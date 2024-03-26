@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>550</width>
-    <height>500</height>
+    <width>626</width>
+    <height>660</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -71,7 +71,7 @@
         <string>ca://${IOC}:image1:ArrayData</string>
        </property>
        <property name="widthChannel" stdset="0">
-        <string>ca://${IOC}:cam1:ArraySizeX_RBV</string>
+        <string>ca://${IOC}:cam1:MaxSizeX_RBV</string>
        </property>
       </widget>
      </item>
