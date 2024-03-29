@@ -9,22 +9,23 @@ from ophyd import (Device, Component as Cpt,
                     EpicsSignal, EpicsSignalRO, EpicsMotor)
 from typhos.plugins import register_signal, SignalConnection, SignalPlugin
 from IPython import start_ipython
+from utils import register_all_signals
 
-from typhos import TyphosTo
 
 os.environ["EPICS_CA_ADDR_LIST"] = "10.149.6.227"
 os.environ["EPICS_PVA_ADDR_LIST"] = "10.149.6.227"
 
 
 motor1 = EpicsMotor('4dh4:m6',name='motor1')
-time.sleep(1)
-ic(motor1.read())
-motor1.move(-1)
-ic(motor1.read())
+# time.sleep(1)
+# ic(motor1.read())
+# motor1.move(-1)
+# ic(motor1.read())
 
-SignalConnection
+register_all_signals(motor1)
 
-register_signal(motor1.user_readback)
+# sig = SignalConnection('sig://','motor1.user_readback')
+# sig.add_listener(motor1)
 
 ic(motor1.user_readback)
 
