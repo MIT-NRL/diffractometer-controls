@@ -1,6 +1,7 @@
 import logging
 import warnings
 from pathlib import Path
+from icecream import ic
 
 import qtawesome as qta
 from pydm import data_plugins
@@ -34,7 +35,7 @@ class MITRMainWindow(PyDMMainWindow):
         def customize_ui(self):
             from application import MITRApplication
             app = MITRApplication.instance()
-            icon_path = "/Users/seanfayfar/Desktop/Screenshot 2024-04-19 110927.png"
+            icon_path = str(Path("./NRL_Logo.png").resolve())
             self.setWindowIcon(QtGui.QIcon(icon_path))
 
             bar = self.statusBar()

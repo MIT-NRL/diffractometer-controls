@@ -36,7 +36,7 @@ class MITRApplication(PyDMApplication):
         # (*ui_file* and *use_main_window* let us render the window here instead)
         # self.default_display = display
 
-        super().__init__(ui_file='main_window.ui', use_main_window=use_main_window, *args, **kwargs)
+        super().__init__(ui_file='main_screen.py', use_main_window=use_main_window, *args, **kwargs)
         # self.ui_file = ui_file
         # self.main_window = MI
 
@@ -59,9 +59,6 @@ class MITRApplication(PyDMApplication):
             command_line_args=command_line_args,
         )
 
-        from screens import Screen
-
-        screen = Screen()
 
         self.main_window = main_window
         # button = self.main_window.ui.pushButton1
