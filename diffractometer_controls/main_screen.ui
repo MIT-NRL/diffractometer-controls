@@ -85,11 +85,42 @@
             </item>
            </layout>
           </widget>
+          <widget class="QPushButton" name="pushButton">
+           <property name="geometry">
+            <rect>
+             <x>190</x>
+             <y>640</y>
+             <width>75</width>
+             <height>23</height>
+            </rect>
+           </property>
+           <property name="text">
+            <string>PushButton</string>
+           </property>
+          </widget>
          </widget>
          <widget class="QWidget" name="tab_5">
           <attribute name="title">
            <string>Page</string>
           </attribute>
+          <widget class="PyDMFrame" name="RE_Console">
+           <property name="geometry">
+            <rect>
+             <x>90</x>
+             <y>90</y>
+             <width>801</width>
+             <height>501</height>
+            </rect>
+           </property>
+           <property name="toolTip">
+            <string/>
+           </property>
+           <layout class="QVBoxLayout" name="verticalLayout_5">
+            <item>
+             <layout class="QGridLayout" name="gridLayout_7"/>
+            </item>
+           </layout>
+          </widget>
          </widget>
         </widget>
        </item>

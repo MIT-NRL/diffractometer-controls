@@ -21,11 +21,15 @@ from bluesky_widgets.qt.run_engine_client import (
 from bluesky_widgets.qt.figures import QtFigure, QtFigures
 from bluesky_widgets.models.auto_plot_builders import AutoLines, AutoPlotter
 from bluesky_widgets.models.plot_builders import Lines
+from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher
 
 from bluesky_widgets.models.run_engine_client import RunEngineClient
 import display
 
 class MainScreen(display.MITRDisplay):
+    re_dispatcher: RemoteDispatcher
+    re_client: RunEngineClient
+
     def __init__(self, parent=None, args=None, macros=None, ui_filename='main_screen.ui'):
         super().__init__(parent, args, macros, ui_filename)
         print("MainScreen here")
@@ -50,9 +54,20 @@ class MainScreen(display.MITRDisplay):
             self.ui.RE_Queue.layout().addWidget(re_queue)
             self.ui.RE_Plan_Editor.layout().addWidget(re_plan_editor)
 
+            # figModel = Lines('motor',['det1','det2'],max_runs=3)
             figModel = AutoLines(max_runs=3)
             viewer = QtFigures(figModel.figures)
-            app.re_dispatcher.subscribe(stream_documents_into_runs(figModel.add_run))
+            self.runs = []
+            app.re_dispatcher.subscribe(stream_documents_into_runs(self.runs.append))
             app.re_dispatcher.start()
+            # app.re_dispatcher.
+
+            re_console = QtReConsoleMonitor(re_client)
+            self.ui.RE_Console.layout().addWidget(re_console)
 
             self.ui.Data_Viewer.layout().addWidget(viewer)
+
+            self.ui.pushButton.clicked.connect(self.printstuff)
+
+    def printstuff(self):
+         print(self.runs)
