@@ -18,13 +18,16 @@ from bluesky_widgets.qt.run_engine_client import (
     QtReStatusMonitor,
 )
 
+from bluesky_widgets.qt.figures import QtFigure, QtFigures
+from bluesky_widgets.models.auto_plot_builders import AutoLines, AutoPlotter
+from bluesky_widgets.models.plot_builders import Lines
+
 from bluesky_widgets.models.run_engine_client import RunEngineClient
 import display
 
 class MainScreen(display.MITRDisplay):
     def __init__(self, parent=None, args=None, macros=None, ui_filename='main_screen.ui'):
         super().__init__(parent, args, macros, ui_filename)
-        # self.customize_ui()
         print("MainScreen here")
 
     def ui_filename(self):
@@ -33,24 +36,23 @@ class MainScreen(display.MITRDisplay):
     def ui_filepath(self):
         return super().ui_filepath()
 
-    # def customize_ui(self):
-    #     button = self.ui.pushButton
-    #     print('Here')
-    #     button.clicked.connect(self.printstuff)
+    def customize_ui(self):
+            # re_client = RunEngineClient(zmq_control_addr='tcp://192.168.0.14:60615')
+            from application import MITRApplication
+            from bluesky_widgets.utils.streaming import stream_documents_into_runs
 
-    #     frame = self.ui.Frame1
+            app = MITRApplication.instance()
+            re_client = app.re_client
+            # print(app.test)
 
-    #     layout = QVBoxLayout()
-        
+            re_queue = QtRePlanQueue(re_client)
+            re_plan_editor = QtRePlanEditor(re_client)
+            self.ui.RE_Queue.layout().addWidget(re_queue)
+            self.ui.RE_Plan_Editor.layout().addWidget(re_plan_editor)
 
-        # button2 = QPushButton('here')
+            figModel = AutoLines(max_runs=3)
+            viewer = QtFigures(figModel.figures)
+            app.re_dispatcher.subscribe(stream_documents_into_runs(figModel.add_run))
+            app.re_dispatcher.start()
 
-    #     re_client = RunEngineClient()
-    #     re_manager = QtReManagerConnection(re_client)
-
-    #     frame = self.ui.Frame1
-    #     frame.layout().addWidget(re_manager)
-
-
-    def printstuff():
-        print("button pressed")
+            self.ui.Data_Viewer.layout().addWidget(viewer)

@@ -22,15 +22,18 @@ from bluesky_widgets.qt.run_engine_client import (
     QtReRunningPlan,
     QtReStatusMonitor,
 )
+from bluesky_widgets.models.run_engine_client import RunEngineClient
 
 
 class MITRMainWindow(PyDMMainWindow):
-        def __init__(self, *args, **kwargs):
+        def __init__(self, re_client: RunEngineClient = None, *args, **kwargs):
             super().__init__(*args, **kwargs)
             # self.customize_ui()
             # self.export_actions()
         #     self.ui.setupUi(self)
             self.customize_ui()
+            # self.re_client = re_client
+            # print(self.re_client.re_manager_status)
 
         def customize_ui(self):
             from application import MITRApplication
@@ -45,17 +48,5 @@ class MITRMainWindow(PyDMMainWindow):
             self.ui.environment_label = QLabel()
             self.ui.environment_label.setText("N/A")
             bar.addPermanentWidget(self.ui.environment_label)
-            # re_connect_frame = self.ui
-            # button = self.ui.pushButton1
-            # self.ui.
-            # # layout = self.ui.verticalLayout.addWidget(button)
-            # layout = QtWidgets.QVBoxLayout()
-            # layout.addWidget(button)
-            # self.setLayout(layout)
-            # layout.addWidget(button)
-            ...
-        #     re_connect_frame = self.ui.REConnectWidget
-        #     layout = QVBoxLayout()
-        #     re_connect_frame.setLayout(layout)
-        #     layout.addWidget(QtReManagerConnection(self))
+
 

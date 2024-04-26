@@ -45,14 +45,24 @@ class REScreen(display.MITRDisplay):
 
         button2 = QPushButton('here')
 
-        re_client = RunEngineClient()
+        from application import MITRApplication
+
+        app = MITRApplication.instance()
+        re_client = app.re_client
+        # re_client = RunEngineClient(zmq_control_addr='tcp://192.168.0.14:60615')
         re_manager = QtReManagerConnection(re_client)
         re_environment = QtReEnvironmentControls(re_client)
-        re_console = QtReStatusMonitor(re_client)
+        re_status = QtReStatusMonitor(re_client)
+        re_running_plan = QtReRunningPlan(re_client)
+        re_queue_controls = QtReQueueControls(re_client)
+        re_plan_execution = QtReExecutionControls(re_client)
 
         self.ui.RE_Connection.layout().addWidget(re_manager)
         self.ui.RE_Worker.layout().addWidget(re_environment)
-        self.ui.RE_Console.layout().addWidget(re_console)
+        self.ui.RE_Status.layout().addWidget(re_status)
+        self.ui.RE_Running.layout().addWidget(re_running_plan)
+        self.ui.RE_Queue_Controls.layout().addWidget(re_queue_controls)
+        self.ui.RE_Plan_Execution.layout().addWidget(re_plan_execution)
 
 
     # def printstuff():

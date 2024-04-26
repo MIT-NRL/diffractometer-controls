@@ -24,6 +24,12 @@
          <height>200</height>
         </size>
        </property>
+       <property name="maximumSize">
+        <size>
+         <width>16777215</width>
+         <height>200</height>
+        </size>
+       </property>
        <property name="toolTip">
         <string/>
        </property>
@@ -33,24 +39,101 @@
       </widget>
      </item>
      <item row="1" column="0">
-      <widget class="PyDMTabWidget" name="PyDMTabWidget">
-       <property name="toolTip">
-        <string/>
-       </property>
-       <property name="whatsThis">
-        <string/>
-       </property>
-       <property name="alarmChannels">
-        <stringlist>
-         <string></string>
-        </stringlist>
-       </property>
-       <widget class="QWidget" name="tab">
-        <attribute name="title">
-         <string>Page 1</string>
-        </attribute>
-       </widget>
-      </widget>
+      <layout class="QGridLayout" name="gridLayout_2">
+       <item row="0" column="1">
+        <widget class="PyDMTabWidget" name="PyDMTabWidget">
+         <property name="toolTip">
+          <string/>
+         </property>
+         <property name="whatsThis">
+          <string/>
+         </property>
+         <property name="currentIndex">
+          <number>0</number>
+         </property>
+         <property name="iconSize">
+          <size>
+           <width>20</width>
+           <height>16</height>
+          </size>
+         </property>
+         <property name="alarmChannels">
+          <stringlist>
+           <string></string>
+           <string></string>
+          </stringlist>
+         </property>
+         <widget class="QWidget" name="Viewer">
+          <attribute name="title">
+           <string>Viewer</string>
+          </attribute>
+          <widget class="PyDMFrame" name="Data_Viewer">
+           <property name="geometry">
+            <rect>
+             <x>170</x>
+             <y>90</y>
+             <width>551</width>
+             <height>461</height>
+            </rect>
+           </property>
+           <property name="toolTip">
+            <string/>
+           </property>
+           <layout class="QVBoxLayout" name="verticalLayout_4">
+            <item>
+             <layout class="QGridLayout" name="gridLayout_6"/>
+            </item>
+           </layout>
+          </widget>
+         </widget>
+         <widget class="QWidget" name="tab_5">
+          <attribute name="title">
+           <string>Page</string>
+          </attribute>
+         </widget>
+        </widget>
+       </item>
+       <item row="0" column="0">
+        <layout class="QGridLayout" name="gridLayout_3">
+         <item row="0" column="0">
+          <widget class="PyDMFrame" name="RE_Queue">
+           <property name="minimumSize">
+            <size>
+             <width>300</width>
+             <height>0</height>
+            </size>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>400</width>
+             <height>16777215</height>
+            </size>
+           </property>
+           <property name="toolTip">
+            <string/>
+           </property>
+           <layout class="QVBoxLayout" name="verticalLayout_2">
+            <item>
+             <widget class="PyDMFrame" name="RE_Plan_Editor">
+              <property name="toolTip">
+               <string/>
+              </property>
+              <layout class="QVBoxLayout" name="verticalLayout_3">
+               <item>
+                <layout class="QGridLayout" name="gridLayout_5"/>
+               </item>
+              </layout>
+             </widget>
+            </item>
+            <item>
+             <layout class="QGridLayout" name="gridLayout_4"/>
+            </item>
+           </layout>
+          </widget>
+         </item>
+        </layout>
+       </item>
+      </layout>
      </item>
     </layout>
    </item>
@@ -66,6 +149,12 @@
    <class>PyDMEmbeddedDisplay</class>
    <extends>QFrame</extends>
    <header>pydm.widgets.embedded_display</header>
+  </customwidget>
+  <customwidget>
+   <class>PyDMFrame</class>
+   <extends>QFrame</extends>
+   <header>pydm.widgets.frame</header>
+   <container>1</container>
   </customwidget>
  </customwidgets>
  <resources/>

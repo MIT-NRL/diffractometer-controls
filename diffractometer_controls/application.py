@@ -16,7 +16,8 @@ from qtpy.QtCore import Signal
 from qtpy.QtWidgets import QAction
 
 from main_window import MITRMainWindow
-
+from bluesky_widgets.models.run_engine_client import RunEngineClient
+from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher
 
 
 log = logging.getLogger(__name__)
@@ -31,19 +32,23 @@ pg.setConfigOption("foreground", (0, 0, 0))
 
 class MITRApplication(PyDMApplication):
 
-    def __init__(self, use_main_window=False, *args, **kwargs):
+    def __init__(self, ipaddress: str = 'localhost', use_main_window=False, *args, **kwargs):
         # Instantiate the parent class
         # (*ui_file* and *use_main_window* let us render the window here instead)
-        # self.default_display = display
+
+        # Create the RunEngineClient as part of the application attributes
+        self.re_client = RunEngineClient(zmq_control_addr=f'tcp://{ipaddress}:60615')
+        self.re_dispatcher = RemoteDispatcher(f'{ipaddress}:5568')
 
         super().__init__(ui_file='main_screen.py', use_main_window=use_main_window, *args, **kwargs)
+ 
         # self.ui_file = ui_file
         # self.main_window = MI
 
         # self.main_window.ui.
 
 
-    def make_main_window(self, stylesheet_path=None, home_file=None, macros=None, command_line_args=None):
+    def make_main_window(self, re_client: RunEngineClient = None, stylesheet_path=None, home_file=None, macros=None, command_line_args=None):
         """
         Instantiate a new PyDMMainWindow, add it to the application's
         list of windows. Typically, this function is only called as part
@@ -51,6 +56,7 @@ class MITRApplication(PyDMApplication):
         one window per process.
         """
         main_window = MITRMainWindow(
+            # re_client=self.re_client,
             hide_nav_bar=self.hide_nav_bar,
             hide_menu_bar=self.hide_menu_bar,
             hide_status_bar=self.hide_status_bar,
@@ -61,7 +67,6 @@ class MITRApplication(PyDMApplication):
 
 
         self.main_window = main_window
-        # button = self.main_window.ui.pushButton1
         apply_stylesheet(stylesheet_path, widget=self.main_window)
         self.main_window.update_tools_menu()
 

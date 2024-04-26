@@ -43,14 +43,19 @@ def main():
 
     parser = argparse.ArgumentParser(description="Python Display Manager")
     parser.add_argument(
-        "displayfile",
-        help="A PyDM file to display." + "    Can be either a Qt .ui file, or a Python file.",
-        nargs="?",
-        default=None,
+        "--ipaddress",
+        help="Specify the IP Address of the RE Manager to connect to.",
+        default="localhost"
     )
-    parser.add_argument(
-        "--homefile", help="Path to a PyDM file to return to when the home button is clicked in the navigation bar"
-    )
+    # parser.add_argument(
+    #     "displayfile",
+    #     help="A PyDM file to display." + "    Can be either a Qt .ui file, or a Python file.",
+    #     nargs="?",
+    #     default=None,
+    # )
+    # parser.add_argument(
+    #     "--homefile", help="Path to a PyDM file to return to when the home button is clicked in the navigation bar"
+    # )
     parser.add_argument(
         "--perfmon",
         action="store_true",
@@ -121,7 +126,7 @@ def main():
     # ic(pydm_args)
 
     app = MITRApplication(
-        # ui_file=pydm_args.displayfile,
+        ipaddress=str(pydm_args.ipaddress),
         command_line_args=pydm_args.display_args,
         perfmon=pydm_args.perfmon,
         hide_nav_bar=pydm_args.hide_nav_bar,
@@ -131,7 +136,7 @@ def main():
         read_only=pydm_args.read_only,
         macros=macros,
         stylesheet_path=pydm_args.stylesheet,
-        home_file=pydm_args.homefile,
+        # home_file=pydm_args.homefile,
     )
 
     base_path = os.path.dirname(os.path.realpath(__file__))
