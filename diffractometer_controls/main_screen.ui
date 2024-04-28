@@ -13,160 +13,258 @@
   <property name="windowTitle">
    <string>Form</string>
   </property>
-  <layout class="QVBoxLayout" name="verticalLayout">
+  <layout class="QVBoxLayout" name="verticalLayout_8">
    <item>
-    <layout class="QGridLayout" name="gridLayout">
-     <item row="0" column="0">
-      <widget class="PyDMEmbeddedDisplay" name="RE_embedded_display">
-       <property name="minimumSize">
-        <size>
-         <width>0</width>
-         <height>200</height>
-        </size>
+    <widget class="PyDMEmbeddedDisplay" name="RE_embedded_display">
+     <property name="minimumSize">
+      <size>
+       <width>0</width>
+       <height>200</height>
+      </size>
+     </property>
+     <property name="maximumSize">
+      <size>
+       <width>16777215</width>
+       <height>200</height>
+      </size>
+     </property>
+     <property name="toolTip">
+      <string/>
+     </property>
+     <property name="filename" stdset="0">
+      <string>re_screen.py</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QSplitter" name="splitter">
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <widget class="QWidget" name="verticalLayoutWidget">
+      <layout class="QVBoxLayout" name="verticalLayout" stretch="0,0">
+       <property name="spacing">
+        <number>6</number>
        </property>
-       <property name="maximumSize">
-        <size>
-         <width>16777215</width>
-         <height>200</height>
-        </size>
+       <property name="sizeConstraint">
+        <enum>QLayout::SetDefaultConstraint</enum>
        </property>
-       <property name="toolTip">
-        <string/>
-       </property>
-       <property name="filename" stdset="0">
-        <string>re_screen.py</string>
-       </property>
-      </widget>
-     </item>
-     <item row="1" column="0">
-      <layout class="QGridLayout" name="gridLayout_2">
-       <item row="0" column="1">
-        <widget class="PyDMTabWidget" name="PyDMTabWidget">
+       <item>
+        <widget class="PyDMFrame" name="RE_Plan_Editor">
+         <property name="enabled">
+          <bool>true</bool>
+         </property>
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="MinimumExpanding" vsizetype="Expanding">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>350</width>
+           <height>0</height>
+          </size>
+         </property>
+         <property name="baseSize">
+          <size>
+           <width>350</width>
+           <height>0</height>
+          </size>
+         </property>
          <property name="toolTip">
           <string/>
          </property>
-         <property name="whatsThis">
-          <string/>
-         </property>
-         <property name="currentIndex">
-          <number>0</number>
-         </property>
-         <property name="iconSize">
-          <size>
-           <width>20</width>
-           <height>16</height>
-          </size>
-         </property>
-         <property name="alarmChannels">
-          <stringlist>
-           <string></string>
-           <string></string>
-          </stringlist>
-         </property>
-         <widget class="QWidget" name="Viewer">
-          <attribute name="title">
-           <string>Viewer</string>
-          </attribute>
-          <widget class="PyDMFrame" name="Data_Viewer">
-           <property name="geometry">
-            <rect>
-             <x>170</x>
-             <y>90</y>
-             <width>551</width>
-             <height>461</height>
-            </rect>
-           </property>
-           <property name="toolTip">
-            <string/>
-           </property>
-           <layout class="QVBoxLayout" name="verticalLayout_4">
-            <item>
-             <layout class="QGridLayout" name="gridLayout_6"/>
-            </item>
-           </layout>
-          </widget>
-          <widget class="QPushButton" name="pushButton">
-           <property name="geometry">
-            <rect>
-             <x>190</x>
-             <y>640</y>
-             <width>75</width>
-             <height>23</height>
-            </rect>
-           </property>
-           <property name="text">
-            <string>PushButton</string>
-           </property>
-          </widget>
-         </widget>
-         <widget class="QWidget" name="tab_5">
-          <attribute name="title">
-           <string>Page</string>
-          </attribute>
-          <widget class="PyDMFrame" name="RE_Console">
-           <property name="geometry">
-            <rect>
-             <x>90</x>
-             <y>90</y>
-             <width>801</width>
-             <height>501</height>
-            </rect>
-           </property>
-           <property name="toolTip">
-            <string/>
-           </property>
-           <layout class="QVBoxLayout" name="verticalLayout_5">
-            <item>
-             <layout class="QGridLayout" name="gridLayout_7"/>
-            </item>
-           </layout>
-          </widget>
-         </widget>
+         <layout class="QVBoxLayout" name="verticalLayout_2">
+          <item>
+           <layout class="QGridLayout" name="gridLayout_3"/>
+          </item>
+         </layout>
         </widget>
        </item>
-       <item row="0" column="0">
-        <layout class="QGridLayout" name="gridLayout_3">
-         <item row="0" column="0">
-          <widget class="PyDMFrame" name="RE_Queue">
-           <property name="minimumSize">
-            <size>
-             <width>300</width>
-             <height>0</height>
-            </size>
-           </property>
-           <property name="maximumSize">
-            <size>
-             <width>400</width>
-             <height>16777215</height>
-            </size>
-           </property>
-           <property name="toolTip">
-            <string/>
-           </property>
-           <layout class="QVBoxLayout" name="verticalLayout_2">
-            <item>
-             <widget class="PyDMFrame" name="RE_Plan_Editor">
-              <property name="toolTip">
-               <string/>
-              </property>
-              <layout class="QVBoxLayout" name="verticalLayout_3">
-               <item>
-                <layout class="QGridLayout" name="gridLayout_5"/>
-               </item>
-              </layout>
-             </widget>
-            </item>
-            <item>
-             <layout class="QGridLayout" name="gridLayout_4"/>
-            </item>
-           </layout>
-          </widget>
-         </item>
-        </layout>
+       <item>
+        <widget class="PyDMFrame" name="RE_Queue">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="MinimumExpanding" vsizetype="Expanding">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>350</width>
+           <height>0</height>
+          </size>
+         </property>
+         <property name="baseSize">
+          <size>
+           <width>350</width>
+           <height>0</height>
+          </size>
+         </property>
+         <property name="toolTip">
+          <string/>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_3">
+          <item>
+           <layout class="QGridLayout" name="gridLayout_4"/>
+          </item>
+         </layout>
+        </widget>
        </item>
       </layout>
-     </item>
-    </layout>
+     </widget>
+     <widget class="PyDMTabWidget" name="PyDMTabWidget">
+      <property name="enabled">
+       <bool>true</bool>
+      </property>
+      <property name="sizePolicy">
+       <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+        <horstretch>1</horstretch>
+        <verstretch>0</verstretch>
+       </sizepolicy>
+      </property>
+      <property name="minimumSize">
+       <size>
+        <width>0</width>
+        <height>0</height>
+       </size>
+      </property>
+      <property name="sizeIncrement">
+       <size>
+        <width>0</width>
+        <height>0</height>
+       </size>
+      </property>
+      <property name="baseSize">
+       <size>
+        <width>0</width>
+        <height>0</height>
+       </size>
+      </property>
+      <property name="font">
+       <font>
+        <pointsize>8</pointsize>
+       </font>
+      </property>
+      <property name="toolTip">
+       <string/>
+      </property>
+      <property name="whatsThis">
+       <string/>
+      </property>
+      <property name="currentIndex">
+       <number>0</number>
+      </property>
+      <property name="iconSize">
+       <size>
+        <width>30</width>
+        <height>30</height>
+       </size>
+      </property>
+      <property name="alarmChannels">
+       <stringlist>
+        <string></string>
+        <string></string>
+       </stringlist>
+      </property>
+      <widget class="QWidget" name="Viewer_Tab">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <attribute name="title">
+        <string>Viewer</string>
+       </attribute>
+       <widget class="PyDMFrame" name="Data_Viewer">
+        <property name="geometry">
+         <rect>
+          <x>170</x>
+          <y>90</y>
+          <width>551</width>
+          <height>461</height>
+         </rect>
+        </property>
+        <property name="toolTip">
+         <string/>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_4">
+         <item>
+          <layout class="QGridLayout" name="gridLayout_6"/>
+         </item>
+        </layout>
+       </widget>
+       <widget class="QPushButton" name="pushButton">
+        <property name="geometry">
+         <rect>
+          <x>190</x>
+          <y>640</y>
+          <width>75</width>
+          <height>23</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>PushButton</string>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="RE_Extras_Tab">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <attribute name="title">
+        <string>RE Extras</string>
+       </attribute>
+       <layout class="QVBoxLayout" name="verticalLayout_6">
+        <item>
+         <widget class="PyDMFrame" name="RE_Queue_History">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="toolTip">
+           <string/>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayout_7">
+           <item>
+            <layout class="QGridLayout" name="gridLayout_10"/>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <layout class="QGridLayout" name="gridLayout_8">
+          <item row="0" column="0">
+           <widget class="PyDMFrame" name="RE_Console">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="toolTip">
+             <string/>
+            </property>
+            <layout class="QVBoxLayout" name="verticalLayout_5">
+             <item>
+              <layout class="QGridLayout" name="gridLayout_7"/>
+             </item>
+            </layout>
+           </widget>
+          </item>
+         </layout>
+        </item>
+       </layout>
+      </widget>
+     </widget>
+    </widget>
    </item>
   </layout>
  </widget>
