@@ -126,7 +126,7 @@ def main():
     # ic(pydm_args)
 
     app = MITRApplication(
-        ipaddress=str(pydm_args.ipaddress),
+        ipaddress=str(pydm_args.ip_addr),
         command_line_args=pydm_args.display_args,
         perfmon=pydm_args.perfmon,
         hide_nav_bar=pydm_args.hide_nav_bar,
