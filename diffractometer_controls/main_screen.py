@@ -41,13 +41,11 @@ class MainScreen(display.MITRDisplay):
         return super().ui_filepath()
 
     def customize_ui(self):
-            # re_client = RunEngineClient(zmq_control_addr='tcp://192.168.0.14:60615')
             from application import MITRApplication
             from bluesky_widgets.utils.streaming import stream_documents_into_runs
 
             app = MITRApplication.instance()
             re_client = app.re_client
-            # print(app.test)
 
             re_queue = QtRePlanQueue(re_client)
             re_plan_editor = QtRePlanEditor(re_client)
@@ -58,12 +56,14 @@ class MainScreen(display.MITRDisplay):
             figModel = AutoLines(max_runs=3)
             viewer = QtFigures(figModel.figures)
             self.runs = []
-            app.re_dispatcher.subscribe(stream_documents_into_runs(self.runs.append))
-            app.re_dispatcher.start()
+            # app.re_dispatcher.subscribe(stream_documents_into_runs(self.runs.append))
+            # app.re_dispatcher.start()
             # app.re_dispatcher.
 
             re_console = QtReConsoleMonitor(re_client)
+            re_queue_history = QtRePlanHistory(re_client)
             self.ui.RE_Console.layout().addWidget(re_console)
+            self.ui.RE_Queue_History.layout().addWidget(re_queue_history)
 
             self.ui.Data_Viewer.layout().addWidget(viewer)
 

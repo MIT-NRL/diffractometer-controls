@@ -37,8 +37,9 @@ class MITRApplication(PyDMApplication):
         # (*ui_file* and *use_main_window* let us render the window here instead)
 
         # Create the RunEngineClient as part of the application attributes
+        # These attributes need to be defined before the super().__init__ call so that the main window can access them
         self.re_client = RunEngineClient(zmq_control_addr=f'tcp://{ipaddress}:60615', zmq_info_addr=f'tcp://{ipaddress}:60625')
-        self.re_dispatcher = RemoteDispatcher(f'{ipaddress}:5567')
+        # self.re_dispatcher = RemoteDispatcher(f'{ipaddress}:5567')
 
         super().__init__(ui_file='main_screen.py', use_main_window=use_main_window, *args, **kwargs)
  
@@ -48,10 +49,11 @@ class MITRApplication(PyDMApplication):
         # self.main_window.ui.
 
     def __del__(self):
-        self.re_client.clear()
-        self.re_dispatcher.stop()
+        pass
+        # self.re_dispatcher.stop()
 
 
+    # Redefine the make_main_window method to use the MITRMainWindow class
     def make_main_window(self, re_client: RunEngineClient = None, stylesheet_path=None, home_file=None, macros=None, command_line_args=None):
         """
         Instantiate a new PyDMMainWindow, add it to the application's
