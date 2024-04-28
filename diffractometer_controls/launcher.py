@@ -43,7 +43,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Python Display Manager")
     parser.add_argument(
-        "--ipaddress",
+        "--ip-addr",
         help="Specify the IP Address of the RE Manager to connect to.",
         default="localhost"
     )
