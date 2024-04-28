@@ -32,7 +32,7 @@ class MainScreen(display.MITRDisplay):
 
     def __init__(self, parent=None, args=None, macros=None, ui_filename='main_screen.ui'):
         super().__init__(parent, args, macros, ui_filename)
-        print("MainScreen here")
+        # print("MainScreen here")
 
     def ui_filename(self):
         return 'main_screen.ui'

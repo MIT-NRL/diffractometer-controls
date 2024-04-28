@@ -24,7 +24,7 @@ import display
 class REScreen(display.MITRDisplay):
     def __init__(self, parent=None, args=None, macros=None, ui_filename='re_screen.ui'):
         super().__init__(parent, args, macros, ui_filename)
-        print("REScreen here")
+        # print("REScreen here")
         # self.customize_ui()
 
     def ui_filename(self):
