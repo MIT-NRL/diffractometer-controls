@@ -18,6 +18,7 @@ from qtpy.QtWidgets import QAction
 from main_window import MITRMainWindow
 from bluesky_widgets.models.run_engine_client import RunEngineClient
 from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher
+# from bluesky.callbacks.zmq import RemoteDispatcher
 
 
 log = logging.getLogger(__name__)
@@ -39,7 +40,7 @@ class MITRApplication(PyDMApplication):
         # Create the RunEngineClient as part of the application attributes
         # These attributes need to be defined before the super().__init__ call so that the main window can access them
         self.re_client = RunEngineClient(zmq_control_addr=f'tcp://{ipaddress}:60615', zmq_info_addr=f'tcp://{ipaddress}:60625')
-        # self.re_dispatcher = RemoteDispatcher(f'{ipaddress}:5567')
+        self.re_dispatcher = RemoteDispatcher(f'{ipaddress}:5568')
 
         super().__init__(ui_file='main_screen.py', use_main_window=use_main_window, *args, **kwargs)
  
