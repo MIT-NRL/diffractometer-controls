@@ -22,6 +22,8 @@ from bluesky_widgets.qt.figures import QtFigure, QtFigures
 from bluesky_widgets.models.auto_plot_builders import AutoLines, AutoPlotter
 from bluesky_widgets.models.plot_builders import Lines
 from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher
+# from bluesky.callbacks.zmq import RemoteDispatcher
+from bluesky.utils import install_remote_qt_kicker
 
 from bluesky_widgets.models.run_engine_client import RunEngineClient
 import display
@@ -56,10 +58,11 @@ class MainScreen(display.MITRDisplay):
             figModel = AutoLines(max_runs=3)
             viewer = QtFigures(figModel.figures)
             self.runs = []
-            # app.re_dispatcher.subscribe(stream_documents_into_runs(self.runs.append))
-            # app.re_dispatcher.start()
-            # app.re_dispatcher.
-
+            app.re_dispatcher.subscribe(stream_documents_into_runs(figModel.add_run))
+            # app.re_dispatcher.subscribe(print)
+            app.re_dispatcher.start()
+            # install_remote_qt_kicker()
+            
             re_console = QtReConsoleMonitor(re_client)
             re_queue_history = QtRePlanHistory(re_client)
             self.ui.RE_Console.layout().addWidget(re_console)
