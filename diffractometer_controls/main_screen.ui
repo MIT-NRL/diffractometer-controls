@@ -212,6 +212,32 @@
          <string>PushButton</string>
         </property>
        </widget>
+       <widget class="PyDMRelatedDisplayButton" name="PyDMRelatedDisplayButton">
+        <property name="geometry">
+         <rect>
+          <x>60</x>
+          <y>570</y>
+          <width>71</width>
+          <height>61</height>
+         </rect>
+        </property>
+        <property name="toolTip">
+         <string/>
+        </property>
+        <property name="filenames" stdset="0">
+         <stringlist>
+          <string>/home/mitr_4dh4/EPICS/IOCs/4dh4/4dh4App/op/adl/ioc_motors.adl</string>
+         </stringlist>
+        </property>
+        <property name="macros" stdset="0">
+         <stringlist>
+          <string>P=4dh4:, ioc=4dh4</string>
+         </stringlist>
+        </property>
+        <property name="openInNewWindow" stdset="0">
+         <bool>true</bool>
+        </property>
+       </widget>
       </widget>
       <widget class="QWidget" name="RE_Extras_Tab">
        <property name="sizePolicy">
@@ -287,6 +313,11 @@
    <extends>QFrame</extends>
    <header>pydm.widgets.frame</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>PyDMRelatedDisplayButton</class>
+   <extends>QPushButton</extends>
+   <header>pydm.widgets.related_display_button</header>
   </customwidget>
  </customwidgets>
  <resources/>
