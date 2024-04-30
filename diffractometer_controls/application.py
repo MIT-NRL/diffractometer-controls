@@ -54,7 +54,7 @@ class MITRApplication(PyDMApplication):
 
 
     # Redefine the make_main_window method to use the MITRMainWindow class
-    def make_main_window(self, re_client: RunEngineClient = None, stylesheet_path=None, home_file=None, macros=None, command_line_args=None):
+    def make_main_window(self, stylesheet_path=None, home_file=None, macros=None, command_line_args=None):
         """
         Instantiate a new PyDMMainWindow, add it to the application's
         list of windows. Typically, this function is only called as part
