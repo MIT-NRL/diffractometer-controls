@@ -5,6 +5,7 @@ import os
 import pstats
 import sys
 import faulthandler
+from pathlib import Path
 from qtpy import QtCore, QtGui
 from icecream import ic
 
@@ -22,6 +23,13 @@ def main():
 
     # Set EPICS as the default protocol
     config.DEFAULT_PROTOCOL = "ca"
+
+    # Define EPICS Support dir where all display files are stored
+    EPICS_SUPPORT = Path('/home/mitr_4dh4/EPICS/synApps-6-3/support')
+    DISPLAY_PATH = os.getenv("PYDM_DISPLAYS_PATH",None)
+    if DISPLAY_PATH is None:
+        DISPLAY_PATH = ':'.join([dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*op/adl*')])
+    os.environ['PYDM_DISPLAYS_PATH'] = DISPLAY_PATH
 
     from pydm.utilities import setup_renderer
 
