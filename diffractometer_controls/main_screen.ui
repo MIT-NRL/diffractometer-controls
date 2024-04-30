@@ -41,6 +41,9 @@
      <property name="orientation">
       <enum>Qt::Horizontal</enum>
      </property>
+     <property name="handleWidth">
+      <number>10</number>
+     </property>
      <widget class="QWidget" name="verticalLayoutWidget">
       <layout class="QVBoxLayout" name="verticalLayout" stretch="0,0">
        <property name="spacing">
