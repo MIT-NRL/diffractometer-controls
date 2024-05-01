@@ -150,3 +150,4 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+diffractometer_controls/bluesky_config/startup/existing_plans_and_devices.yaml
