@@ -11,18 +11,18 @@ startup:
   # existing_plans_and_devices_path: ~/.ipython/profile_collection/startup
   # user_group_permissions_path: ~/.ipython/profile_collection/startup
 operation:
-  print_console_output: true
+  print_console_output: false
   console_logging_level: NORMAL
   update_existing_plans_and_devices: ENVIRONMENT_OPEN
   user_group_permissions_reload: ON_REQUEST
   emergency_lock_key: custom_lock_key
 worker:
   use_ipython_kernel: false
-  ipython_kernel_ip: None
+  # ipython_kernel_ip: None
   ipython_matplotlib: None
 run_engine:
   use_persistent_metadata: true
   kafka_server: 127.0.0.1:9092
-  kafka_topic: custom_topic_name
+  kafka_topic: None
   zmq_data_proxy_addr: localhost:5567
   databroker_config: None
