@@ -1,0 +1,28 @@
+network:
+  zmq_control_addr: tcp://*:60615
+  # zmq_private_key: ${CUSTOM_EV_FOR_PRIVATE_KEY}
+  zmq_info_addr: tcp://*:60625
+  zmq_publish_console: true
+  redis_addr: localhost:6379
+  # redis_name_prefix: qs_default
+startup:
+  keep_re: true
+  startup_dir: /home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/bluesky_config/startup
+  # existing_plans_and_devices_path: ~/.ipython/profile_collection/startup
+  # user_group_permissions_path: ~/.ipython/profile_collection/startup
+operation:
+  print_console_output: true
+  console_logging_level: NORMAL
+  update_existing_plans_and_devices: ENVIRONMENT_OPEN
+  user_group_permissions_reload: ON_REQUEST
+  emergency_lock_key: custom_lock_key
+worker:
+  use_ipython_kernel: false
+  ipython_kernel_ip: None
+  ipython_matplotlib: None
+run_engine:
+  use_persistent_metadata: true
+  kafka_server: 127.0.0.1:9092
+  kafka_topic: custom_topic_name
+  zmq_data_proxy_addr: localhost:5567
+  databroker_config: None
