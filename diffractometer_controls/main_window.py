@@ -49,4 +49,14 @@ class MITRMainWindow(PyDMMainWindow):
 
             bar.addPermanentWidget(heartbeat_indicator)
 
+        def update_window_title(self):
+            if self.showing_file_path_in_title_bar:
+                title = self.current_file()
+            else:
+                title = self.display_widget().windowTitle()
+            title += " - MITR 4DH4 Beamline Controls"
+            if data_plugins.is_read_only():
+                title += " [Read Only Mode]"
+            self.setWindowTitle(title)
+
 
