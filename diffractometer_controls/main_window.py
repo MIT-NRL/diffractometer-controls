@@ -32,6 +32,7 @@ class MITRMainWindow(PyDMMainWindow):
             self.macros = kwargs.get('macros', {})
             self.customize_ui()
 
+
         def customize_ui(self):
             from application import MITRApplication
             app = MITRApplication.instance()
@@ -39,7 +40,7 @@ class MITRMainWindow(PyDMMainWindow):
             self.setWindowIcon(QtGui.QIcon(icon_path))
 
             bar = self.statusBar()
-            heartbeat_indicator = PyDMByteIndicator(init_channel='ca://4dh4:HEARTBEAT')
+            heartbeat_indicator = PyDMByteIndicator(init_channel=f'ca://{self.macros['P']}HEARTBEAT')
             heartbeat_indicator.labels = ['IOC Heartbeat']
             heartbeat_indicator.labelPosition = 2
 
