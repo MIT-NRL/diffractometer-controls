@@ -222,9 +222,7 @@
                </stringlist>
               </property>
               <property name="macros" stdset="0">
-               <stringlist>
-                <string>P=4dh4:, ioc=4dh4</string>
-               </stringlist>
+               <stringlist/>
               </property>
               <property name="openInNewWindow" stdset="0">
                <bool>true</bool>
