@@ -131,7 +131,10 @@ def main():
         logger.setLevel(pydm_args.log_level)
         handler.setLevel(pydm_args.log_level)
 
-    # ic(pydm_args)
+    if macros is None:
+        macros = dict(P='4dh4:',ioc='4dh4')
+
+    ic(macros)
 
     app = MITRApplication(
         ipaddress=str(pydm_args.ip_addr),
