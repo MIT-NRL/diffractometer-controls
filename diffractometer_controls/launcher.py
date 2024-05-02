@@ -134,7 +134,7 @@ def main():
     if macros is None:
         macros = dict(P='4dh4:',ioc='4dh4')
 
-    ic(macros)
+    # ic(macros)
 
     app = MITRApplication(
         ipaddress=str(pydm_args.ip_addr),
