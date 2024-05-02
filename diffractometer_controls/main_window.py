@@ -23,6 +23,7 @@ from bluesky_widgets.qt.run_engine_client import (
     QtReStatusMonitor,
 )
 from bluesky_widgets.models.run_engine_client import RunEngineClient
+from pydm.widgets import PyDMByteIndicator
 
 
 class MITRMainWindow(PyDMMainWindow):
@@ -42,11 +43,10 @@ class MITRMainWindow(PyDMMainWindow):
             self.setWindowIcon(QtGui.QIcon(icon_path))
 
             bar = self.statusBar()
-            _label = QLabel()
-            _label.setText("Queue:")
-            bar.addPermanentWidget(_label)
-            self.ui.environment_label = QLabel()
-            self.ui.environment_label.setText("N/A")
-            bar.addPermanentWidget(self.ui.environment_label)
+            heartbeat_indicator = PyDMByteIndicator(init_channel='ca://4dh4:HEARTBEAT')
+            heartbeat_indicator.labels = ['IOC Heartbeat']
+            heartbeat_indicator.labelPosition = 2
+
+            bar.addPermanentWidget(heartbeat_indicator)
 
 
