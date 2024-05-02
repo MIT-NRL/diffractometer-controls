@@ -27,14 +27,10 @@ from pydm.widgets import PyDMByteIndicator
 
 
 class MITRMainWindow(PyDMMainWindow):
-        def __init__(self, re_client: RunEngineClient = None, *args, **kwargs):
+        def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            # self.customize_ui()
-            # self.export_actions()
-        #     self.ui.setupUi(self)
+            self.macros = kwargs.get('macros', {})
             self.customize_ui()
-            # self.re_client = re_client
-            # print(self.re_client.re_manager_status)
 
         def customize_ui(self):
             from application import MITRApplication
