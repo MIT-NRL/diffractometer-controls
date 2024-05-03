@@ -131,8 +131,13 @@ def main():
         logger.setLevel(pydm_args.log_level)
         handler.setLevel(pydm_args.log_level)
 
+    # Set default macros to connect to the 4dh4 IOC
     if macros is None:
         macros = dict(P='4dh4:',ioc='4dh4')
+
+    # Set the EPICS CA and PVA addresses
+    os.environ["EPICS_CA_ADDR_LIST"] = pydm_args.ip_addr
+    os.environ["EPICS_PVA_ADDR_LIST"] = pydm_args.ip_addr
 
     # ic(macros)
 
