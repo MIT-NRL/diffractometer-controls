@@ -73,5 +73,7 @@ class MainScreen(display.MITRDisplay):
 
             self.ui.pushButton.clicked.connect(self.printstuff)
 
+            # self.ui.psdDisplay.addChannel(y_channel=f"ca://{self.macros['P']}det1:LiveCountsD0",color='black',symbolSize=5,symbol='o')
+
     def printstuff(self):
          print(self.runs)
