@@ -25,10 +25,10 @@ RE.subscribe(db.insert)
 # Use BestEffortCallback 
 # TODO: Retire our use of BestEffortCallback, using a table from
 # bluesky_widgets once one is available.
-# from bluesky.callbacks.best_effort import BestEffortCallback
-# bec = BestEffortCallback()
-# #bec.disable_plots()
-# RE.subscribe(bec)
+from bluesky.callbacks.best_effort import BestEffortCallback
+bec = BestEffortCallback()
+bec.disable_plots()
+RE.subscribe(bec)
 
 
 import matplotlib.pyplot as plt
