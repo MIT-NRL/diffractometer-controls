@@ -55,14 +55,15 @@ class MainScreen(display.MITRDisplay):
             self.ui.RE_Plan_Editor.layout().addWidget(re_plan_editor)
 
             # figModel = Lines('motor',['det1','det2'],max_runs=3)
-            figModel = AutoLines(max_runs=3)
-            viewer = QtFigures(figModel.figures)
+            # figModel = AutoLines(max_runs=3)
+            figModel = Lines('he3psd_position_x[0]',['he3psd_counts0[0]'],max_runs=3)
+            viewer = QtFigure(figModel.figure)
             self.runs = []
             app.re_dispatcher.subscribe(stream_documents_into_runs(figModel.add_run))
             # app.re_dispatcher.subscribe(print)
             app.re_dispatcher.start()
             # install_remote_qt_kicker()
-            
+
             re_console = QtReConsoleMonitor(re_client)
             re_queue_history = QtRePlanHistory(re_client)
             self.ui.RE_Console.layout().addWidget(re_console)
