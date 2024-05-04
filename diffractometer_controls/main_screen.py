@@ -18,7 +18,7 @@ from bluesky_widgets.qt.run_engine_client import (
     QtReStatusMonitor,
 )
 
-from bluesky_widgets.qt.figures import QtFigure, QtFigures
+# from bluesky_widgets.qt.figures import QtFigure, QtFigures
 from bluesky_widgets.models.auto_plot_builders import AutoLines, AutoPlotter
 from bluesky_widgets.models.plot_builders import Lines
 from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher
@@ -27,6 +27,8 @@ from bluesky.utils import install_remote_qt_kicker
 
 from bluesky_widgets.models.run_engine_client import RunEngineClient
 import display
+
+from figures import QtFigure, NewLivePlot
 
 class MainScreen(display.MITRDisplay):
     re_dispatcher: RemoteDispatcher
@@ -56,11 +58,16 @@ class MainScreen(display.MITRDisplay):
 
             # figModel = Lines('motor',['det1','det2'],max_runs=3)
             # figModel = AutoLines(max_runs=3)
-            figModel = Lines('he3psd_position_x[0]',['he3psd_counts0[0]'],max_runs=3)
-            viewer = QtFigure(figModel.figure)
-            self.runs = []
-            app.re_dispatcher.subscribe(stream_documents_into_runs(figModel.add_run))
+            # figModel = Lines('he3psd_position_x[0]',['he3psd_counts0[0]'],max_runs=3)
+            
+            # viewer = QtFigure(figModel.figure)
+            # self.runs = []
+            # app.re_dispatcher.subscribe(stream_documents_into_runs(figModel.add_run))
             # app.re_dispatcher.subscribe(print)
+
+            viewer = QtFigure()
+            app.re_dispatcher.subscribe(NewLivePlot('he3psd_counts0',x='he3psd_position_x',ax=viewer.axes,marker='o',lw=1,mfc='none'))
+
             app.re_dispatcher.start()
             # install_remote_qt_kicker()
 
