@@ -62,4 +62,4 @@ class HE3PSD(Device):
         return status
     
 
-he3psd = HE3PSD("4dh4:det1", name="he3psd")
+he3psd = HE3PSD("4dh4:he3PSD", name="he3psd")
