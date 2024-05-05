@@ -11,4 +11,4 @@ import bluesky.preprocessors as bpp
 
 # from "20-detectors.py" import he3psd
 
-monitor_and_count = bpp.monitor_during_decorator([he3psd.counts0])(bp.count)
+monitor_and_count = bpp.monitor_during_decorator([he3psd.counts])(bp.count)
