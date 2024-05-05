@@ -85,7 +85,7 @@
        </property>
        <property name="curves">
         <stringlist>
-         <string>{&quot;y_channel&quot;: &quot;ca://${P}he3PSD:LiveCountsD${DN}&quot;, &quot;x_channel&quot;: null, &quot;plot_style&quot;: &quot;Line&quot;, &quot;name&quot;: &quot;&quot;, &quot;color&quot;: &quot;black&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: &quot;o&quot;, &quot;symbolSize&quot;: 5, &quot;yAxisName&quot;: &quot;Counts&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;, &quot;redraw_mode&quot;: 2}</string>
+         <string>{&quot;y_channel&quot;: &quot;ca://${P}he3PSD:Det${DN}:LiveCounts&quot;, &quot;x_channel&quot;: null, &quot;plot_style&quot;: &quot;Line&quot;, &quot;name&quot;: &quot;&quot;, &quot;color&quot;: &quot;black&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: &quot;o&quot;, &quot;symbolSize&quot;: 5, &quot;yAxisName&quot;: &quot;Counts&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;, &quot;redraw_mode&quot;: 2}</string>
         </stringlist>
        </property>
       </widget>

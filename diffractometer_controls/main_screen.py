@@ -66,7 +66,7 @@ class MainScreen(display.MITRDisplay):
             # app.re_dispatcher.subscribe(print)
 
             viewer = QtFigure()
-            app.re_dispatcher.subscribe(NewLivePlot('he3psd_counts0',x='he3psd_position_x',ax=viewer.axes,marker='o',lw=1,mfc='none'))
+            app.re_dispatcher.subscribe(NewLivePlot('he3psd_counts',x='he3psd_position_x',ax=viewer.axes,marker='o',lw=1,mfc='none'))
 
             app.re_dispatcher.start()
             # install_remote_qt_kicker()
