@@ -31,15 +31,9 @@ class HE3PSD(Device):
     # counts7 = Cpt(EpicsSignalRO, ":CountsD7")
     # total_counts = Cpt(EpicsSignalRO, ":TotalCounts")
 
-    counts0 = Cpt(EpicsSignalRO, ":LiveCountsD0")
-    counts1 = Cpt(EpicsSignalRO, ":LiveCountsD1",kind='omitted')
-    counts2 = Cpt(EpicsSignalRO, ":LiveCountsD2",kind='omitted')
-    counts3 = Cpt(EpicsSignalRO, ":LiveCountsD3",kind='omitted')
-    counts4 = Cpt(EpicsSignalRO, ":LiveCountsD4",kind='omitted')
-    counts5 = Cpt(EpicsSignalRO, ":LiveCountsD5",kind='omitted')
-    counts6 = Cpt(EpicsSignalRO, ":LiveCountsD6",kind='omitted')
-    counts7 = Cpt(EpicsSignalRO, ":LiveCountsD7")
-    total_counts = Cpt(EpicsSignalRO, ":LiveTotalCounts")
+    counts = Cpt(EpicsSignalRO, ":Det0:LiveCounts")
+    
+    # total_counts = Cpt(EpicsSignalRO, ":LiveTotalCounts")
 
     # _default_read_attrs = (
     #     "counts0",
