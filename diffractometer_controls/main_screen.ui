@@ -80,7 +80,7 @@
          </property>
          <layout class="QVBoxLayout" name="verticalLayout_2">
           <item>
-           <layout class="QGridLayout" name="gridLayout_3"/>
+           <layout class="QVBoxLayout" name="verticalLayout_12"/>
           </item>
          </layout>
         </widget>
@@ -110,7 +110,7 @@
          </property>
          <layout class="QVBoxLayout" name="verticalLayout_3">
           <item>
-           <layout class="QGridLayout" name="gridLayout_4"/>
+           <layout class="QVBoxLayout" name="verticalLayout_13"/>
           </item>
          </layout>
         </widget>
@@ -147,7 +147,7 @@
       </property>
       <property name="font">
        <font>
-        <pointsize>13</pointsize>
+        <pointsize>9</pointsize>
        </font>
       </property>
       <property name="toolTip">
@@ -157,7 +157,7 @@
        <string/>
       </property>
       <property name="currentIndex">
-       <number>2</number>
+       <number>1</number>
       </property>
       <property name="iconSize">
        <size>
@@ -260,7 +260,7 @@
           </property>
           <layout class="QVBoxLayout" name="verticalLayout_7">
            <item>
-            <layout class="QGridLayout" name="gridLayout_10"/>
+            <layout class="QVBoxLayout" name="verticalLayout_11"/>
            </item>
           </layout>
          </widget>
