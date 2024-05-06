@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1368</width>
-    <height>1231</height>
+    <width>1371</width>
+    <height>1183</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -78,11 +78,7 @@
          <property name="toolTip">
           <string/>
          </property>
-         <layout class="QVBoxLayout" name="verticalLayout_2">
-          <item>
-           <layout class="QVBoxLayout" name="verticalLayout_12"/>
-          </item>
-         </layout>
+         <layout class="QVBoxLayout" name="verticalLayout_2"/>
         </widget>
        </item>
        <item>
@@ -108,11 +104,7 @@
          <property name="toolTip">
           <string/>
          </property>
-         <layout class="QVBoxLayout" name="verticalLayout_3">
-          <item>
-           <layout class="QVBoxLayout" name="verticalLayout_13"/>
-          </item>
-         </layout>
+         <layout class="QVBoxLayout" name="verticalLayout_3"/>
         </widget>
        </item>
       </layout>
@@ -147,7 +139,7 @@
       </property>
       <property name="font">
        <font>
-        <pointsize>8</pointsize>
+        <pointsize>13</pointsize>
        </font>
       </property>
       <property name="toolTip">
@@ -157,7 +149,7 @@
        <string/>
       </property>
       <property name="currentIndex">
-       <number>0</number>
+       <number>2</number>
       </property>
       <property name="iconSize">
        <size>
@@ -196,11 +188,7 @@
             <property name="toolTip">
              <string/>
             </property>
-            <layout class="QVBoxLayout" name="verticalLayout_4">
-             <item>
-              <layout class="QGridLayout" name="gridLayout_6"/>
-             </item>
-            </layout>
+            <layout class="QVBoxLayout" name="verticalLayout_4"/>
            </widget>
           </item>
           <item>
@@ -246,28 +234,24 @@
        <attribute name="title">
         <string>RE Extras</string>
        </attribute>
-       <layout class="QVBoxLayout" name="verticalLayout_6">
+       <layout class="QVBoxLayout" name="verticalLayout_11">
         <item>
-         <widget class="PyDMFrame" name="RE_Queue_History">
-          <property name="sizePolicy">
-           <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
-            <horstretch>0</horstretch>
-            <verstretch>0</verstretch>
-           </sizepolicy>
-          </property>
-          <property name="toolTip">
-           <string/>
-          </property>
-          <layout class="QVBoxLayout" name="verticalLayout_7">
-           <item>
-            <layout class="QVBoxLayout" name="verticalLayout_11"/>
-           </item>
-          </layout>
-         </widget>
-        </item>
-        <item>
-         <layout class="QGridLayout" name="gridLayout_8">
-          <item row="0" column="0">
+         <layout class="QVBoxLayout" name="verticalLayout_6">
+          <item>
+           <widget class="PyDMFrame" name="RE_Queue_History">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="toolTip">
+             <string/>
+            </property>
+            <layout class="QVBoxLayout" name="verticalLayout_7"/>
+           </widget>
+          </item>
+          <item>
            <widget class="PyDMFrame" name="RE_Console">
             <property name="sizePolicy">
              <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
@@ -278,11 +262,7 @@
             <property name="toolTip">
              <string/>
             </property>
-            <layout class="QVBoxLayout" name="verticalLayout_5">
-             <item>
-              <layout class="QGridLayout" name="gridLayout_7"/>
-             </item>
-            </layout>
+            <layout class="QVBoxLayout" name="verticalLayout_5"/>
            </widget>
           </item>
          </layout>
