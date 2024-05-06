@@ -37,6 +37,9 @@
    </property>
    <item>
     <layout class="QGridLayout" name="gridLayout">
+     <property name="spacing">
+      <number>0</number>
+     </property>
      <item row="0" column="0">
       <widget class="PyDMFrame" name="RE_Connection">
        <property name="sizePolicy">
@@ -47,7 +50,7 @@
        </property>
        <property name="minimumSize">
         <size>
-         <width>150</width>
+         <width>160</width>
          <height>200</height>
         </size>
        </property>
@@ -93,7 +96,7 @@
        </property>
        <property name="minimumSize">
         <size>
-         <width>150</width>
+         <width>160</width>
          <height>200</height>
         </size>
        </property>
