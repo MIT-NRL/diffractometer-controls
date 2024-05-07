@@ -307,6 +307,37 @@
          <bool>true</bool>
         </property>
        </widget>
+       <widget class="PyDMRelatedDisplayButton" name="PyDMRelatedDisplayButton_3">
+        <property name="geometry">
+         <rect>
+          <x>130</x>
+          <y>410</y>
+          <width>191</width>
+          <height>31</height>
+         </rect>
+        </property>
+        <property name="toolTip">
+         <string/>
+        </property>
+        <property name="filenames" stdset="0">
+         <stringlist>
+          <string>extra_ui/autoconvert/ADZWO.ui</string>
+          <string>ADBase.ad</string>
+         </stringlist>
+        </property>
+        <property name="titles" stdset="0">
+         <stringlist/>
+        </property>
+        <property name="macros" stdset="0">
+         <stringlist>
+          <string>R=ZWO1:</string>
+          <string>R=cam2:</string>
+         </stringlist>
+        </property>
+        <property name="openInNewWindow" stdset="0">
+         <bool>true</bool>
+        </property>
+       </widget>
       </widget>
      </widget>
     </widget>
