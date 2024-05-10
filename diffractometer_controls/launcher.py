@@ -28,7 +28,8 @@ def main():
     EPICS_SUPPORT = Path('/home/mitr_4dh4/EPICS/synApps-6-3/support')
     DISPLAY_PATH = os.getenv("PYDM_DISPLAYS_PATH",None)
     if DISPLAY_PATH is None:
-        DISPLAY_PATH = ':'.join([dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*op/adl*')])
+        path_list = [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*op/adl*')] + [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*opi/medm*')]
+        DISPLAY_PATH = ':'.join(path_list)
     os.environ['PYDM_DISPLAYS_PATH'] = DISPLAY_PATH
 
     from pydm.utilities import setup_renderer
