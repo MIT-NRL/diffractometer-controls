@@ -71,10 +71,10 @@
         <enum>PyDMImageView::Clike</enum>
        </property>
        <property name="imageChannel" stdset="0">
-        <string>ca://${IOC}:image1:ArrayData</string>
+        <string>ca://${P}image1:ArrayData</string>
        </property>
        <property name="widthChannel" stdset="0">
-        <string>ca://${IOC}:image1:ArraySize0_RBV</string>
+        <string>ca://${P}image1:ArraySize0_RBV</string>
        </property>
       </widget>
      </item>
