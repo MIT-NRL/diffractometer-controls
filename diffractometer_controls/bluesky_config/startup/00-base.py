@@ -1,11 +1,21 @@
 
+import os
 from bluesky import RunEngine
 from bluesky.utils import PersistentDict
+from bluesky.callbacks.zmq import Publisher
 
 from pathlib import Path
 
 RE = RunEngine({})
 RE.md = PersistentDict(str(Path("~/.bluesky_history").expanduser()))
+
+publisher = Publisher('localhost:5567')
+RE.subscribe(publisher)
+
+# Add default metadata
+RE.md['facility'] = 'MITR'
+RE.md['beamline_id'] = '4DH4'
+
 
 from bluesky import SupplementalData
 sd = SupplementalData()
