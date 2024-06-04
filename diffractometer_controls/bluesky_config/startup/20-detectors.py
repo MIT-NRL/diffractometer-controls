@@ -1,25 +1,17 @@
 import numpy as np
 from ophyd import (Device, Component as Cpt,
-                   EpicsSignal, EpicsSignalRO, EpicsMotor, Signal)
+                   EpicsSignal, EpicsSignalRO, EpicsSignalWithRBV, 
+                   EpicsMotor, Signal)
 from ophyd.device import DeviceStatus
 from ophyd.status import Status, SubscriptionStatus
 
 
-class EpicsSignalWithRBV(EpicsSignal):
-    def __init__(self, prefix, **kwargs):
-        super().__init__(prefix + "_RBV", write_pv=prefix, **kwargs)
-
-
-class EpicsSignalWithRBV(EpicsSignal):
-    def __init__(self, prefix, **kwargs):
-        super().__init__(prefix + "_RBV", write_pv=prefix, **kwargs)
-
 class HE3PSD(Device):
-    acquire = Cpt(EpicsSignalWithRBV, ":Acquire",kind='config')
-    acquire_time = Cpt(EpicsSignalWithRBV, ":AcquireTime",kind='config')
-    nbins = Cpt(EpicsSignalWithRBV, ":NBins",kind='config')
+    acquire = Cpt(EpicsSignalWithRBV, "Acquire",kind='config')
+    acquire_time = Cpt(EpicsSignalWithRBV, "AcquireTime",kind='config')
+    nbins = Cpt(EpicsSignalWithRBV, "NBins",kind='config')
 
-    position_x = Cpt(Signal,value=np.linspace(-150,150,300))
+    position_x = Cpt(Signal,value=np.linspace(-150,150,300),kind="hinted")
 
     # counts0 = Cpt(EpicsSignalRO, ":CountsD0")
     # counts1 = Cpt(EpicsSignalRO, ":CountsD1")
@@ -31,7 +23,7 @@ class HE3PSD(Device):
     # counts7 = Cpt(EpicsSignalRO, ":CountsD7")
     # total_counts = Cpt(EpicsSignalRO, ":TotalCounts")
 
-    counts = Cpt(EpicsSignalRO, ":Det0:LiveCounts")
+    counts = Cpt(EpicsSignalRO, "Det0:LiveCounts",kind="hinted")
     
     # total_counts = Cpt(EpicsSignalRO, ":LiveTotalCounts")
 
@@ -56,4 +48,4 @@ class HE3PSD(Device):
         return status
     
 
-he3psd = HE3PSD("4dh4:he3PSD", name="he3psd")
+he3psd = HE3PSD("4dh4:he3PSD:", name="he3psd")
