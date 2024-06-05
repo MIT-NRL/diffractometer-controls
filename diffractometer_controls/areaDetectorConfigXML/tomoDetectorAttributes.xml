@@ -1,12 +1,11 @@
 <?xml version="1.0" standalone="no" ?>
+<!-- Attributes -->
 <Attributes
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:noNamespaceSchemaLocation="../../../../../ADCore/XML_schema/NDAttributes.xsd"
     >
-    <Attribute name="AcquireTime"         type="EPICS_PV" source="$(P)cam2:AcquireTime"  dbrtype="DBR_NATIVE"  description="Camera acquire time"/>
-    <Attribute name="HDF5FrameLocation"   type="EPICS_PV" source="$(P)cam2:FrameType"    dbrtype="DBR_STRING"  description="HDF5 address for this frame"/>
-    <Attribute name="ImageCounter"        type="PARAM"    source="ARRAY_COUNTER"                datatype="INT"        description="Image counter"/>
+    <Attribute name="AcquireTime"         type="EPICS_PV" source="4dh4:cam2:AcquireTime"      dbrtype="DBR_NATIVE"  description="Camera acquire time"/>
+    <Attribute name="FrameType"           type="EPICS_PV" source="4dh4:cam2:FrameType"        dbrtype="DBR_NATIVE"  description="Camera frame type (projection, dark, or flat)"/>
     <Attribute name="AttributesFileParam" type="PARAM"    source="ND_ATTRIBUTES_FILE"           datatype="STRING"     description="Attributes file param"/>
-    <Attribute name="CameraModel"         type="PARAM"    source="MODEL"                        datatype="STRING"     description="Camera model"/>
-    <Attribute name="CameraManufacturer"  type="PARAM"    source="MANUFACTURER"                 datatype="STRING"     description="Camera manufacturer"/>
 </Attributes>
+
