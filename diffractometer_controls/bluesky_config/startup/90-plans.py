@@ -124,10 +124,10 @@ def tomo_scan(detectors, *args, num=None, md=None):
     def background_exposure(frame_type: str="dark"):
         if frame_type == "dark":
             for obj in detectors:
-                obj.cam.frame_type.put("Background")
+                yield from bps.mov(obj.cam.frame_type, 1)
         elif frame_type == "flat":
             for obj in detectors:
-                obj.cam.frame_type.put("FlatField")
+                yield from bps.mov(obj.cam.frame_type, 2)
         yield from bps.trigger_and_read(detectors, name=frame_type)
 
 
@@ -140,7 +140,7 @@ def tomo_scan(detectors, *args, num=None, md=None):
         yield from background_exposure("flat")
 
         for obj in detectors:
-            obj.cam.frame_type.put("Normal")
+            yield from bps.mov(obj.cam.frame_type, 0)
         full_cycler = plan_patterns.inner_product(num=num, args=args)
 
         pos_cache = defaultdict(lambda: None)
