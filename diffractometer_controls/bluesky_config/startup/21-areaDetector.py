@@ -14,7 +14,9 @@ class MyTIFFPlugin(FileStoreTIFFIterativeWrite,TIFFPlugin):
     pass
 
 class MyHDF5Plugin(FileStoreHDF5IterativeWrite,HDF5Plugin):
-    pass
+    layout_filename = Cpt(EpicsSignal, "XMLFileName", kind="config", string=True)
+    layout_filename_valid = Cpt(EpicsSignal, "XMLValid_RBV", kind="omitted", string=True)
+    nd_attr_status = Cpt(EpicsSignal, "NDAttributesStatus", kind="omitted", string=True)
 
 class ZWODetector(SingleTrigger, AreaDetector):
     cam = Cpt(cam.AreaDetectorCam, "cam1:")
@@ -55,3 +57,5 @@ class SimAreaDetector(SingleTrigger, SimDetector):
 
 # cam1 = ZWODetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total'])
 cam_sim = SimAreaDetector(prefix='4dh4:',name='cam2',read_attrs=['hdf1','stats1.total'])
+cam_sim.hdf1.stage_sigs["layout_filename"] = "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoLayout.xml"
+cam_sim.cam.stage_sigs["nd_attributes_file"] = "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml"
