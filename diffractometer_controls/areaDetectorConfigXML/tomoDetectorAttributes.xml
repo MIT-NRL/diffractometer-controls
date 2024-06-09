@@ -11,7 +11,7 @@
     <Attribute name="SDKVersion"                    type="EPICS_PV"     source="4dh4:cam1:SDKVersion_RBV"               dbrtype="DBR_STRING"  description="Detector vendor SDK version"/>
     <Attribute name="DriverVersion"                 type="EPICS_PV"     source="4dh4:cam1:DriverVersion_RBV"            dbrtype="DBR_STRING"  description="areaDetector driver version"/>
     <Attribute name="ADCoreVersion"                 type="EPICS_PV"     source="4dh4:cam1:ADCoreVersion_RBV"            dbrtype="DBR_STRING"  description="areaDetector ADCore version"/>
-<!-- 
+
     <Attribute name="MaxSizeX"                      type="EPICS_PV"     source="4dh4:cam1:MaxSizeX_RBV"                 dbrtype="DBR_NATIVE"  description="Detector total X pixels"/>
     <Attribute name="MaxSizeY"                      type="EPICS_PV"     source="4dh4:cam1:MaxSizeY_RBV"                 dbrtype="DBR_NATIVE"  description="Detector total Y pixels"/>
     <Attribute name="MinX"                          type="EPICS_PV"     source="4dh4:cam1:MinX"                         dbrtype="DBR_NATIVE"  description="Detector readout min X"/>
@@ -35,11 +35,11 @@
     <Attribute name="FileName"                      type="EPICS_PV"     source="4dh4:HDF1:FileName"                     dbrtype="DBR_STRING"  description="File name "/>
     <Attribute name="FullFileName"                  type="EPICS_PV"     source="4dh4:HDF1:FullFileName_RBV"             dbrtype="DBR_STRING"  description="Full file name"/>
     <Attribute name="FilePath"                      type="EPICS_PV"     source="4dh4:HDF1:FilePath_RBV"                 dbrtype="DBR_STRING"  description="File path"/>
-    <Attribute name="HDFPluginVersion"              type="EPICS_PV"     source="4dh4:HDF1:PluginType_RBV"               dbrtype="DBR_STRING"  description="File plugin type"/> -->
+    <Attribute name="HDFPluginVersion"              type="EPICS_PV"     source="4dh4:HDF1:PluginType_RBV"               dbrtype="DBR_STRING"  description="File plugin type"/>
 
     <Attribute name="ReactorPower"                   type="EPICS_PV"     source="mitr:power_6"                             dbrtype="DBR_NATIVE"  description="Ring current (mA)"/>
     
-    <!-- <Attribute name="ScintillatorType"              type="EPICS_PV"     source="4dh4:TS:ScintillatorType"             dbrtype="DBR_STRING"  description="Scintillator type"/>
+    <Attribute name="ScintillatorType"              type="EPICS_PV"     source="4dh4:TS:ScintillatorType"             dbrtype="DBR_STRING"  description="Scintillator type"/>
     <Attribute name="ScintillatorThickness"         type="EPICS_PV"     source="4dh4:TS:ScintillatorThickness"        dbrtype="DBR_NATIVE"  description="Scintillator thickness (microns)"/>
  
     <Attribute name="ImagePixelSize"                type="EPICS_PV"     source="4dh4:TS:ImagePixelSize"               dbrtype="DBR_NATIVE"  description="Pixel size on sample (microns)"/>
@@ -54,20 +54,18 @@
 
     <Attribute name="UserLastName"                  type="EPICS_PV"     source="4dh4:TS:UserLastName"                dbrtype="DBR_STRING"  description="User last name"/>
     <Attribute name="UserInstitution"               type="EPICS_PV"     source="4dh4:TS:UserInstitution"             dbrtype="DBR_STRING"  description="User institution"/>
-    <Attribute name="UserBadge"                     type="EPICS_PV"     source="4dh4:TS:UserBadge"                   dbrtype="DBR_STRING"  description="User badge number"/>
     <Attribute name="UserEmail"                     type="EPICS_PV"     source="4dh4:TS:UserEmail"                   dbrtype="DBR_STRING"  description="User e-mail"/>
     <Attribute name="ProposalNumber"                type="EPICS_PV"     source="4dh4:TS:ProposalNumber"              dbrtype="DBR_STRING"  description="Proposal number"/>
     <Attribute name="ProposalTitle"                 type="EPICS_PV"     source="4dh4:TS:ProposalTitle"               dbrtype="DBR_STRING"  description="Proposal title"/>
-    <Attribute name="ESAFNumber"                    type="EPICS_PV"     source="4dh4:TS:ESAFNumber"                  dbrtype="DBR_STRING"  description="ESAF number"/> -->
 
     <Attribute name="HDF5FrameLocation"             type="EPICS_PV"     source="4dh4:cam1:FrameType"                dbrtype="DBR_STRING"  description="Where to store frame in HDF5 file"/>
 
-    <!-- <Attribute name="SampleTheta"                   type="EPICS_PV"     source="4dh4:m6.VAL"                        dbrtype="DBR_DOUBLE"   description="Rotational angle of sample"/>
+    <Attribute name="SampleTheta"                   type="EPICS_PV"     source="4dh4:m6.VAL"                        dbrtype="DBR_DOUBLE"   description="Rotational angle of sample"/>
 
     <Attribute name="CcdCameraX"                    type="EPICS_PV" source="4dh4:m12.VAL"                        dbrtype="DBR_DOUBLE"     description="Camera x position in the beam"/>
     <Attribute name="CcdCameraXDial"                type="EPICS_PV" source="4dh4:m12.DVAL"                       dbrtype="DBR_DOUBLE"/>
 
-    <Attribute name="CcdCameraFocusDist"            type="EPICS_PV" source="4dh4:m4.VAL"                        dbrtype="DBR_DOUBLE"    description="Camera distance from scintillator box"/> -->
+    <Attribute name="CcdCameraFocusDist"            type="EPICS_PV" source="4dh4:m4.VAL"                        dbrtype="DBR_DOUBLE"    description="Camera distance from scintillator box"/>
 
 </Attributes>
 
