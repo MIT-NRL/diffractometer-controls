@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>Form</class>
+ <widget class="QWidget" name="Form">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>600</width>
+    <height>350</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Form</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="PyDMLabel" name="PyDMLabel_5">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
+     <property name="minimumSize">
+      <size>
+       <width>0</width>
+       <height>30</height>
+      </size>
+     </property>
+     <property name="maximumSize">
+      <size>
+       <width>16777215</width>
+       <height>40</height>
+      </size>
+     </property>
+     <property name="font">
+      <font>
+       <pointsize>14</pointsize>
+       <weight>75</weight>
+       <bold>true</bold>
+      </font>
+     </property>
+     <property name="toolTip">
+      <string/>
+     </property>
+     <property name="text">
+      <string>Sample Info</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignCenter</set>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout">
+     <item>
+      <widget class="PyDMLabel" name="PyDMLabel">
+       <property name="toolTip">
+        <string/>
+       </property>
+       <property name="text">
+        <string>Sample Name</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay">
+       <property name="toolTip">
+        <string/>
+       </property>
+       <property name="macros" stdset="0">
+        <string>FieldName=SampleName</string>
+       </property>
+       <property name="filename" stdset="0">
+        <string>Field_Input.ui</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout_2">
+     <item>
+      <widget class="PyDMLabel" name="PyDMLabel_2">
+       <property name="toolTip">
+        <string/>
+       </property>
+       <property name="text">
+        <string>Sample Description #1</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_2">
+       <property name="toolTip">
+        <string/>
+       </property>
+       <property name="macros" stdset="0">
+        <string>FieldName=SampleDescription1</string>
+       </property>
+       <property name="filename" stdset="0">
+        <string>Field_Input.ui</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout_3">
+     <item>
+      <widget class="PyDMLabel" name="PyDMLabel_3">
+       <property name="toolTip">
+        <string/>
+       </property>
+       <property name="text">
+        <string>Sample Description #2</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_3">
+       <property name="toolTip">
+        <string/>
+       </property>
+       <property name="macros" stdset="0">
+        <string>FieldName=SampleDescription2</string>
+       </property>
+       <property name="filename" stdset="0">
+        <string>Field_Input.ui</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout_4">
+     <item>
+      <widget class="PyDMLabel" name="PyDMLabel_4">
+       <property name="toolTip">
+        <string/>
+       </property>
+       <property name="text">
+        <string>Sample Description #3</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_4">
+       <property name="toolTip">
+        <string/>
+       </property>
+       <property name="macros" stdset="0">
+        <string>FieldName=SampleDescription3</string>
+       </property>
+       <property name="filename" stdset="0">
+        <string>Field_Input.ui</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>PyDMLabel</class>
+   <extends>QLabel</extends>
+   <header>pydm.widgets.label</header>
+  </customwidget>
+  <customwidget>
+   <class>PyDMEmbeddedDisplay</class>
+   <extends>QFrame</extends>
+   <header>pydm.widgets.embedded_display</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>
