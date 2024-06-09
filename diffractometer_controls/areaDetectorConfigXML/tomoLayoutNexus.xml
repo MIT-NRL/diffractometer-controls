@@ -3,7 +3,7 @@
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:noNamespaceSchemaLocation="../../../../../ADCore/XML_schema/hdf5_xml_layout_schema.xsd"
     >
-  <global name="detector_data_destination" ndattribute="FrameType" />
+  <global name="detector_data_destination" ndattribute="HDF5FrameLocation" />
   <group name="entry">
     <attribute name="NX_class" source="constant" value="NXentry" type="string" />
     <attribute name="default" source="constant" value="data" type="string" />
