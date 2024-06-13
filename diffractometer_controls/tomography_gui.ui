@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>Form</class>
+ <widget class="QWidget" name="Form">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1500</width>
+    <height>1200</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Form</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout_2">
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout_2">
+     <item>
+      <widget class="PyDMEmbeddedDisplay" name="ReactorPower_embedded_display">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>150</width>
+         <height>200</height>
+        </size>
+       </property>
+       <property name="maximumSize">
+        <size>
+         <width>150</width>
+         <height>200</height>
+        </size>
+       </property>
+       <property name="toolTip">
+        <string/>
+       </property>
+       <property name="filename" stdset="0">
+        <string>extra_ui/reactor_power.ui</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PyDMEmbeddedDisplay" name="Scan_display">
+       <property name="toolTip">
+        <string/>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout">
+     <item>
+      <widget class="QSplitter" name="splitter">
+       <property name="orientation">
+        <enum>Qt::Vertical</enum>
+       </property>
+       <widget class="PyDMEmbeddedDisplay" name="Motor_controls_display">
+        <property name="minimumSize">
+         <size>
+          <width>400</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="toolTip">
+         <string/>
+        </property>
+        <property name="filename" stdset="0">
+         <string>tomo_motor_control.ui</string>
+        </property>
+       </widget>
+       <widget class="PyDMEmbeddedDisplay" name="Camera_controls_display">
+        <property name="minimumSize">
+         <size>
+          <width>400</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="toolTip">
+         <string/>
+        </property>
+       </widget>
+      </widget>
+     </item>
+     <item>
+      <widget class="PyDMTabWidget" name="PyDMTabWidget">
+       <property name="toolTip">
+        <string/>
+       </property>
+       <property name="whatsThis">
+        <string/>
+       </property>
+       <property name="alarmChannels">
+        <stringlist>
+         <string></string>
+        </stringlist>
+       </property>
+       <widget class="QWidget" name="tab">
+        <attribute name="title">
+         <string>Imaging Viewer</string>
+        </attribute>
+        <layout class="QVBoxLayout" name="verticalLayout">
+         <item>
+          <widget class="PyDMEmbeddedDisplay" name="Viewer_display">
+           <property name="toolTip">
+            <string/>
+           </property>
+           <property name="filename" stdset="0">
+            <string>imaging_viewer.py</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>PyDMTabWidget</class>
+   <extends>QTabWidget</extends>
+   <header>pydm.widgets.tab_bar</header>
+  </customwidget>
+  <customwidget>
+   <class>PyDMEmbeddedDisplay</class>
+   <extends>QFrame</extends>
+   <header>pydm.widgets.embedded_display</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>
