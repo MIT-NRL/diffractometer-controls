@@ -42,7 +42,7 @@ class MITRApplication(PyDMApplication):
         self.re_client = RunEngineClient(zmq_control_addr=f'tcp://{ipaddress}:60615', zmq_info_addr=f'tcp://{ipaddress}:60625')
         self.re_dispatcher = RemoteDispatcher(f'{ipaddress}:5568')
 
-        super().__init__(ui_file='main_screen.py', use_main_window=use_main_window, *args, **kwargs)
+        super().__init__(ui_file='main_screen.ui', use_main_window=use_main_window, *args, **kwargs)
  
         # self.ui_file = ui_file
         # self.main_window = MI

@@ -8,6 +8,7 @@ from ophyd.status import Status, SubscriptionStatus
 from ophyd.areadetector import AreaDetector, SingleTrigger, SimDetector, ImagePlugin, StatsPlugin, TIFFPlugin, HDF5Plugin
 from ophyd.areadetector.filestore_mixins import FileStoreTIFFIterativeWrite, FileStoreHDF5IterativeWrite
 from ophyd import cam
+from epics import caput, caget, cainfo
 
 
 class MyTIFFPlugin(FileStoreTIFFIterativeWrite,TIFFPlugin):
@@ -37,7 +38,7 @@ class ZWODetector(SingleTrigger, AreaDetector):
     )
 
 class SimAreaDetector(SingleTrigger, SimDetector):
-    cam = Cpt(cam.SimDetectorCam, "cam2:")
+    cam = Cpt(cam.SimDetectorCam, "cam1:")
     image = Cpt(ImagePlugin, suffix='image1:')
     stats1 = Cpt(StatsPlugin, 'Stats1:')
 
@@ -55,7 +56,16 @@ class SimAreaDetector(SingleTrigger, SimDetector):
     )
 
 
-# cam1 = ZWODetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total'])
-cam_sim = SimAreaDetector(prefix='4dh4:',name='cam2',read_attrs=['hdf1','stats1.total'])
-cam_sim.hdf1.stage_sigs["layout_filename"] = "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoLayout.xml"
-cam_sim.cam.stage_sigs["nd_attributes_file"] = "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml"
+cam_zwo = ZWODetector(prefix='4dh4:',name='cam1',read_attrs=['hdf1','stats1.total'])
+cam_zwo.hdf1.stage_sigs["layout_filename"] = "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoLayoutDX.xml"
+cam_zwo.cam.stage_sigs["nd_attributes_file"] = "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml"
+cam_zwo.hdf1.stage_sigs["store_attr"] = "Yes"
+
+# cam_sim = SimAreaDetector(prefix='4dh4:',name='cam1',read_attrs=['hdf1','stats1.total'])
+# cam_sim.hdf1.stage_sigs["layout_filename"] = "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoLayoutDX.xml"
+# cam_sim.cam.stage_sigs["nd_attributes_file"] = "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml"
+
+
+caput("4dh4:cam1:FrameType.ZRST", "/exchange/data")
+caput("4dh4:cam1:FrameType.ONST", "/exchange/data_dark")
+caput("4dh4:cam1:FrameType.TWST", "/exchange/data_white")

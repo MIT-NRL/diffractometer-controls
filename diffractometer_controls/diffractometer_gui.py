@@ -19,8 +19,8 @@ from bluesky_widgets.qt.run_engine_client import (
 )
 
 # from bluesky_widgets.qt.figures import QtFigure, QtFigures
-from bluesky_widgets.models.auto_plot_builders import AutoLines, AutoPlotter
-from bluesky_widgets.models.plot_builders import Lines
+# from bluesky_widgets.models.auto_plot_builders import AutoLines, AutoPlotter, AutoImages
+from bluesky_widgets.models.plot_builders import Lines, Images
 from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher
 # from bluesky.callbacks.zmq import RemoteDispatcher
 from bluesky.utils import install_remote_qt_kicker
@@ -34,12 +34,12 @@ class MainScreen(display.MITRDisplay):
     re_dispatcher: RemoteDispatcher
     re_client: RunEngineClient
 
-    def __init__(self, parent=None, args=None, macros=None, ui_filename='main_screen.ui'):
+    def __init__(self, parent=None, args=None, macros=None, ui_filename='diffractometer_gui.ui'):
         super().__init__(parent, args, macros, ui_filename)
         # print("MainScreen here")
 
     def ui_filename(self):
-        return 'main_screen.ui'
+        return 'diffractometer_gui.ui'
 
     def ui_filepath(self):
         return super().ui_filepath()
@@ -60,10 +60,15 @@ class MainScreen(display.MITRDisplay):
             # figModel = AutoLines(max_runs=3)
             # figModel = Lines('he3psd_position_x[0]',['he3psd_counts0[0]'],max_runs=3)
             
-            # viewer = QtFigure(figModel.figure)
+            # viewer = QtFigures(figModel.figures)
             # self.runs = []
             # app.re_dispatcher.subscribe(stream_documents_into_runs(figModel.add_run))
             # app.re_dispatcher.subscribe(print)
+
+            #Viewer for imaging data
+            # figModel = Images("tiff1")
+            # viewer = QtFigure(figModel.figure)
+            # app.re_dispatcher.subscribe(stream_documents_into_runs(figModel.add_run))
 
             viewer = QtFigure()
             app.re_dispatcher.subscribe(NewLivePlot('he3psd_counts',x='he3psd_position_x',ax=viewer.axes,marker='o',lw=1,mfc='none'))

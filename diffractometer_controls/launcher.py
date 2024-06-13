@@ -137,6 +137,7 @@ def main():
         macros = dict(P='4dh4:',ioc='4dh4')
 
     # Set the EPICS CA and PVA addresses
+    os.environ["EPICS_CA_AUTO_ADDR_LIST"] = "NO"
     os.environ["EPICS_CA_ADDR_LIST"] = pydm_args.ip_addr + " 10.149.0.101"
     os.environ["EPICS_PVA_ADDR_LIST"] = pydm_args.ip_addr + " 10.149.0.101"
 
@@ -174,6 +175,15 @@ def main():
     app.setApplicationName("MITR")
 
     pydm.utilities.shortcuts.install_connection_inspector(parent=app.main_window)
+
+    def quit_print():
+        print("About to quit")
+
+    app.aboutToQuit.connect(quit_print)
+
+    from bluesky_widgets.qt.threading import wait_for_workers_to_quit, active_thread_count
+
+    app.aboutToQuit.connect(wait_for_workers_to_quit)
 
     exit_code = app.exec_()
 

@@ -1,7 +1,7 @@
 import logging
 import warnings
 from pathlib import Path
-from icecream import ic
+# from icecream import ic
 
 import qtawesome as qta
 from pydm import data_plugins
