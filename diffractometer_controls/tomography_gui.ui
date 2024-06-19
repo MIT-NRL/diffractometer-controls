@@ -46,6 +46,12 @@
      </item>
      <item>
       <widget class="PyDMEmbeddedDisplay" name="Scan_display">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
        <property name="toolTip">
         <string/>
        </property>
@@ -54,72 +60,89 @@
     </layout>
    </item>
    <item>
-    <layout class="QHBoxLayout" name="horizontalLayout">
-     <item>
-      <widget class="QSplitter" name="splitter">
-       <property name="orientation">
-        <enum>Qt::Vertical</enum>
+    <widget class="QSplitter" name="splitter_2">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+       <horstretch>0</horstretch>
+       <verstretch>1</verstretch>
+      </sizepolicy>
+     </property>
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <widget class="QSplitter" name="splitter">
+      <property name="orientation">
+       <enum>Qt::Vertical</enum>
+      </property>
+      <widget class="PyDMEmbeddedDisplay" name="Motor_controls_display">
+       <property name="minimumSize">
+        <size>
+         <width>400</width>
+         <height>0</height>
+        </size>
        </property>
-       <widget class="PyDMEmbeddedDisplay" name="Motor_controls_display">
-        <property name="minimumSize">
-         <size>
-          <width>400</width>
-          <height>0</height>
-         </size>
-        </property>
-        <property name="toolTip">
-         <string/>
-        </property>
-        <property name="filename" stdset="0">
-         <string>tomo_motor_control.ui</string>
-        </property>
-       </widget>
-       <widget class="PyDMEmbeddedDisplay" name="Camera_controls_display">
-        <property name="minimumSize">
-         <size>
-          <width>400</width>
-          <height>0</height>
-         </size>
-        </property>
-        <property name="toolTip">
-         <string/>
-        </property>
-       </widget>
-      </widget>
-     </item>
-     <item>
-      <widget class="PyDMTabWidget" name="PyDMTabWidget">
        <property name="toolTip">
         <string/>
        </property>
-       <property name="whatsThis">
+       <property name="filename" stdset="0">
+        <string>tomo_motor_controls.ui</string>
+       </property>
+      </widget>
+      <widget class="PyDMEmbeddedDisplay" name="Camera_controls_display">
+       <property name="minimumSize">
+        <size>
+         <width>400</width>
+         <height>0</height>
+        </size>
+       </property>
+       <property name="toolTip">
         <string/>
        </property>
-       <property name="alarmChannels">
-        <stringlist>
-         <string></string>
-        </stringlist>
-       </property>
-       <widget class="QWidget" name="tab">
-        <attribute name="title">
-         <string>Imaging Viewer</string>
-        </attribute>
-        <layout class="QVBoxLayout" name="verticalLayout">
-         <item>
-          <widget class="PyDMEmbeddedDisplay" name="Viewer_display">
-           <property name="toolTip">
-            <string/>
-           </property>
-           <property name="filename" stdset="0">
-            <string>imaging_viewer.py</string>
-           </property>
-          </widget>
-         </item>
-        </layout>
-       </widget>
       </widget>
-     </item>
-    </layout>
+     </widget>
+     <widget class="PyDMTabWidget" name="PyDMTabWidget">
+      <property name="sizePolicy">
+       <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+        <horstretch>0</horstretch>
+        <verstretch>1</verstretch>
+       </sizepolicy>
+      </property>
+      <property name="toolTip">
+       <string/>
+      </property>
+      <property name="whatsThis">
+       <string/>
+      </property>
+      <property name="alarmChannels">
+       <stringlist>
+        <string></string>
+       </stringlist>
+      </property>
+      <widget class="QWidget" name="tab">
+       <attribute name="title">
+        <string>Imaging Viewer</string>
+       </attribute>
+       <layout class="QVBoxLayout" name="verticalLayout">
+        <item>
+         <widget class="PyDMEmbeddedDisplay" name="Viewer_display">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="toolTip">
+           <string/>
+          </property>
+          <property name="filename" stdset="0">
+           <string>imaging_viewer.py</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+     </widget>
+    </widget>
    </item>
   </layout>
  </widget>

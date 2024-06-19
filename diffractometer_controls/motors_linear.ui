@@ -6,301 +6,463 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>400</width>
-    <height>100</height>
+    <width>320</width>
+    <height>153</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Form</string>
   </property>
-  <widget class="PyDMLabel" name="PyDMLabel">
-   <property name="geometry">
-    <rect>
-     <x>140</x>
-     <y>0</y>
-     <width>101</width>
-     <height>21</height>
-    </rect>
-   </property>
-   <property name="font">
-    <font>
-     <pointsize>12</pointsize>
-    </font>
-   </property>
-   <property name="toolTip">
-    <string/>
-   </property>
-   <property name="text">
-    <string>#####</string>
-   </property>
-   <property name="alignment">
-    <set>Qt::AlignCenter</set>
-   </property>
-   <property name="channel" stdset="0">
-    <string>ca://{P}{R}.DESC</string>
-   </property>
-  </widget>
-  <widget class="PyDMLineEdit" name="PyDMLineEdit">
-   <property name="geometry">
-    <rect>
-     <x>91</x>
-     <y>41</y>
-     <width>112</width>
-     <height>22</height>
-    </rect>
-   </property>
-   <property name="minimumSize">
-    <size>
-     <width>100</width>
-     <height>0</height>
-    </size>
-   </property>
-   <property name="toolTip">
-    <string/>
-   </property>
-   <property name="channel" stdset="0">
-    <string>ca://{P}{R}.VAL</string>
-   </property>
-  </widget>
-  <widget class="PyDMDrawingRectangle" name="rectangle_1">
-   <property name="geometry">
-    <rect>
-     <x>40</x>
-     <y>0</y>
-     <width>210</width>
-     <height>31</height>
-    </rect>
-   </property>
-   <property name="toolTip">
-    <string>rectangle_1</string>
-   </property>
-   <property name="rules" stdset="0">
-    <string>[{&quot;name&quot;: &quot;visibility&quot;, &quot;property&quot;: &quot;Visible&quot;, &quot;channels&quot;: [{&quot;channel&quot;: &quot;ca://${P}${M}.DMOV&quot;, &quot;trigger&quot;: true, &quot;use_enum&quot;: false}], &quot;expression&quot;: &quot;ch[0]==0&quot;}]</string>
-   </property>
-   <property name="brush" stdset="0">
-    <brush brushstyle="SolidPattern">
-     <color alpha="255">
-      <red>115</red>
-      <green>255</green>
-      <blue>107</blue>
-     </color>
-    </brush>
-   </property>
-   <property name="penStyle" stdset="0">
-    <enum>Qt::SolidLine</enum>
-   </property>
-   <property name="penCapStyle" stdset="0">
-    <enum>Qt::FlatCap</enum>
-   </property>
-   <property name="penColor" stdset="0">
-    <color>
-     <red>115</red>
-     <green>255</green>
-     <blue>107</blue>
-    </color>
-   </property>
-   <property name="penWidth" stdset="0">
-    <double>1.000000000000000</double>
-   </property>
-  </widget>
-  <widget class="PyDMDrawingRectangle" name="rectangle">
-   <property name="geometry">
-    <rect>
-     <x>60</x>
-     <y>30</y>
-     <width>241</width>
-     <height>31</height>
-    </rect>
-   </property>
-   <property name="toolTip">
-    <string>rectangle</string>
-   </property>
-   <property name="rules" stdset="0">
-    <string>[{&quot;name&quot;: &quot;visibility&quot;, &quot;property&quot;: &quot;Visible&quot;, &quot;channels&quot;: [{&quot;channel&quot;: &quot;ca://${P}${M}.LVIO&quot;, &quot;trigger&quot;: true, &quot;use_enum&quot;: false}], &quot;expression&quot;: &quot;ch[0]!=0&quot;}]</string>
-   </property>
-   <property name="brush" stdset="0">
-    <brush brushstyle="SolidPattern">
-     <color alpha="255">
-      <red>251</red>
-      <green>243</green>
-      <blue>74</blue>
-     </color>
-    </brush>
-   </property>
-   <property name="penStyle" stdset="0">
-    <enum>Qt::SolidLine</enum>
-   </property>
-   <property name="penCapStyle" stdset="0">
-    <enum>Qt::FlatCap</enum>
-   </property>
-   <property name="penColor" stdset="0">
-    <color>
-     <red>251</red>
-     <green>243</green>
-     <blue>74</blue>
-    </color>
-   </property>
-   <property name="penWidth" stdset="0">
-    <double>1.000000000000000</double>
-   </property>
-  </widget>
-  <widget class="PyDMDrawingRectangle" name="rectangle_8">
-   <property name="geometry">
-    <rect>
-     <x>190</x>
-     <y>70</y>
-     <width>210</width>
-     <height>31</height>
-    </rect>
-   </property>
-   <property name="toolTip">
-    <string>rectangle_8</string>
-   </property>
-   <property name="rules" stdset="0">
-    <string>[{&quot;name&quot;: &quot;visibility&quot;, &quot;property&quot;: &quot;Visible&quot;, &quot;channels&quot;: [{&quot;channel&quot;: &quot;ca://${P}${M}_able.VAL&quot;, &quot;trigger&quot;: true, &quot;use_enum&quot;: false}], &quot;expression&quot;: &quot;ch[0]!=0&quot;}]</string>
-   </property>
-   <property name="brush" stdset="0">
-    <brush brushstyle="NoBrush">
-     <color alpha="255">
-      <red>253</red>
-      <green>0</green>
-      <blue>0</blue>
-     </color>
-    </brush>
-   </property>
-   <property name="penStyle" stdset="0">
-    <enum>Qt::DashLine</enum>
-   </property>
-   <property name="penCapStyle" stdset="0">
-    <enum>Qt::FlatCap</enum>
-   </property>
-   <property name="penColor" stdset="0">
-    <color>
-     <red>253</red>
-     <green>0</green>
-     <blue>0</blue>
-    </color>
-   </property>
-   <property name="penWidth" stdset="0">
-    <double>2.000000000000000</double>
-   </property>
-  </widget>
-  <widget class="QWidget" name="">
-   <property name="geometry">
-    <rect>
-     <x>90</x>
-     <y>70</y>
-     <width>221</width>
-     <height>25</height>
-    </rect>
-   </property>
-   <layout class="QHBoxLayout" name="horizontalLayout_2">
-    <item>
-     <widget class="PyDMPushButton" name="PyDMPushButton">
-      <property name="sizePolicy">
-       <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-        <horstretch>40</horstretch>
-        <verstretch>0</verstretch>
-       </sizepolicy>
-      </property>
-      <property name="minimumSize">
-       <size>
-        <width>40</width>
-        <height>0</height>
-       </size>
-      </property>
-      <property name="maximumSize">
-       <size>
-        <width>40</width>
-        <height>16777215</height>
-       </size>
-      </property>
-      <property name="toolTip">
-       <string/>
-      </property>
-      <property name="text">
-       <string>&lt;</string>
-      </property>
-      <property name="channel" stdset="0">
-       <string>ca://{P}{R}.TWB</string>
-      </property>
-     </widget>
-    </item>
-    <item>
-     <widget class="PyDMLineEdit" name="PyDMLineEdit_2">
-      <property name="minimumSize">
-       <size>
-        <width>100</width>
-        <height>0</height>
-       </size>
-      </property>
-      <property name="toolTip">
-       <string/>
-      </property>
-      <property name="channel" stdset="0">
-       <string>ca://{P}{R}.TWV</string>
-      </property>
-     </widget>
-    </item>
-    <item>
-     <widget class="PyDMPushButton" name="PyDMPushButton_2">
-      <property name="minimumSize">
-       <size>
-        <width>40</width>
-        <height>0</height>
-       </size>
-      </property>
-      <property name="maximumSize">
-       <size>
-        <width>40</width>
-        <height>16777215</height>
-       </size>
-      </property>
-      <property name="toolTip">
-       <string/>
-      </property>
-      <property name="text">
-       <string>&gt;</string>
-      </property>
-      <property name="channel" stdset="0">
-       <string>ca://{P}{R}.TWF</string>
-      </property>
-     </widget>
-    </item>
-   </layout>
-  </widget>
-  <widget class="PyDMLabel" name="PyDMLabel_2">
-   <property name="geometry">
-    <rect>
-     <x>209</x>
-     <y>41</y>
-     <width>100</width>
-     <height>17</height>
-    </rect>
-   </property>
-   <property name="minimumSize">
-    <size>
-     <width>100</width>
-     <height>0</height>
-    </size>
-   </property>
-   <property name="toolTip">
-    <string/>
-   </property>
-   <property name="showUnits" stdset="0">
-    <bool>true</bool>
-   </property>
-   <property name="channel" stdset="0">
-    <string>ca://{P}{R}.RBV</string>
-   </property>
-  </widget>
-  <zorder>rectangle</zorder>
-  <zorder>rectangle_8</zorder>
+  <layout class="QVBoxLayout" name="verticalLayout_2">
+   <item>
+    <widget class="PyDMLabel" name="PyDMLabel">
+     <property name="font">
+      <font>
+       <pointsize>12</pointsize>
+      </font>
+     </property>
+     <property name="toolTip">
+      <string/>
+     </property>
+     <property name="text">
+      <string>#####</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignCenter</set>
+     </property>
+     <property name="channel" stdset="0">
+      <string>ca://${P}${M}.DESC</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout">
+     <item>
+      <widget class="PyDMLineEdit" name="PyDMLineEdit">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>100</width>
+         <height>0</height>
+        </size>
+       </property>
+       <property name="toolTip">
+        <string/>
+       </property>
+       <property name="channel" stdset="0">
+        <string>ca://${P}${M}.VAL</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PyDMLabel" name="PyDMLabel_2">
+       <property name="minimumSize">
+        <size>
+         <width>100</width>
+         <height>0</height>
+        </size>
+       </property>
+       <property name="toolTip">
+        <string/>
+       </property>
+       <property name="showUnits" stdset="0">
+        <bool>true</bool>
+       </property>
+       <property name="channel" stdset="0">
+        <string>ca://${P}${M}.RBV</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PyDMFrame" name="PyDMFrame">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>40</width>
+         <height>0</height>
+        </size>
+       </property>
+       <property name="maximumSize">
+        <size>
+         <width>16777215</width>
+         <height>20</height>
+        </size>
+       </property>
+       <property name="toolTip">
+        <string/>
+       </property>
+       <layout class="QHBoxLayout" name="horizontalLayout_3">
+        <property name="spacing">
+         <number>0</number>
+        </property>
+        <property name="leftMargin">
+         <number>0</number>
+        </property>
+        <property name="topMargin">
+         <number>0</number>
+        </property>
+        <property name="rightMargin">
+         <number>0</number>
+        </property>
+        <property name="bottomMargin">
+         <number>0</number>
+        </property>
+        <item>
+         <widget class="PyDMDrawingRectangle" name="PyDMDrawingRectangle_2">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>10</width>
+            <height>20</height>
+           </size>
+          </property>
+          <property name="maximumSize">
+           <size>
+            <width>10</width>
+            <height>20</height>
+           </size>
+          </property>
+          <property name="toolTip">
+           <string/>
+          </property>
+          <property name="rules" stdset="0">
+           <string>[{&quot;name&quot;: &quot;visibility&quot;, &quot;property&quot;: &quot;Visible&quot;, &quot;initial_value&quot;: &quot;&quot;, &quot;expression&quot;: &quot;ch[0]!=0&quot;, &quot;channels&quot;: [{&quot;channel&quot;: &quot;ca://${P}${M}.LLS&quot;, &quot;trigger&quot;: true, &quot;use_enum&quot;: false}], &quot;notes&quot;: &quot;&quot;}]</string>
+          </property>
+          <property name="alarmSensitiveContent" stdset="0">
+           <bool>false</bool>
+          </property>
+          <property name="alarmSensitiveBorder" stdset="0">
+           <bool>false</bool>
+          </property>
+          <property name="PyDMToolTip" stdset="0">
+           <string/>
+          </property>
+          <property name="channel" stdset="0">
+           <string/>
+          </property>
+          <property name="brush" stdset="0">
+           <brush brushstyle="SolidPattern">
+            <color alpha="255">
+             <red>255</red>
+             <green>0</green>
+             <blue>0</blue>
+            </color>
+           </brush>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <layout class="QVBoxLayout" name="verticalLayout">
+          <property name="spacing">
+           <number>0</number>
+          </property>
+          <item>
+           <widget class="PyDMDrawingRectangle" name="rectangle_1">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>20</width>
+              <height>10</height>
+             </size>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>10</width>
+              <height>10</height>
+             </size>
+            </property>
+            <property name="sizeIncrement">
+             <size>
+              <width>0</width>
+              <height>10</height>
+             </size>
+            </property>
+            <property name="toolTip">
+             <string>rectangle_1</string>
+            </property>
+            <property name="rules" stdset="0">
+             <string>[{&quot;name&quot;: &quot;visibility&quot;, &quot;property&quot;: &quot;Visible&quot;, &quot;channels&quot;: [{&quot;channel&quot;: &quot;ca://${P}${M}.DMOV&quot;, &quot;trigger&quot;: true, &quot;use_enum&quot;: false}], &quot;expression&quot;: &quot;ch[0]==0&quot;}]</string>
+            </property>
+            <property name="brush" stdset="0">
+             <brush brushstyle="SolidPattern">
+              <color alpha="255">
+               <red>115</red>
+               <green>255</green>
+               <blue>107</blue>
+              </color>
+             </brush>
+            </property>
+            <property name="penStyle" stdset="0">
+             <enum>Qt::SolidLine</enum>
+            </property>
+            <property name="penCapStyle" stdset="0">
+             <enum>Qt::FlatCap</enum>
+            </property>
+            <property name="penColor" stdset="0">
+             <color>
+              <red>115</red>
+              <green>255</green>
+              <blue>107</blue>
+             </color>
+            </property>
+            <property name="penWidth" stdset="0">
+             <double>1.000000000000000</double>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="PyDMDrawingRectangle" name="rectangle">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="MinimumExpanding" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>20</width>
+              <height>10</height>
+             </size>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>10</width>
+              <height>10</height>
+             </size>
+            </property>
+            <property name="toolTip">
+             <string>rectangle</string>
+            </property>
+            <property name="rules" stdset="0">
+             <string>[{&quot;name&quot;: &quot;visibility&quot;, &quot;property&quot;: &quot;Visible&quot;, &quot;channels&quot;: [{&quot;channel&quot;: &quot;ca://${P}${M}.LVIO&quot;, &quot;trigger&quot;: true, &quot;use_enum&quot;: false}], &quot;expression&quot;: &quot;ch[0]!=0&quot;}]</string>
+            </property>
+            <property name="brush" stdset="0">
+             <brush brushstyle="SolidPattern">
+              <color alpha="255">
+               <red>251</red>
+               <green>243</green>
+               <blue>74</blue>
+              </color>
+             </brush>
+            </property>
+            <property name="penStyle" stdset="0">
+             <enum>Qt::SolidLine</enum>
+            </property>
+            <property name="penCapStyle" stdset="0">
+             <enum>Qt::FlatCap</enum>
+            </property>
+            <property name="penColor" stdset="0">
+             <color>
+              <red>251</red>
+              <green>243</green>
+              <blue>74</blue>
+             </color>
+            </property>
+            <property name="penWidth" stdset="0">
+             <double>1.000000000000000</double>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <widget class="PyDMDrawingRectangle" name="PyDMDrawingRectangle">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>10</width>
+            <height>20</height>
+           </size>
+          </property>
+          <property name="maximumSize">
+           <size>
+            <width>10</width>
+            <height>20</height>
+           </size>
+          </property>
+          <property name="toolTip">
+           <string/>
+          </property>
+          <property name="rules" stdset="0">
+           <string>[{&quot;name&quot;: &quot;visibility&quot;, &quot;property&quot;: &quot;Visible&quot;, &quot;initial_value&quot;: &quot;&quot;, &quot;expression&quot;: &quot;ch[0]!=0&quot;, &quot;channels&quot;: [{&quot;channel&quot;: &quot;ca://${P}${M}.HLS&quot;, &quot;trigger&quot;: true, &quot;use_enum&quot;: false}], &quot;notes&quot;: &quot;&quot;}]</string>
+          </property>
+          <property name="alarmSensitiveContent" stdset="0">
+           <bool>false</bool>
+          </property>
+          <property name="alarmSensitiveBorder" stdset="0">
+           <bool>false</bool>
+          </property>
+          <property name="PyDMToolTip" stdset="0">
+           <string/>
+          </property>
+          <property name="channel" stdset="0">
+           <string/>
+          </property>
+          <property name="brush" stdset="0">
+           <brush brushstyle="SolidPattern">
+            <color alpha="255">
+             <red>255</red>
+             <green>0</green>
+             <blue>0</blue>
+            </color>
+           </brush>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout_2">
+     <item>
+      <widget class="PyDMPushButton" name="PyDMPushButton">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>40</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>40</width>
+         <height>0</height>
+        </size>
+       </property>
+       <property name="maximumSize">
+        <size>
+         <width>40</width>
+         <height>16777215</height>
+        </size>
+       </property>
+       <property name="toolTip">
+        <string/>
+       </property>
+       <property name="text">
+        <string>&lt;</string>
+       </property>
+       <property name="channel" stdset="0">
+        <string>ca://${P}${M}.TWR</string>
+       </property>
+       <property name="pressValue" stdset="0">
+        <string>1</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PyDMLineEdit" name="PyDMLineEdit_2">
+       <property name="minimumSize">
+        <size>
+         <width>100</width>
+         <height>0</height>
+        </size>
+       </property>
+       <property name="toolTip">
+        <string/>
+       </property>
+       <property name="channel" stdset="0">
+        <string>ca://${P}${M}.TWV</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PyDMPushButton" name="PyDMPushButton_2">
+       <property name="minimumSize">
+        <size>
+         <width>40</width>
+         <height>0</height>
+        </size>
+       </property>
+       <property name="maximumSize">
+        <size>
+         <width>40</width>
+         <height>16777215</height>
+        </size>
+       </property>
+       <property name="toolTip">
+        <string/>
+       </property>
+       <property name="text">
+        <string>&gt;</string>
+       </property>
+       <property name="channel" stdset="0">
+        <string>ca://${P}${M}.TWF</string>
+       </property>
+       <property name="pressValue" stdset="0">
+        <string>1</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="PyDMRelatedDisplayButton" name="PyDMRelatedDisplayButton">
+     <property name="toolTip">
+      <string/>
+     </property>
+     <property name="text">
+      <string>More</string>
+     </property>
+     <property name="icon">
+      <iconset theme="None"/>
+     </property>
+     <property name="filenames" stdset="0">
+      <stringlist>
+       <string>extra_ui/autoconvert/motorx_more.ui</string>
+       <string>extra_ui/autoconvert/motorx_all.ui</string>
+       <string>extra_ui/autoconvert/motorx_setup.ui</string>
+      </stringlist>
+     </property>
+     <property name="titles" stdset="0">
+      <stringlist>
+       <string>${M} - Medium</string>
+       <string>${M} - All</string>
+       <string>${M} - Setup</string>
+      </stringlist>
+     </property>
+     <property name="macros" stdset="0">
+      <stringlist>
+       <string>P=${P}</string>
+       <string>M=${M}</string>
+      </stringlist>
+     </property>
+     <property name="openInNewWindow" stdset="0">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+  </layout>
+  <zorder>layoutWidget</zorder>
+  <zorder>PyDMLabel_2</zorder>
   <zorder>PyDMLabel</zorder>
   <zorder>PyDMLineEdit</zorder>
-  <zorder>PyDMPushButton</zorder>
-  <zorder>PyDMPushButton_2</zorder>
-  <zorder>PyDMLineEdit_2</zorder>
+  <zorder>rectangle</zorder>
   <zorder>rectangle_1</zorder>
  </widget>
  <customwidgets>
@@ -315,6 +477,12 @@
    <header>pydm.widgets.drawing</header>
   </customwidget>
   <customwidget>
+   <class>PyDMFrame</class>
+   <extends>QFrame</extends>
+   <header>pydm.widgets.frame</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
    <class>PyDMLineEdit</class>
    <extends>QLineEdit</extends>
    <header>pydm.widgets.line_edit</header>
@@ -323,6 +491,11 @@
    <class>PyDMPushButton</class>
    <extends>QPushButton</extends>
    <header>pydm.widgets.pushbutton</header>
+  </customwidget>
+  <customwidget>
+   <class>PyDMRelatedDisplayButton</class>
+   <extends>QPushButton</extends>
+   <header>pydm.widgets.related_display_button</header>
   </customwidget>
  </customwidgets>
  <resources/>

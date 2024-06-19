@@ -53,6 +53,11 @@
      <property name="text">
       <string>Tomography GUI</string>
      </property>
+     <property name="filenames" stdset="0">
+      <stringlist>
+       <string>tomography_gui.py</string>
+      </stringlist>
+     </property>
     </widget>
    </item>
    <item>
