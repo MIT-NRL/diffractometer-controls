@@ -6,9 +6,15 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>320</width>
-    <height>153</height>
+    <width>300</width>
+    <height>268</height>
    </rect>
+  </property>
+  <property name="minimumSize">
+   <size>
+    <width>300</width>
+    <height>0</height>
+   </size>
   </property>
   <property name="windowTitle">
    <string>Form</string>
@@ -18,7 +24,9 @@
     <widget class="PyDMLabel" name="PyDMLabel">
      <property name="font">
       <font>
-       <pointsize>12</pointsize>
+       <pointsize>16</pointsize>
+       <weight>75</weight>
+       <bold>true</bold>
       </font>
      </property>
      <property name="toolTip">
@@ -377,6 +385,12 @@
      </item>
      <item>
       <widget class="PyDMLineEdit" name="PyDMLineEdit_2">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
        <property name="minimumSize">
         <size>
          <width>100</width>
@@ -430,7 +444,8 @@
       <string>More</string>
      </property>
      <property name="icon">
-      <iconset theme="None"/>
+      <iconset theme="None">
+       <normaloff>.</normaloff>.</iconset>
      </property>
      <property name="filenames" stdset="0">
       <stringlist>
@@ -458,12 +473,8 @@
     </widget>
    </item>
   </layout>
-  <zorder>layoutWidget</zorder>
-  <zorder>PyDMLabel_2</zorder>
+  <zorder>PyDMRelatedDisplayButton</zorder>
   <zorder>PyDMLabel</zorder>
-  <zorder>PyDMLineEdit</zorder>
-  <zorder>rectangle</zorder>
-  <zorder>rectangle_1</zorder>
  </widget>
  <customwidgets>
   <customwidget>
