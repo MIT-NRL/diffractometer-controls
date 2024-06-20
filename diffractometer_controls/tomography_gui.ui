@@ -13,6 +13,9 @@
   <property name="windowTitle">
    <string>Form</string>
   </property>
+  <property name="styleSheet">
+   <string notr="true"/>
+  </property>
   <layout class="QVBoxLayout" name="verticalLayout_2">
    <item>
     <layout class="QHBoxLayout" name="horizontalLayout_2">
@@ -38,6 +41,9 @@
        </property>
        <property name="toolTip">
         <string/>
+       </property>
+       <property name="frameShape">
+        <enum>QFrame::Panel</enum>
        </property>
        <property name="filename" stdset="0">
         <string>extra_ui/reactor_power.ui</string>
@@ -147,6 +153,28 @@
            </property>
           </widget>
          </item>
+         <item>
+          <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_2">
+           <property name="toolTip">
+            <string/>
+           </property>
+           <property name="frameShape">
+            <enum>QFrame::Box</enum>
+           </property>
+           <property name="lineWidth">
+            <number>1</number>
+           </property>
+           <property name="midLineWidth">
+            <number>0</number>
+           </property>
+           <property name="macros" stdset="0">
+            <string>M=m6</string>
+           </property>
+           <property name="filename" stdset="0">
+            <string>extra_ui/motors_linear.ui</string>
+           </property>
+          </widget>
+         </item>
         </layout>
        </widget>
        <widget class="QWidget" name="tab_3">
@@ -214,28 +242,28 @@
        <property name="toolTip">
         <string/>
        </property>
-       <widget class="PyDMLabel" name="PyDMLabel">
+       <widget class="PyDMRelatedDisplayButton" name="PyDMRelatedDisplayButton">
         <property name="geometry">
          <rect>
-          <x>320</x>
-          <y>10</y>
-          <width>251</width>
-          <height>31</height>
+          <x>50</x>
+          <y>40</y>
+          <width>171</width>
+          <height>61</height>
          </rect>
-        </property>
-        <property name="font">
-         <font>
-          <pointsize>20</pointsize>
-         </font>
         </property>
         <property name="toolTip">
          <string/>
         </property>
-        <property name="text">
-         <string>Camera Controls</string>
+        <property name="channel" stdset="0">
+         <string/>
         </property>
-        <property name="alignment">
-         <set>Qt::AlignCenter</set>
+        <property name="filenames" stdset="0">
+         <stringlist>
+          <string>extra_ui/motors_list_8.ui</string>
+         </stringlist>
+        </property>
+        <property name="openInNewWindow" stdset="0">
+         <bool>true</bool>
         </property>
        </widget>
       </widget>
@@ -299,11 +327,6 @@
    <header>pydm.widgets.tab_bar</header>
   </customwidget>
   <customwidget>
-   <class>PyDMLabel</class>
-   <extends>QLabel</extends>
-   <header>pydm.widgets.label</header>
-  </customwidget>
-  <customwidget>
    <class>PyDMEmbeddedDisplay</class>
    <extends>QFrame</extends>
    <header>pydm.widgets.embedded_display</header>
@@ -313,6 +336,11 @@
    <extends>QFrame</extends>
    <header>pydm.widgets.frame</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>PyDMRelatedDisplayButton</class>
+   <extends>QPushButton</extends>
+   <header>pydm.widgets.related_display_button</header>
   </customwidget>
  </customwidgets>
  <resources/>
