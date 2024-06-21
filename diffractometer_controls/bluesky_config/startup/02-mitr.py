@@ -10,9 +10,9 @@ from bluesky.suspenders import SuspendFloor, SuspendBoolLow
 sd: SupplementalData
 RE: RunEngine
 
-reactor_power_6 = EpicsSignalRO("mitr:power_6",name="reactor_power_6")
-reactor_power_4 = EpicsSignalRO("mitr:power_4",name="reactor_power_4")
-reactor_power_thm = EpicsSignalRO("mitr:power_thm",name="reactor_power_thm")
+reactor_power_6 = EpicsSignalRO("mitr:Power6",name="reactor_power_6")
+reactor_power_4 = EpicsSignalRO("mitr:Power4",name="reactor_power_4")
+reactor_power_thm = EpicsSignalRO("mitr:PowerThm",name="reactor_power_thm")
 
 sd.monitors.append(reactor_power_6)
 sd.baseline.append(reactor_power_6)
