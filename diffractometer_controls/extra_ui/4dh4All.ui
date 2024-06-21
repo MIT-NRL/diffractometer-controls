@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>Form</class>
+ <widget class="QWidget" name="Form">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>647</width>
+    <height>295</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Form</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">background-color: rgb(139, 149, 158);</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="PyDMLabel" name="text">
+     <property name="font">
+      <font>
+       <pointsize>15</pointsize>
+      </font>
+     </property>
+     <property name="toolTip">
+      <string>text</string>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">color: rgb(255, 255, 255);
+background-color: rgb(117, 0, 20);</string>
+     </property>
+     <property name="text">
+      <string>${P}</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+     </property>
+     <property name="rules" stdset="0">
+      <string>[{&quot;name&quot;: &quot;visibility&quot;, &quot;property&quot;: &quot;Visible&quot;, &quot;channels&quot;: [{&quot;channel&quot;: &quot;ca://${P}&quot;, &quot;trigger&quot;: true, &quot;use_enum&quot;: false}], &quot;expression&quot;: &quot;ch[0]!=0&quot;}]</string>
+     </property>
+     <property name="brush" stdset="0">
+      <brush brushstyle="SolidPattern">
+       <color alpha="255">
+        <red>255</red>
+        <green>255</green>
+        <blue>255</blue>
+       </color>
+      </brush>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="PyDMTabWidget" name="PyDMTabWidget">
+     <property name="toolTip">
+      <string/>
+     </property>
+     <property name="whatsThis">
+      <string/>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">QTabBar::tab
+{
+	border-style: solid;
+	border-width: 2px;
+	border-color: rgb(117, 0, 20);
+
+	margin-left: 5px;
+	margin-right: 5px;
+	margin-bottom: 3px;
+
+	padding-top: 3px;
+	padding-bottom: 3px;
+	padding-right: 4px;
+	padding-left: 4px;
+
+	background: rgb(96, 0, 16);
+	color: rgb(228, 228, 228);
+}
+
+QTabBar::tab:hover
+{
+	background: rgb(125, 0, 25);
+}
+
+QTabWidget::pane
+{
+	border-style: solid;
+	border-width: 3px;
+	border-color: rgb(117, 0, 20);
+	background-color: rgba(0,0,0,0);
+}
+
+QTabBar::tab:selected
+{
+	background: rgb(255, 20, 35)
+}
+
+QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
+     </property>
+     <property name="tabPosition">
+      <enum>QTabWidget::North</enum>
+     </property>
+     <property name="tabShape">
+      <enum>QTabWidget::Rounded</enum>
+     </property>
+     <property name="currentIndex">
+      <number>0</number>
+     </property>
+     <property name="iconSize">
+      <size>
+       <width>20</width>
+       <height>16</height>
+      </size>
+     </property>
+     <property name="alarmChannels">
+      <stringlist>
+       <string></string>
+       <string></string>
+       <string></string>
+       <string></string>
+       <string></string>
+       <string></string>
+      </stringlist>
+     </property>
+     <widget class="QWidget" name="Motors">
+      <attribute name="title">
+       <string>Motors</string>
+      </attribute>
+     </widget>
+     <widget class="QWidget" name="Optics">
+      <attribute name="title">
+       <string>Optics</string>
+      </attribute>
+     </widget>
+     <widget class="QWidget" name="Detectors">
+      <attribute name="title">
+       <string>Detectors</string>
+      </attribute>
+     </widget>
+     <widget class="QWidget" name="DirectIO">
+      <attribute name="title">
+       <string>Direct I/O</string>
+      </attribute>
+     </widget>
+     <widget class="QWidget" name="Devices">
+      <attribute name="title">
+       <string>Devices</string>
+      </attribute>
+     </widget>
+     <widget class="QWidget" name="Tools">
+      <attribute name="title">
+       <string>Tools</string>
+      </attribute>
+     </widget>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout">
+     <item>
+      <widget class="PyDMRelatedDisplayButton" name="PyDMRelatedDisplayButton">
+       <property name="toolTip">
+        <string/>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PyDMRelatedDisplayButton" name="PyDMRelatedDisplayButton_2">
+       <property name="toolTip">
+        <string/>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PyDMPushButton" name="PyDMPushButton">
+       <property name="toolTip">
+        <string/>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>PyDMTabWidget</class>
+   <extends>QTabWidget</extends>
+   <header>pydm.widgets.tab_bar</header>
+  </customwidget>
+  <customwidget>
+   <class>PyDMLabel</class>
+   <extends>QLabel</extends>
+   <header>pydm.widgets.label</header>
+  </customwidget>
+  <customwidget>
+   <class>PyDMPushButton</class>
+   <extends>QPushButton</extends>
+   <header>pydm.widgets.pushbutton</header>
+  </customwidget>
+  <customwidget>
+   <class>PyDMRelatedDisplayButton</class>
+   <extends>QPushButton</extends>
+   <header>pydm.widgets.related_display_button</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

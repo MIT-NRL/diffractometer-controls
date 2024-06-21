@@ -59,7 +59,15 @@ class MITRMainWindow(PyDMMainWindow):
             # set the size of the icon
             controls.setIconSize(QSize(25, 25))
 
+            controlsAll = PyDMRelatedDisplayButton(filename="extra_ui/4dh4All.ui")
+            controlsAll.macros = ','.join(['='.join(items) for items in self.macros.items()])
+            controlsAll.setText("Controls")
+            controlsAll.setIcon(gear_icon)
+            controlsAll.openInNewWindow = True
+            controlsAll.setIconSize(QSize(25, 25))
+
             self.ui.navbar.addWidget(controls)
+            self.ui.navbar.addWidget(controlsAll)
 
 
         def update_window_title(self):
