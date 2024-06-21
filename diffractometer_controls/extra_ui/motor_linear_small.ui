@@ -50,13 +50,13 @@
        </property>
        <property name="minimumSize">
         <size>
-         <width>30</width>
+         <width>35</width>
          <height>0</height>
         </size>
        </property>
        <property name="maximumSize">
         <size>
-         <width>30</width>
+         <width>35</width>
          <height>20</height>
         </size>
        </property>
@@ -99,6 +99,9 @@
          <string>P=${P}</string>
          <string>M=${M}</string>
         </stringlist>
+       </property>
+       <property name="openInNewWindow" stdset="0">
+        <bool>true</bool>
        </property>
       </widget>
      </item>
