@@ -149,7 +149,7 @@
             <string>M=m3</string>
            </property>
            <property name="filename" stdset="0">
-            <string>extra_ui/motors_linear.ui</string>
+            <string>extra_ui/motors_square.ui</string>
            </property>
           </widget>
          </item>
@@ -171,7 +171,7 @@
             <string>M=m6</string>
            </property>
            <property name="filename" stdset="0">
-            <string>extra_ui/motors_linear.ui</string>
+            <string>extra_ui/motors_square.ui</string>
            </property>
           </widget>
          </item>
@@ -200,7 +200,7 @@
             <string>M=m1</string>
            </property>
            <property name="filename" stdset="0">
-            <string>extra_ui/motors_linear.ui</string>
+            <string>extra_ui/motors_square.ui</string>
            </property>
           </widget>
          </item>
@@ -219,7 +219,7 @@
             <string>M=m12</string>
            </property>
            <property name="filename" stdset="0">
-            <string>extra_ui/motors_linear.ui</string>
+            <string>extra_ui/motors_square.ui</string>
            </property>
           </widget>
          </item>
