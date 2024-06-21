@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>550</width>
-    <height>340</height>
+    <width>586</width>
+    <height>240</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -34,17 +34,20 @@
      <property name="minimumSize">
       <size>
        <width>0</width>
-       <height>40</height>
+       <height>30</height>
       </size>
      </property>
      <property name="maximumSize">
       <size>
        <width>16777215</width>
-       <height>60</height>
+       <height>40</height>
       </size>
      </property>
      <property name="toolTip">
       <string/>
+     </property>
+     <property name="lineWidth">
+      <number>1</number>
      </property>
      <property name="macros" stdset="0">
       <string>M=m1</string>
@@ -59,17 +62,20 @@
      <property name="minimumSize">
       <size>
        <width>0</width>
-       <height>40</height>
+       <height>30</height>
       </size>
      </property>
      <property name="maximumSize">
       <size>
        <width>16777215</width>
-       <height>60</height>
+       <height>40</height>
       </size>
      </property>
      <property name="toolTip">
       <string/>
+     </property>
+     <property name="lineWidth">
+      <number>1</number>
      </property>
      <property name="macros" stdset="0">
       <string>M=m2</string>
@@ -84,17 +90,20 @@
      <property name="minimumSize">
       <size>
        <width>0</width>
-       <height>0</height>
+       <height>30</height>
       </size>
      </property>
      <property name="maximumSize">
       <size>
        <width>16777215</width>
-       <height>60</height>
+       <height>40</height>
       </size>
      </property>
      <property name="toolTip">
       <string/>
+     </property>
+     <property name="lineWidth">
+      <number>1</number>
      </property>
      <property name="macros" stdset="0">
       <string>M=m3</string>
@@ -109,17 +118,20 @@
      <property name="minimumSize">
       <size>
        <width>0</width>
-       <height>40</height>
+       <height>30</height>
       </size>
      </property>
      <property name="maximumSize">
       <size>
        <width>16777215</width>
-       <height>60</height>
+       <height>40</height>
       </size>
      </property>
      <property name="toolTip">
       <string/>
+     </property>
+     <property name="lineWidth">
+      <number>1</number>
      </property>
      <property name="macros" stdset="0">
       <string>M=m4</string>
@@ -134,17 +146,20 @@
      <property name="minimumSize">
       <size>
        <width>0</width>
-       <height>40</height>
+       <height>30</height>
       </size>
      </property>
      <property name="maximumSize">
       <size>
        <width>16777215</width>
-       <height>60</height>
+       <height>40</height>
       </size>
      </property>
      <property name="toolTip">
       <string/>
+     </property>
+     <property name="lineWidth">
+      <number>1</number>
      </property>
      <property name="macros" stdset="0">
       <string>M=m5</string>
@@ -159,17 +174,20 @@
      <property name="minimumSize">
       <size>
        <width>0</width>
-       <height>40</height>
+       <height>30</height>
       </size>
      </property>
      <property name="maximumSize">
       <size>
        <width>16777215</width>
-       <height>60</height>
+       <height>40</height>
       </size>
      </property>
      <property name="toolTip">
       <string/>
+     </property>
+     <property name="lineWidth">
+      <number>1</number>
      </property>
      <property name="macros" stdset="0">
       <string>M=m6</string>
@@ -184,17 +202,20 @@
      <property name="minimumSize">
       <size>
        <width>0</width>
-       <height>40</height>
+       <height>30</height>
       </size>
      </property>
      <property name="maximumSize">
       <size>
        <width>16777215</width>
-       <height>60</height>
+       <height>40</height>
       </size>
      </property>
      <property name="toolTip">
       <string/>
+     </property>
+     <property name="lineWidth">
+      <number>1</number>
      </property>
      <property name="macros" stdset="0">
       <string>M=m7</string>
@@ -209,17 +230,20 @@
      <property name="minimumSize">
       <size>
        <width>0</width>
-       <height>40</height>
+       <height>30</height>
       </size>
      </property>
      <property name="maximumSize">
       <size>
        <width>16777215</width>
-       <height>60</height>
+       <height>40</height>
       </size>
      </property>
      <property name="toolTip">
       <string/>
+     </property>
+     <property name="lineWidth">
+      <number>1</number>
      </property>
      <property name="macros" stdset="0">
       <string>M=m8</string>
