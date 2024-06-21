@@ -77,8 +77,28 @@
          <height>0</height>
         </size>
        </property>
+       <property name="filenames" stdset="0">
+        <stringlist>
+         <string>extra_ui/autoconvert/motorx_more.ui</string>
+         <string>extra_ui/autoconvert/motorx_all.ui</string>
+         <string>extra_ui/autoconvert/motorx_setup.ui</string>
+        </stringlist>
+       </property>
+       <property name="titles" stdset="0">
+        <stringlist>
+         <string>${M} - Medium</string>
+         <string>${M} - All</string>
+         <string>${M} - Setup</string>
+        </stringlist>
+       </property>
        <property name="showIcon" stdset="0">
         <bool>false</bool>
+       </property>
+       <property name="macros" stdset="0">
+        <stringlist>
+         <string>P=${P}</string>
+         <string>M=${M}</string>
+        </stringlist>
        </property>
       </widget>
      </item>
