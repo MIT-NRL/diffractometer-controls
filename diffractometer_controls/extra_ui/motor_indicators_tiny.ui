@@ -80,7 +80,7 @@
      </size>
     </property>
     <property name="toolTip">
-     <string>rectangle_3</string>
+     <string>ca://${P}${M}_able.VAL</string>
     </property>
     <property name="rules" stdset="0">
      <string>[{&quot;name&quot;: &quot;visibility&quot;, &quot;property&quot;: &quot;Visible&quot;, &quot;channels&quot;: [{&quot;channel&quot;: &quot;ca://${P}${M}_able.VAL&quot;, &quot;trigger&quot;: true, &quot;use_enum&quot;: false}], &quot;expression&quot;: &quot;ch[0]!=0&quot;}]</string>
@@ -151,7 +151,7 @@
      </size>
     </property>
     <property name="toolTip">
-     <string>rectangle_38</string>
+     <string>ca://${P}${M}.DMOV</string>
     </property>
     <property name="rules" stdset="0">
      <string>[{&quot;name&quot;: &quot;visibility&quot;, &quot;property&quot;: &quot;Visible&quot;, &quot;channels&quot;: [{&quot;channel&quot;: &quot;ca://${P}${M}.DMOV&quot;, &quot;trigger&quot;: true, &quot;use_enum&quot;: false}], &quot;expression&quot;: &quot;ch[0]==0&quot;}]</string>
@@ -222,7 +222,7 @@
      </size>
     </property>
     <property name="toolTip">
-     <string>rectangle_21</string>
+     <string>ca://${P}${M}.LLS</string>
     </property>
     <property name="rules" stdset="0">
      <string>[{&quot;name&quot;: &quot;visibility&quot;, &quot;property&quot;: &quot;Visible&quot;, &quot;channels&quot;: [{&quot;channel&quot;: &quot;ca://${P}${M}.LLS&quot;, &quot;trigger&quot;: true, &quot;use_enum&quot;: false}], &quot;expression&quot;: &quot;ch[0]!=0&quot;}]</string>
@@ -293,7 +293,7 @@
      </size>
     </property>
     <property name="toolTip">
-     <string>rectangle_39</string>
+     <string>ca://${P}${M}.HLS</string>
     </property>
     <property name="rules" stdset="0">
      <string>[{&quot;name&quot;: &quot;visibility&quot;, &quot;property&quot;: &quot;Visible&quot;, &quot;channels&quot;: [{&quot;channel&quot;: &quot;ca://${P}${M}.HLS&quot;, &quot;trigger&quot;: true, &quot;use_enum&quot;: false}], &quot;expression&quot;: &quot;ch[0]!=0&quot;}]</string>
@@ -364,7 +364,7 @@
      </size>
     </property>
     <property name="toolTip">
-     <string>rectangle_37</string>
+     <string>ca://${P}${M}.LVIO</string>
     </property>
     <property name="rules" stdset="0">
      <string>[{&quot;name&quot;: &quot;visibility&quot;, &quot;property&quot;: &quot;Visible&quot;, &quot;channels&quot;: [{&quot;channel&quot;: &quot;ca://${P}${M}.LVIO&quot;, &quot;trigger&quot;: true, &quot;use_enum&quot;: false}], &quot;expression&quot;: &quot;ch[0]!=0&quot;}]</string>
