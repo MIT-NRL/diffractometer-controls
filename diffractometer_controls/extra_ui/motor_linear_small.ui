@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>550</width>
+    <width>480</width>
     <height>30</height>
    </rect>
   </property>
@@ -42,9 +42,21 @@
     <layout class="QHBoxLayout" name="horizontalLayout_3">
      <item>
       <widget class="PyDMRelatedDisplayButton" name="PyDMRelatedDisplayButton">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>30</width>
+         <height>0</height>
+        </size>
+       </property>
        <property name="maximumSize">
         <size>
-         <width>16777215</width>
+         <width>30</width>
          <height>20</height>
         </size>
        </property>
@@ -74,13 +86,13 @@
       <widget class="PyDMLineEdit" name="PyDMLineEdit">
        <property name="minimumSize">
         <size>
-         <width>100</width>
+         <width>150</width>
          <height>0</height>
         </size>
        </property>
        <property name="maximumSize">
         <size>
-         <width>16777215</width>
+         <width>150</width>
          <height>20</height>
         </size>
        </property>
@@ -136,13 +148,13 @@
       <widget class="PyDMLabel" name="text_update_2">
        <property name="minimumSize">
         <size>
-         <width>100</width>
+         <width>125</width>
          <height>0</height>
         </size>
        </property>
        <property name="maximumSize">
         <size>
-         <width>16777215</width>
+         <width>125</width>
          <height>20</height>
         </size>
        </property>
