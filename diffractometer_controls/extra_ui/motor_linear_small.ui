@@ -74,7 +74,7 @@
       <widget class="PyDMLineEdit" name="PyDMLineEdit">
        <property name="minimumSize">
         <size>
-         <width>150</width>
+         <width>100</width>
          <height>0</height>
         </size>
        </property>
@@ -136,7 +136,7 @@
       <widget class="PyDMLabel" name="text_update_2">
        <property name="minimumSize">
         <size>
-         <width>150</width>
+         <width>100</width>
          <height>0</height>
         </size>
        </property>
@@ -178,7 +178,7 @@
       <widget class="PyDMEnumButton" name="PyDMEnumButton">
        <property name="minimumSize">
         <size>
-         <width>140</width>
+         <width>100</width>
          <height>0</height>
         </size>
        </property>
