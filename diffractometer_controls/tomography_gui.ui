@@ -226,46 +226,25 @@
         </layout>
        </widget>
       </widget>
-      <widget class="PyDMFrame" name="PyDMFrame">
+      <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_5">
        <property name="sizePolicy">
         <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
          <horstretch>0</horstretch>
          <verstretch>1</verstretch>
         </sizepolicy>
        </property>
-       <property name="minimumSize">
-        <size>
-         <width>300</width>
-         <height>0</height>
-        </size>
-       </property>
        <property name="toolTip">
         <string/>
        </property>
-       <widget class="PyDMRelatedDisplayButton" name="PyDMRelatedDisplayButton">
-        <property name="geometry">
-         <rect>
-          <x>50</x>
-          <y>40</y>
-          <width>171</width>
-          <height>61</height>
-         </rect>
-        </property>
-        <property name="toolTip">
-         <string/>
-        </property>
-        <property name="channel" stdset="0">
-         <string/>
-        </property>
-        <property name="filenames" stdset="0">
-         <stringlist>
-          <string>extra_ui/motors_list_8.ui</string>
-         </stringlist>
-        </property>
-        <property name="openInNewWindow" stdset="0">
-         <bool>true</bool>
-        </property>
-       </widget>
+       <property name="lineWidth">
+        <number>1</number>
+       </property>
+       <property name="macros" stdset="0">
+        <string>R=cam1:</string>
+       </property>
+       <property name="filename" stdset="0">
+        <string>extra_ui/tomo_cam_controls.ui</string>
+       </property>
       </widget>
      </widget>
      <widget class="PyDMTabWidget" name="PyDMTabWidget">
@@ -330,17 +309,6 @@
    <class>PyDMEmbeddedDisplay</class>
    <extends>QFrame</extends>
    <header>pydm.widgets.embedded_display</header>
-  </customwidget>
-  <customwidget>
-   <class>PyDMFrame</class>
-   <extends>QFrame</extends>
-   <header>pydm.widgets.frame</header>
-   <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>PyDMRelatedDisplayButton</class>
-   <extends>QPushButton</extends>
-   <header>pydm.widgets.related_display_button</header>
   </customwidget>
  </customwidgets>
  <resources/>
