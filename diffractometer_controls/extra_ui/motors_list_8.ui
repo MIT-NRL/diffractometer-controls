@@ -34,7 +34,7 @@
      <property name="minimumSize">
       <size>
        <width>0</width>
-       <height>30</height>
+       <height>25</height>
       </size>
      </property>
      <property name="maximumSize">
@@ -50,7 +50,7 @@
       <number>1</number>
      </property>
      <property name="macros" stdset="0">
-      <string>M=m1</string>
+      <string>M=${M1}</string>
      </property>
      <property name="filename" stdset="0">
       <string>motor_linear_small.ui</string>
@@ -62,7 +62,7 @@
      <property name="minimumSize">
       <size>
        <width>0</width>
-       <height>30</height>
+       <height>25</height>
       </size>
      </property>
      <property name="maximumSize">
@@ -78,7 +78,7 @@
       <number>1</number>
      </property>
      <property name="macros" stdset="0">
-      <string>M=m2</string>
+      <string>M=${M2}</string>
      </property>
      <property name="filename" stdset="0">
       <string>motor_linear_small.ui</string>
@@ -90,7 +90,7 @@
      <property name="minimumSize">
       <size>
        <width>0</width>
-       <height>30</height>
+       <height>25</height>
       </size>
      </property>
      <property name="maximumSize">
@@ -106,7 +106,7 @@
       <number>1</number>
      </property>
      <property name="macros" stdset="0">
-      <string>M=m3</string>
+      <string>M=${M3}</string>
      </property>
      <property name="filename" stdset="0">
       <string>motor_linear_small.ui</string>
@@ -118,7 +118,7 @@
      <property name="minimumSize">
       <size>
        <width>0</width>
-       <height>30</height>
+       <height>25</height>
       </size>
      </property>
      <property name="maximumSize">
@@ -134,7 +134,7 @@
       <number>1</number>
      </property>
      <property name="macros" stdset="0">
-      <string>M=m4</string>
+      <string>M=${M4}</string>
      </property>
      <property name="filename" stdset="0">
       <string>motor_linear_small.ui</string>
@@ -146,7 +146,7 @@
      <property name="minimumSize">
       <size>
        <width>0</width>
-       <height>30</height>
+       <height>25</height>
       </size>
      </property>
      <property name="maximumSize">
@@ -162,7 +162,7 @@
       <number>1</number>
      </property>
      <property name="macros" stdset="0">
-      <string>M=m5</string>
+      <string>M=${M5}</string>
      </property>
      <property name="filename" stdset="0">
       <string>motor_linear_small.ui</string>
@@ -174,7 +174,7 @@
      <property name="minimumSize">
       <size>
        <width>0</width>
-       <height>30</height>
+       <height>25</height>
       </size>
      </property>
      <property name="maximumSize">
@@ -190,7 +190,7 @@
       <number>1</number>
      </property>
      <property name="macros" stdset="0">
-      <string>M=m6</string>
+      <string>M=${M6}</string>
      </property>
      <property name="filename" stdset="0">
       <string>motor_linear_small.ui</string>
@@ -202,7 +202,7 @@
      <property name="minimumSize">
       <size>
        <width>0</width>
-       <height>30</height>
+       <height>25</height>
       </size>
      </property>
      <property name="maximumSize">
@@ -218,7 +218,7 @@
       <number>1</number>
      </property>
      <property name="macros" stdset="0">
-      <string>M=m7</string>
+      <string>M=${M7}</string>
      </property>
      <property name="filename" stdset="0">
       <string>motor_linear_small.ui</string>
@@ -230,7 +230,7 @@
      <property name="minimumSize">
       <size>
        <width>0</width>
-       <height>30</height>
+       <height>25</height>
       </size>
      </property>
      <property name="maximumSize">
@@ -246,7 +246,7 @@
       <number>1</number>
      </property>
      <property name="macros" stdset="0">
-      <string>M=m8</string>
+      <string>M=${M8}</string>
      </property>
      <property name="filename" stdset="0">
       <string>motor_linear_small.ui</string>
