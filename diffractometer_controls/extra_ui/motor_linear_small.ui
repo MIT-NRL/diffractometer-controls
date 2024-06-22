@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>480</width>
+    <width>451</width>
     <height>25</height>
    </rect>
   </property>
@@ -26,6 +26,9 @@
    <string>Form</string>
   </property>
   <layout class="QHBoxLayout" name="horizontalLayout_4">
+   <property name="spacing">
+    <number>0</number>
+   </property>
    <property name="leftMargin">
     <number>5</number>
    </property>
@@ -41,7 +44,7 @@
    <item>
     <layout class="QHBoxLayout" name="horizontalLayout_3">
      <property name="spacing">
-      <number>6</number>
+      <number>1</number>
      </property>
      <item>
       <widget class="PyDMRelatedDisplayButton" name="PyDMRelatedDisplayButton">
@@ -118,7 +121,7 @@
        </property>
        <property name="maximumSize">
         <size>
-         <width>150</width>
+         <width>250</width>
          <height>20</height>
         </size>
        </property>
@@ -146,24 +149,21 @@
       <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay">
        <property name="minimumSize">
         <size>
-         <width>28</width>
-         <height>28</height>
+         <width>25</width>
+         <height>20</height>
         </size>
        </property>
        <property name="maximumSize">
         <size>
-         <width>28</width>
-         <height>28</height>
+         <width>25</width>
+         <height>20</height>
         </size>
        </property>
        <property name="toolTip">
         <string/>
        </property>
-       <property name="frameShape">
-        <enum>QFrame::NoFrame</enum>
-       </property>
-       <property name="lineWidth">
-        <number>0</number>
+       <property name="macros" stdset="0">
+        <string>M=${M}</string>
        </property>
        <property name="filename" stdset="0">
         <string>motor_indicators_tiny.ui</string>
@@ -172,6 +172,12 @@
      </item>
      <item>
       <widget class="PyDMLabel" name="text_update_2">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
        <property name="minimumSize">
         <size>
          <width>125</width>
@@ -180,7 +186,7 @@
        </property>
        <property name="maximumSize">
         <size>
-         <width>125</width>
+         <width>225</width>
          <height>20</height>
         </size>
        </property>
