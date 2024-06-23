@@ -316,9 +316,9 @@ background-color: rgb(37, 140, 2);
        </property>
        <property name="filenames" stdset="0">
         <stringlist>
-         <string>extra_ui/autoconvert/motorx_more.ui</string>
-         <string>extra_ui/autoconvert/motorx_all.ui</string>
-         <string>extra_ui/autoconvert/motorx_setup.ui</string>
+         <string>motorx_more.ui</string>
+         <string>motorx_all.ui</string>
+         <string>motorx_setup.ui</string>
         </stringlist>
        </property>
        <property name="titles" stdset="0">

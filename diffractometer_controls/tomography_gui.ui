@@ -46,7 +46,7 @@
         <enum>QFrame::Panel</enum>
        </property>
        <property name="filename" stdset="0">
-        <string>extra_ui/reactor_power.ui</string>
+        <string>reactor_power.ui</string>
        </property>
       </widget>
      </item>
@@ -149,7 +149,7 @@
             <string>M=m3</string>
            </property>
            <property name="filename" stdset="0">
-            <string>extra_ui/motors_square.ui</string>
+            <string>motors_square.ui</string>
            </property>
           </widget>
          </item>
@@ -171,7 +171,7 @@
             <string>M=m6</string>
            </property>
            <property name="filename" stdset="0">
-            <string>extra_ui/motors_square.ui</string>
+            <string>motors_square.ui</string>
            </property>
           </widget>
          </item>
@@ -200,7 +200,7 @@
             <string>M=m1</string>
            </property>
            <property name="filename" stdset="0">
-            <string>extra_ui/motors_square.ui</string>
+            <string>motors_square.ui</string>
            </property>
           </widget>
          </item>
@@ -219,7 +219,7 @@
             <string>M=m12</string>
            </property>
            <property name="filename" stdset="0">
-            <string>extra_ui/motors_square.ui</string>
+            <string>motors_square.ui</string>
            </property>
           </widget>
          </item>
@@ -243,7 +243,7 @@
         <string>R=cam1:</string>
        </property>
        <property name="filename" stdset="0">
-        <string>extra_ui/tomo_cam_controls.ui</string>
+        <string>tomo_cam_controls.ui</string>
        </property>
       </widget>
      </widget>

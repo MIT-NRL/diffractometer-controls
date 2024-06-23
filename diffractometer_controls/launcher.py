@@ -2,6 +2,7 @@ import argparse
 import cProfile
 import logging
 import os
+import platform
 import pstats
 import sys
 import faulthandler
@@ -25,11 +26,22 @@ def main():
     config.DEFAULT_PROTOCOL = "ca"
 
     # Define EPICS Support dir where all display files are stored
+    if platform.system() == "Windows":
+        separator = ';'
+    elif platform.system() == "Linux":
+        separator = ':'
+    path_list = [dirs.as_posix() for dirs in [Path('./extra_ui').absolute(),Path('./extra_ui/autoconvert').absolute()]]
     EPICS_SUPPORT = Path('/home/mitr_4dh4/EPICS/synApps-6-3/support')
     DISPLAY_PATH = os.getenv("PYDM_DISPLAYS_PATH",None)
+
     if DISPLAY_PATH is None:
-        path_list = [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*op/adl*')] + [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*opi/medm*')]
-        DISPLAY_PATH = ':'.join(path_list)
+        path_list_adl = [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*op/adl*')] + [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*opi/medm*')]
+        print(path_list_adl,len(path_list_adl))
+        if len(path_list_adl) != 0:
+            path_list.append(path_list_adl)
+        print(path_list)
+        DISPLAY_PATH = separator.join(path_list)
+        
     os.environ['PYDM_DISPLAYS_PATH'] = DISPLAY_PATH
 
     from pydm.utilities import setup_renderer

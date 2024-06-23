@@ -170,7 +170,7 @@ background-color: rgb(25, 102, 255);</string>
          </property>
          <property name="filenames" stdset="0">
           <stringlist>
-           <string>extra_ui/motors_list_8.ui</string>
+           <string>motors_list_8.ui</string>
           </stringlist>
          </property>
          <property name="showIcon" stdset="0">
@@ -323,7 +323,7 @@ background-color: rgb(25, 102, 255);</string>
          </property>
          <property name="filenames" stdset="0">
           <stringlist>
-           <string>extra_ui/motors_list_8.ui</string>
+           <string>motors_list_8.ui</string>
           </stringlist>
          </property>
          <property name="showIcon" stdset="0">
@@ -476,7 +476,7 @@ background-color: rgb(25, 102, 255);</string>
          </property>
          <property name="filenames" stdset="0">
           <stringlist>
-           <string>extra_ui/motors_list_8.ui</string>
+           <string>motors_list_8.ui</string>
           </stringlist>
          </property>
          <property name="showIcon" stdset="0">
@@ -626,6 +626,11 @@ background-color: rgb(25, 102, 255);</string>
          </property>
          <property name="text">
           <string>Motors 25-32</string>
+         </property>
+         <property name="filenames" stdset="0">
+          <stringlist>
+           <string>motors_list_8.ui</string>
+          </stringlist>
          </property>
          <property name="showIcon" stdset="0">
           <bool>false</bool>
@@ -1351,8 +1356,8 @@ background-color: rgb(25, 102, 255);</string>
          </property>
          <property name="filenames" stdset="0">
           <stringlist>
-           <string>extra_ui/he3_detectors.ui</string>
-           <string>extra_ui/he3_detectors.ui</string>
+           <string>he3_detectors.ui</string>
+           <string>he3_detectors.ui</string>
           </stringlist>
          </property>
          <property name="titles" stdset="0">
@@ -1400,8 +1405,8 @@ background-color: rgb(25, 102, 255);</string>
          </property>
          <property name="filenames" stdset="0">
           <stringlist>
-           <string>extra_ui/autoconvert/ADZWO.ui</string>
-           <string>extra_ui/cam.ui</string>
+           <string>ADZWO.ui</string>
+           <string>cam.ui</string>
           </stringlist>
          </property>
          <property name="titles" stdset="0">
@@ -1562,7 +1567,7 @@ background-color: rgb(25, 102, 255);</string>
          <property name="filenames" stdset="0">
           <stringlist>
            <string>ADBase.ui</string>
-           <string>extra_ui/cam.ui</string>
+           <string>cam.ui</string>
           </stringlist>
          </property>
          <property name="titles" stdset="0">
