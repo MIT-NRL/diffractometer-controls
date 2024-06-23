@@ -271,7 +271,8 @@ background-color: rgb(115, 223, 255);</string>
         <string>ca://${P}allstop.VAL</string>
        </property>
        <property name="styleSheet">
-        <string notr="true">background-color: rgb(252, 1, 7);</string>
+        <string notr="true">color: rgb(251, 243, 74);
+background-color: rgb(252, 1, 7);</string>
        </property>
        <property name="text">
         <string>STOP</string>
@@ -302,7 +303,8 @@ background-color: rgb(115, 223, 255);</string>
         <string/>
        </property>
        <property name="styleSheet">
-        <string notr="true">background-color: rgb(37, 140, 2);
+        <string notr="true">color: rgb(228, 228, 228);
+background-color: rgb(37, 140, 2);
 </string>
        </property>
        <property name="text">
