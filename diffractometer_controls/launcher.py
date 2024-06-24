@@ -28,7 +28,7 @@ def main():
     # Define EPICS Support dir where all display files are stored
     if platform.system() == "Windows":
         separator = ';'
-    elif platform.system() == "Linux":
+    else:
         separator = ':'
     path_list = [dirs.as_posix() for dirs in [Path('./extra_ui').absolute(),Path('./extra_ui/autoconvert').absolute()]]
     EPICS_SUPPORT = Path('/home/mitr_4dh4/EPICS/synApps-6-3/support')
@@ -38,7 +38,7 @@ def main():
         path_list_adl = [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*op/adl*')] + [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*opi/medm*')]
         print(path_list_adl,len(path_list_adl))
         if len(path_list_adl) != 0:
-            path_list.append(path_list_adl)
+            path_list.extend(path_list_adl)
         print(path_list)
         DISPLAY_PATH = separator.join(path_list)
         
