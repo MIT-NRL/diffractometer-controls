@@ -37,7 +37,7 @@
     <Attribute name="FilePath"                      type="EPICS_PV"     source="4dh4:HDF1:FilePath_RBV"                 dbrtype="DBR_STRING"  description="File path"/>
     <Attribute name="HDFPluginVersion"              type="EPICS_PV"     source="4dh4:HDF1:PluginType_RBV"               dbrtype="DBR_STRING"  description="File plugin type"/>
 
-    <Attribute name="ReactorPower"                   type="EPICS_PV"     source="mitr:power_6"                             dbrtype="DBR_NATIVE"  description="Ring current (mA)"/>
+    <Attribute name="ReactorPower"                   type="EPICS_PV"     source="mitr:Power6"                             dbrtype="DBR_NATIVE"  description="Reactor power (MW)"/>
     
     <Attribute name="ScintillatorType"              type="EPICS_PV"     source="4dh4:TS:ScintillatorType"             dbrtype="DBR_STRING"  description="Scintillator type"/>
     <Attribute name="ScintillatorThickness"         type="EPICS_PV"     source="4dh4:TS:ScintillatorThickness"        dbrtype="DBR_NATIVE"  description="Scintillator thickness (microns)"/>
@@ -61,6 +61,7 @@
     <Attribute name="HDF5FrameLocation"             type="EPICS_PV"     source="4dh4:cam1:FrameType"                dbrtype="DBR_STRING"  description="Where to store frame in HDF5 file"/>
 
     <Attribute name="SampleTheta"                   type="EPICS_PV"     source="4dh4:m3.VAL"                        dbrtype="DBR_DOUBLE"   description="Rotational angle of sample"/>
+    <Attribute name="SampleX"                       type="EPICS_PV"     source="4dh4:m14.VAL"                        dbrtype="DBR_DOUBLE"   description="Sample x position"/>
 
     <Attribute name="CcdCameraX"                    type="EPICS_PV" source="4dh4:m4.VAL"                        dbrtype="DBR_DOUBLE"     description="Camera x position in the beam"/>
     <Attribute name="CcdCameraXDial"                type="EPICS_PV" source="4dh4:m4.DVAL"                       dbrtype="DBR_DOUBLE"/>
