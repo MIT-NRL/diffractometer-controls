@@ -168,7 +168,7 @@
             <number>0</number>
            </property>
            <property name="macros" stdset="0">
-            <string>M=m6</string>
+            <string>M=m14</string>
            </property>
            <property name="filename" stdset="0">
             <string>motors_square.ui</string>
@@ -289,6 +289,9 @@
           </property>
           <property name="toolTip">
            <string/>
+          </property>
+          <property name="macros" stdset="0">
+           <string>R=cam1:</string>
           </property>
           <property name="filename" stdset="0">
            <string>imaging_viewer.py</string>
