@@ -236,6 +236,9 @@
        <property name="toolTip">
         <string/>
        </property>
+       <property name="frameShape">
+        <enum>QFrame::Box</enum>
+       </property>
        <property name="lineWidth">
         <number>1</number>
        </property>
