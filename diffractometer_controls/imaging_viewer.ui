@@ -423,7 +423,12 @@ Input</string>
             </property>
             <property name="filenames" stdset="0">
              <stringlist>
-              <string>Measurement_Info.ui</string>
+              <string>metadata_input.ui</string>
+             </stringlist>
+            </property>
+            <property name="macros" stdset="0">
+             <stringlist>
+              <string>P=${P},R=TS:</string>
              </stringlist>
             </property>
             <property name="openInNewWindow" stdset="0">
