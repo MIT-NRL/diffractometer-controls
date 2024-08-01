@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1500</width>
+    <width>2000</width>
     <height>1200</height>
    </rect>
   </property>
@@ -58,8 +58,26 @@
          <verstretch>0</verstretch>
         </sizepolicy>
        </property>
+       <property name="minimumSize">
+        <size>
+         <width>0</width>
+         <height>200</height>
+        </size>
+       </property>
+       <property name="maximumSize">
+        <size>
+         <width>16777215</width>
+         <height>200</height>
+        </size>
+       </property>
        <property name="toolTip">
         <string/>
+       </property>
+       <property name="macros" stdset="0">
+        <string>S=scan1</string>
+       </property>
+       <property name="filename" stdset="0">
+        <string>re_screen.py</string>
        </property>
       </widget>
      </item>
@@ -76,230 +94,279 @@
      <property name="orientation">
       <enum>Qt::Horizontal</enum>
      </property>
-     <widget class="QSplitter" name="splitter">
+     <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_6">
       <property name="sizePolicy">
-       <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+       <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
         <horstretch>0</horstretch>
         <verstretch>0</verstretch>
        </sizepolicy>
       </property>
       <property name="minimumSize">
        <size>
-        <width>300</width>
+        <width>350</width>
         <height>0</height>
        </size>
-      </property>
-      <property name="maximumSize">
-       <size>
-        <width>16777215</width>
-        <height>16777215</height>
-       </size>
-      </property>
-      <property name="orientation">
-       <enum>Qt::Vertical</enum>
-      </property>
-      <widget class="PyDMTabWidget" name="PyDMTabWidget_2">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="minimumSize">
-        <size>
-         <width>300</width>
-         <height>0</height>
-        </size>
-       </property>
-       <property name="toolTip">
-        <string/>
-       </property>
-       <property name="whatsThis">
-        <string/>
-       </property>
-       <property name="currentIndex">
-        <number>0</number>
-       </property>
-       <property name="alarmChannels">
-        <stringlist>
-         <string></string>
-         <string></string>
-        </stringlist>
-       </property>
-       <widget class="QWidget" name="tab_2">
-        <attribute name="title">
-         <string>Sample Motors</string>
-        </attribute>
-        <layout class="QVBoxLayout" name="verticalLayout_4">
-         <item>
-          <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay">
-           <property name="toolTip">
-            <string/>
-           </property>
-           <property name="frameShape">
-            <enum>QFrame::Box</enum>
-           </property>
-           <property name="lineWidth">
-            <number>1</number>
-           </property>
-           <property name="midLineWidth">
-            <number>0</number>
-           </property>
-           <property name="macros" stdset="0">
-            <string>M=m3</string>
-           </property>
-           <property name="filename" stdset="0">
-            <string>motors_square.ui</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_2">
-           <property name="toolTip">
-            <string/>
-           </property>
-           <property name="frameShape">
-            <enum>QFrame::Box</enum>
-           </property>
-           <property name="lineWidth">
-            <number>1</number>
-           </property>
-           <property name="midLineWidth">
-            <number>0</number>
-           </property>
-           <property name="macros" stdset="0">
-            <string>M=m14</string>
-           </property>
-           <property name="filename" stdset="0">
-            <string>motors_square.ui</string>
-           </property>
-          </widget>
-         </item>
-        </layout>
-       </widget>
-       <widget class="QWidget" name="tab_3">
-        <attribute name="title">
-         <string>Camera Motors</string>
-        </attribute>
-        <layout class="QVBoxLayout" name="verticalLayout_3">
-         <item>
-          <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_3">
-           <property name="toolTip">
-            <string/>
-           </property>
-           <property name="frameShape">
-            <enum>QFrame::Box</enum>
-           </property>
-           <property name="lineWidth">
-            <number>1</number>
-           </property>
-           <property name="midLineWidth">
-            <number>0</number>
-           </property>
-           <property name="macros" stdset="0">
-            <string>M=m1</string>
-           </property>
-           <property name="filename" stdset="0">
-            <string>motors_square.ui</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_4">
-           <property name="toolTip">
-            <string/>
-           </property>
-           <property name="frameShape">
-            <enum>QFrame::Box</enum>
-           </property>
-           <property name="lineWidth">
-            <number>1</number>
-           </property>
-           <property name="macros" stdset="0">
-            <string>M=m12</string>
-           </property>
-           <property name="filename" stdset="0">
-            <string>motors_square.ui</string>
-           </property>
-          </widget>
-         </item>
-        </layout>
-       </widget>
-      </widget>
-      <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_5">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
-         <horstretch>0</horstretch>
-         <verstretch>1</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="toolTip">
-        <string/>
-       </property>
-       <property name="frameShape">
-        <enum>QFrame::Box</enum>
-       </property>
-       <property name="lineWidth">
-        <number>1</number>
-       </property>
-       <property name="macros" stdset="0">
-        <string>R=cam1:</string>
-       </property>
-       <property name="filename" stdset="0">
-        <string>tomo_cam_controls.ui</string>
-       </property>
-      </widget>
-     </widget>
-     <widget class="PyDMTabWidget" name="PyDMTabWidget">
-      <property name="sizePolicy">
-       <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-        <horstretch>1</horstretch>
-        <verstretch>1</verstretch>
-       </sizepolicy>
       </property>
       <property name="toolTip">
        <string/>
       </property>
-      <property name="whatsThis">
-       <string/>
+      <property name="filename" stdset="0">
+       <string>re_plans.py</string>
       </property>
-      <property name="alarmChannels">
-       <stringlist>
-        <string></string>
-       </stringlist>
-      </property>
-      <widget class="QWidget" name="tab">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <attribute name="title">
-        <string>Imaging Viewer</string>
-       </attribute>
-       <layout class="QVBoxLayout" name="verticalLayout">
-        <item>
-         <widget class="PyDMEmbeddedDisplay" name="Viewer_display">
+     </widget>
+     <widget class="QWidget" name="layoutWidget">
+      <layout class="QHBoxLayout" name="horizontalLayout">
+       <item>
+        <widget class="PyDMTabWidget" name="PyDMTabWidget">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+           <horstretch>1</horstretch>
+           <verstretch>1</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="toolTip">
+          <string/>
+         </property>
+         <property name="whatsThis">
+          <string/>
+         </property>
+         <property name="currentIndex">
+          <number>0</number>
+         </property>
+         <property name="alarmChannels">
+          <stringlist>
+           <string></string>
+           <string></string>
+          </stringlist>
+         </property>
+         <widget class="QWidget" name="ImagingViewerTab">
           <property name="sizePolicy">
-           <sizepolicy hsizetype="Expanding" vsizetype="MinimumExpanding">
+           <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
             <horstretch>0</horstretch>
             <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <attribute name="title">
+           <string>Imaging Viewer</string>
+          </attribute>
+          <layout class="QVBoxLayout" name="verticalLayout">
+           <item>
+            <widget class="PyDMEmbeddedDisplay" name="Viewer_display">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Expanding" vsizetype="MinimumExpanding">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="toolTip">
+              <string/>
+             </property>
+             <property name="macros" stdset="0">
+              <string>R=cam1:</string>
+             </property>
+             <property name="filename" stdset="0">
+              <string>imaging_viewer.py</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+         <widget class="QWidget" name="RunEngineTab">
+          <attribute name="title">
+           <string>Run Engine Extras</string>
+          </attribute>
+          <layout class="QVBoxLayout" name="verticalLayout_6">
+           <item>
+            <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_7">
+             <property name="toolTip">
+              <string/>
+             </property>
+             <property name="filename" stdset="0">
+              <string>re_extras.py</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </widget>
+       </item>
+       <item>
+        <widget class="QSplitter" name="splitter">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>300</width>
+           <height>0</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>16777215</width>
+           <height>16777215</height>
+          </size>
+         </property>
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <widget class="PyDMTabWidget" name="PyDMTabWidget_2">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>300</width>
+            <height>0</height>
+           </size>
+          </property>
+          <property name="toolTip">
+           <string/>
+          </property>
+          <property name="whatsThis">
+           <string/>
+          </property>
+          <property name="currentIndex">
+           <number>0</number>
+          </property>
+          <property name="alarmChannels">
+           <stringlist>
+            <string></string>
+            <string></string>
+           </stringlist>
+          </property>
+          <widget class="QWidget" name="tab_2">
+           <attribute name="title">
+            <string>Sample Motors</string>
+           </attribute>
+           <layout class="QVBoxLayout" name="verticalLayout_4">
+            <item>
+             <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay">
+              <property name="toolTip">
+               <string/>
+              </property>
+              <property name="frameShape">
+               <enum>QFrame::Box</enum>
+              </property>
+              <property name="lineWidth">
+               <number>1</number>
+              </property>
+              <property name="midLineWidth">
+               <number>0</number>
+              </property>
+              <property name="macros" stdset="0">
+               <string>M=m3</string>
+              </property>
+              <property name="filename" stdset="0">
+               <string>motors_square.ui</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_2">
+              <property name="toolTip">
+               <string/>
+              </property>
+              <property name="frameShape">
+               <enum>QFrame::Box</enum>
+              </property>
+              <property name="lineWidth">
+               <number>1</number>
+              </property>
+              <property name="midLineWidth">
+               <number>0</number>
+              </property>
+              <property name="macros" stdset="0">
+               <string>M=m14</string>
+              </property>
+              <property name="filename" stdset="0">
+               <string>motors_square.ui</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+          <widget class="QWidget" name="tab_3">
+           <attribute name="title">
+            <string>Camera Motors</string>
+           </attribute>
+           <layout class="QVBoxLayout" name="verticalLayout_3">
+            <item>
+             <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_3">
+              <property name="toolTip">
+               <string/>
+              </property>
+              <property name="frameShape">
+               <enum>QFrame::Box</enum>
+              </property>
+              <property name="lineWidth">
+               <number>1</number>
+              </property>
+              <property name="midLineWidth">
+               <number>0</number>
+              </property>
+              <property name="macros" stdset="0">
+               <string>M=m1</string>
+              </property>
+              <property name="filename" stdset="0">
+               <string>motors_square.ui</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_4">
+              <property name="toolTip">
+               <string/>
+              </property>
+              <property name="frameShape">
+               <enum>QFrame::Box</enum>
+              </property>
+              <property name="lineWidth">
+               <number>1</number>
+              </property>
+              <property name="macros" stdset="0">
+               <string>M=m12</string>
+              </property>
+              <property name="filename" stdset="0">
+               <string>motors_square.ui</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </widget>
+         <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_5">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+            <horstretch>0</horstretch>
+            <verstretch>1</verstretch>
            </sizepolicy>
           </property>
           <property name="toolTip">
            <string/>
           </property>
+          <property name="frameShape">
+           <enum>QFrame::Box</enum>
+          </property>
+          <property name="lineWidth">
+           <number>1</number>
+          </property>
           <property name="macros" stdset="0">
            <string>R=cam1:</string>
           </property>
           <property name="filename" stdset="0">
-           <string>imaging_viewer.py</string>
+           <string>tomo_cam_controls.ui</string>
           </property>
          </widget>
-        </item>
-       </layout>
-      </widget>
+        </widget>
+       </item>
+      </layout>
      </widget>
     </widget>
    </item>
