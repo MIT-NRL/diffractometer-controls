@@ -26,7 +26,7 @@
     <Attribute name="FrameRate"                     type="EPICS_PV"     source="4dh4:cam1:FrameRate_RBV"                dbrtype="DBR_NATIVE"  description="Frame rate"/>
     <Attribute name="FrameRateEnable"               type="EPICS_PV"     source="4dh4:cam1:FrameRateEnable_RBV"          dbrtype="DBR_STRING"  description="Frame rate enable"/>
     <Attribute name="Gain"                          type="EPICS_PV"     source="4dh4:cam1:Gain_RBV"                     dbrtype="DBR_NATIVE"  description="Gain"/>
-    <Attribute name="GainAuto"                      type="EPICS_PV"     source="4dh4:cam1:GainAuto_RBV"                 dbrtype="DBR_NATIVE"  description="Gain auto"/>
+    <Attribute name="Offset"                        type="EPICS_PV"     source="4dh4:cam1:Offset_RBV"                   dbrtype="DBR_NATIVE"  description="Offset"/>
     <Attribute name="PixelFormat"                   type="EPICS_PV"     source="4dh4:cam1:PixelFormat_RBV"              dbrtype="DBR_STRING"  description="Readout pixel format"/>
     <Attribute name="ConvertPixelFormat"            type="EPICS_PV"     source="4dh4:cam1:ConvertPixelFormat_RBV"       dbrtype="DBR_STRING"  description="Converted pixel format"/>
     <Attribute name="ArrayCounter"                  type="EPICS_PV"     source="4dh4:cam1:ArrayCounter_RBV"             dbrtype="DBR_NATIVE"  description="Frames collected to date"/>
@@ -42,7 +42,7 @@
     <Attribute name="ScintillatorType"              type="EPICS_PV"     source="4dh4:TS:ScintillatorType"             dbrtype="DBR_STRING"  description="Scintillator type"/>
     <Attribute name="ScintillatorThickness"         type="EPICS_PV"     source="4dh4:TS:ScintillatorThickness"        dbrtype="DBR_NATIVE"  description="Scintillator thickness (microns)"/>
  
-    <Attribute name="ImagePixelSize"                type="EPICS_PV"     source="4dh4:TS:ImagePixelSize"               dbrtype="DBR_NATIVE"  description="Pixel size on sample (microns)"/>
+    <Attribute name="SensorPixelSize"                type="EPICS_PV"     source="4dh4:TS:SensorPixelSize"               dbrtype="DBR_NATIVE"  description="Pixel size on sample (microns)"/>
     <Attribute name="DetectorPixelSize"             type="EPICS_PV"     source="4dh4:TS:DetectorPixelSize"            dbrtype="DBR_NATIVE"  description="Detector pixel size (microns)"/>
     <Attribute name="CameraObjective"               type="EPICS_PV"     source="4dh4:TS:CameraObjective"              dbrtype="DBR_STRING"  description="Objective Magnification"/>
     <Attribute name="CameraTubeLength"              type="EPICS_PV"     source="4dh4:TS:CameraTubeLength"             dbrtype="DBR_NATIVE"  description="Tube length (mm)"/>
