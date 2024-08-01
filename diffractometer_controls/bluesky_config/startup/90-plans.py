@@ -166,15 +166,25 @@ monitor_and_count = bpp.monitor_during_decorator([he3psd.counts])(bp.count)
 
 
 
-
-def tomo_scan(detector, motor, start_angle, stop_angle, num_angles, num_dark: int=1, num_white: int=1,md=None):
+def tomo_scan(file_name:str, 
+              detector, 
+              motor, 
+              start_angle:float = 0, 
+              stop_angle:float = 359, 
+              angle_step:float = 1,
+              md:dict = None):
     '''
     Tomography scan that performs dark field scans, flat field scans, and then the actual tomography scan.
     '''
+
+    num_angles = (stop_angle-start_angle+1)/angle_step
+
     caput("4dh4:TS:RotationStart",start_angle)
     caput("4dh4:TS:RotationStop",stop_angle)
     caput("4dh4:TS:NumAngles",num_angles)
-    caput("4dh4:TS:RotationStep", (stop_angle-start_angle+1)/num_angles)
+    caput("4dh4:TS:RotationStep", angle_step)
+
+    file_name = str(file_name).strip().replace(" ","_").replace("__","_")
 
     detector = [detector]
     # md_args = list(chain(*((repr(motor), start, stop) for motor, start_angle, stop_angle)))
@@ -189,7 +199,7 @@ def tomo_scan(detector, motor, start_angle, stop_angle, num_angles, num_dark: in
         "plan_name": "tomo_scan",
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,
-        "plan_pattern_args": dict(motor=motor.name, start_angle=start_angle, stop_angle=stop_angle, num_angles=num_angles, num_dark=num_dark, num_white=num_white),  # noqa: C408
+        "plan_pattern_args": dict(motor=motor.name, start_angle=start_angle, stop_angle=stop_angle, num_angles=num_angles),  # noqa: C408
         "motors": motor_names,
     }
     _md.update(md)
@@ -209,44 +219,164 @@ def tomo_scan(detector, motor, start_angle, stop_angle, num_angles, num_dark: in
     _md["hints"].update(md.get("hints", {}) or {})
     
 
-    def background_exposure(frame_type: str="dark"):
-        if frame_type == "dark":
-            for det in detector:
-                yield from bps.mov(det.cam.frame_type, 1)
-        elif frame_type == "flat":
-            for det in detector:
-                yield from bps.mov(det.cam.frame_type, 2)
-        yield from bps.trigger_and_read(detector, name=frame_type)
+    # def background_exposure(frame_type: str="dark"):
+    #     if frame_type == "dark":
+    #         for det in detector:
+    #             yield from bps.mov(det.cam.frame_type, 1)
+    #     elif frame_type == "flat":
+    #         for det in detector:
+    #             yield from bps.mov(det.cam.frame_type, 2)
+    #     yield from bps.trigger_and_read(detector, name=frame_type)
 
     @bpp.run_decorator(md=_md)
     def main_plan():
+
         for det in detector:
+            det.tiff1.file_name.put(file_name)
             yield from bps.stage(det)
         yield from bps.stage(motor)
 
-        print("Close shutter then press Resume to take the dark field")
-        yield from bps.checkpoint()
-        yield from bps.pause()
-        yield from bps.repeater(num_dark,background_exposure, frame_type="dark")
+        # print("Close shutter then press Resume to take the dark field")
+        # yield from bps.checkpoint()
+        # yield from bps.pause()
+        # yield from bps.repeater(num_dark,background_exposure, frame_type="dark")
 
-        print("Open shutter and remove the sample then press Resume to take the flat field")
-        yield from bps.checkpoint()
-        yield from bps.pause()
-        yield from bps.repeater(num_white,background_exposure, frame_type="flat")
+        # print("Open shutter and remove the sample then press Resume to take the flat field")
+        # yield from bps.checkpoint()
+        # yield from bps.pause()
+        # yield from bps.repeater(num_white,background_exposure, frame_type="flat")
 
-        for det in detector:
-            yield from bps.mov(det.cam.frame_type, 0)
+        # for det in detector:
+        #     yield from bps.mov(det.cam.frame_type, 0)
+        
         pos_cache = defaultdict(lambda: None)
         cycler = plan_patterns.inner_product(num=num_angles, args=[motor, start_angle, stop_angle])
 
         def inner_scan_nd():
-            yield from bps.declare_stream(motor, *detector, name="primary")
+            # yield from bps.declare_stream(motor, *detector, name="primary")
             for step in list(cycler):
                 yield from bps.one_nd_step(detector, step, pos_cache)
 
-        print("Replace the sample, open the shutter, and press Resume to start the scan")
-        yield from bps.checkpoint()
-        yield from bps.pause()
+        # print("Replace the sample, open the shutter, and press Resume to start the scan")
+        # yield from bps.checkpoint()
+        # yield from bps.pause()
+        yield from inner_scan_nd()
+
+    return(yield from main_plan())
+
+
+
+
+def imaging(file_name:str, 
+              detector, 
+              num_exposures:int = 1,
+              md:dict = None):
+    '''
+    Tomography scan that performs dark field scans, flat field scans, and then the actual tomography scan.
+    '''
+
+    file_name = str(file_name).strip().replace(" ","_").replace("__","_")
+
+    detector = [detector]
+    # md_args = list(chain(*((repr(motor), start, stop) for motor, start_angle, stop_angle)))
+    md = md or {}
+    _md = {
+        "plan_args": {
+            "detectors": list(map(repr, detector)),
+            # "num": num,
+            # "args": md_args,
+        },
+        "plan_name": "imaging",
+        "plan_pattern": "inner_product",
+        "plan_pattern_module": plan_patterns.__name__,
+    }
+    _md.update(md)
+    
+
+    def exposure():
+        yield from bps.trigger_and_read(detector)
+
+    @bpp.run_decorator(md=_md)
+    def main_plan():
+
+        for det in detector:
+            det.tiff1.file_name.put(file_name)
+            yield from bps.stage(det)     
+
+        yield from bps.repeater(num_exposures,exposure)
+
+    return(yield from main_plan())
+
+
+
+
+def imaging_scan(file_name:str, 
+              detector, 
+              motor, 
+              start_pos:float = 0, 
+              stop_pos:float = 30, 
+              step:float = 5,
+              md:dict = None):
+    '''
+    General scan for the imaging detector system.
+    '''
+
+    file_name = str(file_name).strip().replace(" ","_").replace("__","_")
+
+    num_steps = (stop_pos-start_pos+1)/step
+
+    detector = [detector]
+    # md_args = list(chain(*((repr(motor), start, stop) for motor, start_angle, stop_angle)))
+    motor_names = motor.name
+    md = md or {}
+    _md = {
+        "plan_args": {
+            "detectors": list(map(repr, detector)),
+            # "num": num,
+            # "args": md_args,
+        },
+        "plan_name": "imaging_scan",
+        "plan_pattern": "inner_product",
+        "plan_pattern_module": plan_patterns.__name__,
+        "plan_pattern_args": dict(motor=motor.name, start_pos=start_pos, stop_pos=stop_pos, step=step),  # noqa: C408
+        "motors": motor_names,
+    }
+    _md.update(md)
+
+    x_fields = []
+    x_fields.extend(utils.get_hinted_fields(motor))
+
+    default_dimensions = [(x_fields, "primary")]
+
+    default_hints = {}
+    if len(x_fields) > 0:
+        default_hints.update(dimensions=default_dimensions)
+
+    # now add default_hints and override any hints from the original md (if
+    # exists)
+    _md["hints"] = default_hints
+    _md["hints"].update(md.get("hints", {}) or {})
+    
+
+    @bpp.run_decorator(md=_md)
+    def main_plan():
+
+        for det in detector:
+            det.tiff1.file_name.put(file_name)
+            yield from bps.stage(det)
+        yield from bps.stage(motor)
+        
+        pos_cache = defaultdict(lambda: None)
+        cycler = plan_patterns.inner_product(num=num_steps, args=[motor, start_pos, stop_pos])
+
+        def inner_scan_nd():
+            # yield from bps.declare_stream(motor, *detector, name="primary")
+            for step in list(cycler):
+                yield from bps.one_nd_step(detector, step, pos_cache)
+
+        # print("Replace the sample, open the shutter, and press Resume to start the scan")
+        # yield from bps.checkpoint()
+        # yield from bps.pause()
         yield from inner_scan_nd()
 
     return(yield from main_plan())
