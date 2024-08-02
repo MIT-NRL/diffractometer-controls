@@ -201,7 +201,6 @@
         <string></string>
         <string></string>
         <string></string>
-        <string></string>
        </stringlist>
       </property>
       <widget class="QWidget" name="Viewer_Tab">
@@ -272,7 +271,7 @@
         </sizepolicy>
        </property>
        <attribute name="title">
-        <string>RE Extras</string>
+        <string>Run Engine Extras</string>
        </attribute>
        <layout class="QVBoxLayout" name="verticalLayout_11">
         <item>
@@ -311,138 +310,7 @@
       </widget>
       <widget class="QWidget" name="tab">
        <attribute name="title">
-        <string>Page</string>
-       </attribute>
-       <widget class="PyDMRelatedDisplayButton" name="PyDMRelatedDisplayButton_2">
-        <property name="geometry">
-         <rect>
-          <x>110</x>
-          <y>310</y>
-          <width>191</width>
-          <height>31</height>
-         </rect>
-        </property>
-        <property name="toolTip">
-         <string/>
-        </property>
-        <property name="filenames" stdset="0">
-         <stringlist>
-          <string>extra_ui/he3_detectors.ui</string>
-          <string>extra_ui/he3_detectors.ui</string>
-         </stringlist>
-        </property>
-        <property name="titles" stdset="0">
-         <stringlist>
-          <string>Detector0</string>
-          <string>Detector7</string>
-         </stringlist>
-        </property>
-        <property name="macros" stdset="0">
-         <stringlist>
-          <string>DN=0</string>
-          <string>DN=7</string>
-         </stringlist>
-        </property>
-        <property name="openInNewWindow" stdset="0">
-         <bool>true</bool>
-        </property>
-       </widget>
-       <widget class="PyDMRelatedDisplayButton" name="PyDMRelatedDisplayButton_3">
-        <property name="geometry">
-         <rect>
-          <x>130</x>
-          <y>410</y>
-          <width>191</width>
-          <height>31</height>
-         </rect>
-        </property>
-        <property name="toolTip">
-         <string/>
-        </property>
-        <property name="filenames" stdset="0">
-         <stringlist>
-          <string>extra_ui/autoconvert/ADZWO.ui</string>
-          <string>ADBase.ad</string>
-          <string>tests/ui/cam.ui</string>
-          <string>extra_ui/autoconvert/ioc_stats_soft.ui</string>
-          <string>extra_ui/autoconvert/NDStats.ui</string>
-         </stringlist>
-        </property>
-        <property name="titles" stdset="0">
-         <stringlist/>
-        </property>
-        <property name="macros" stdset="0">
-         <stringlist>
-          <string>R=cam1:</string>
-          <string>R=cam2:</string>
-          <string>R=cam1:</string>
-          <string>R=cam1:</string>
-          <string>R=Stats1:</string>
-         </stringlist>
-        </property>
-        <property name="openInNewWindow" stdset="0">
-         <bool>true</bool>
-        </property>
-       </widget>
-       <widget class="PyDMLineEdit" name="PyDMLineEdit">
-        <property name="geometry">
-         <rect>
-          <x>530</x>
-          <y>220</y>
-          <width>108</width>
-          <height>25</height>
-         </rect>
-        </property>
-        <property name="toolTip">
-         <string/>
-        </property>
-        <property name="channel" stdset="0">
-         <string/>
-        </property>
-       </widget>
-       <widget class="PyDMLineEdit" name="PyDMLineEdit_2">
-        <property name="geometry">
-         <rect>
-          <x>520</x>
-          <y>150</y>
-          <width>108</width>
-          <height>25</height>
-         </rect>
-        </property>
-        <property name="toolTip">
-         <string/>
-        </property>
-        <property name="channel" stdset="0">
-         <string>ca://4dh4:m6.VAL</string>
-        </property>
-       </widget>
-       <widget class="PyDMTimePlot" name="PyDMTimePlot">
-        <property name="geometry">
-         <rect>
-          <x>470</x>
-          <y>400</y>
-          <width>491</width>
-          <height>391</height>
-         </rect>
-        </property>
-        <property name="toolTip">
-         <string/>
-        </property>
-        <property name="yAxes">
-         <stringlist>
-          <string>{&quot;name&quot;: &quot;Axis 1&quot;, &quot;orientation&quot;: &quot;left&quot;, &quot;label&quot;: null, &quot;minRange&quot;: -1.0, &quot;maxRange&quot;: 1.0, &quot;autoRange&quot;: true, &quot;logMode&quot;: false}</string>
-         </stringlist>
-        </property>
-        <property name="curves">
-         <stringlist>
-          <string>{&quot;channel&quot;: &quot;ca://mitr:power_6&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;mitr:power_6&quot;, &quot;color&quot;: &quot;black&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
-         </stringlist>
-        </property>
-       </widget>
-      </widget>
-      <widget class="QWidget" name="tab_2">
-       <attribute name="title">
-        <string>Imaging</string>
+        <string>Analyzer calcuations</string>
        </attribute>
        <layout class="QVBoxLayout" name="verticalLayout_8">
         <item>
@@ -451,7 +319,7 @@
            <string/>
           </property>
           <property name="filename" stdset="0">
-           <string>imaging_viewer.py</string>
+           <string>analyzer_calculation.py</string>
           </property>
          </widget>
         </item>
@@ -469,11 +337,6 @@
    <header>pydm.widgets.tab_bar</header>
   </customwidget>
   <customwidget>
-   <class>PyDMTimePlot</class>
-   <extends>QGraphicsView</extends>
-   <header>pydm.widgets.timeplot</header>
-  </customwidget>
-  <customwidget>
    <class>PyDMEmbeddedDisplay</class>
    <extends>QFrame</extends>
    <header>pydm.widgets.embedded_display</header>
@@ -483,11 +346,6 @@
    <extends>QFrame</extends>
    <header>pydm.widgets.frame</header>
    <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>PyDMLineEdit</class>
-   <extends>QLineEdit</extends>
-   <header>pydm.widgets.line_edit</header>
   </customwidget>
   <customwidget>
    <class>PyDMRelatedDisplayButton</class>
