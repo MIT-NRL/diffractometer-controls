@@ -80,7 +80,7 @@
          <item row="0" column="3" colspan="2">
           <widget class="QLabel" name="label_4">
            <property name="text">
-            <string>2θ_S</string>
+            <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;2θ Sample&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
            </property>
           </widget>
          </item>
@@ -93,7 +93,7 @@
          <item row="0" column="7">
           <widget class="QLabel" name="label_7">
            <property name="text">
-            <string>180-2θ_A</string>
+            <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;180-2θ&lt;span style=&quot; vertical-align:sub;&quot;&gt;A&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
            </property>
           </widget>
          </item>
@@ -128,7 +128,7 @@
          <item row="0" column="5">
           <widget class="QLabel" name="label_5">
            <property name="text">
-            <string>2θ_A</string>
+            <string>2θ Analyzer</string>
            </property>
           </widget>
          </item>
@@ -138,7 +138,7 @@
          <item row="0" column="8">
           <widget class="QLabel" name="label_8">
            <property name="text">
-            <string>Gon_A</string>
+            <string>Analyzer Angle</string>
            </property>
           </widget>
          </item>
@@ -170,14 +170,14 @@
        <item row="1" column="1">
         <widget class="QLabel" name="label_12">
          <property name="text">
-          <string>LSA</string>
+          <string>Length sample-analyzer</string>
          </property>
         </widget>
        </item>
        <item row="1" column="2">
         <widget class="QLabel" name="label_13">
          <property name="text">
-          <string>LAD</string>
+          <string>Length analyzer-detector</string>
          </property>
         </widget>
        </item>
@@ -198,7 +198,7 @@
        <item row="1" column="5">
         <widget class="QLabel" name="label_15">
          <property name="text">
-          <string>1/RH</string>
+          <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;1/R&lt;span style=&quot; vertical-align:sub;&quot;&gt;H&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
          </property>
         </widget>
        </item>
