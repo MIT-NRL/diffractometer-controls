@@ -51,10 +51,10 @@ class MainScreen(display.MITRDisplay):
             app = MITRApplication.instance()
             re_client = app.re_client
 
-            re_queue = QtRePlanQueue(re_client)
-            re_plan_editor = QtRePlanEditor(re_client)
-            self.ui.RE_Queue.layout().addWidget(re_queue)
-            self.ui.RE_Plan_Editor.layout().addWidget(re_plan_editor)
+            # re_queue = QtRePlanQueue(re_client)
+            # re_plan_editor = QtRePlanEditor(re_client)
+            # self.ui.RE_Queue.layout().addWidget(re_queue)
+            # self.ui.RE_Plan_Editor.layout().addWidget(re_plan_editor)
 
             # figModel = Lines('motor',['det1','det2'],max_runs=3)
             # figModel = AutoLines(max_runs=3)
@@ -76,14 +76,14 @@ class MainScreen(display.MITRDisplay):
             app.re_dispatcher.start()
             # install_remote_qt_kicker()
 
-            re_console = QtReConsoleMonitor(re_client)
-            re_queue_history = QtRePlanHistory(re_client)
-            self.ui.RE_Console.layout().addWidget(re_console)
-            self.ui.RE_Queue_History.layout().addWidget(re_queue_history)
+            # re_console = QtReConsoleMonitor(re_client)
+            # re_queue_history = QtRePlanHistory(re_client)
+            # self.ui.RE_Console.layout().addWidget(re_console)
+            # self.ui.RE_Queue_History.layout().addWidget(re_queue_history)
 
             self.ui.Data_Viewer.layout().addWidget(viewer)
 
-            self.ui.pushButton.clicked.connect(self.printstuff)
+            # self.ui.pushButton.clicked.connect(self.printstuff)
 
             # self.ui.psdDisplay.addChannel(y_channel=f"ca://{self.macros['P']}det1:LiveCountsD0",color='black',symbolSize=5,symbol='o')
 

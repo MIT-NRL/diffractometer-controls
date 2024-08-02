@@ -13,8 +13,8 @@
   <property name="windowTitle">
    <string>Form</string>
   </property>
-  <layout class="QGridLayout" name="gridLayout">
-   <item row="0" column="0">
+  <layout class="QVBoxLayout" name="verticalLayout_7">
+   <item>
     <layout class="QHBoxLayout" name="horizontalLayout_2">
      <item>
       <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay">
@@ -38,6 +38,9 @@
        </property>
        <property name="toolTip">
         <string/>
+       </property>
+       <property name="frameShape">
+        <enum>QFrame::Box</enum>
        </property>
        <property name="filename" stdset="0">
         <string>extra_ui/reactor_power.ui</string>
@@ -74,147 +77,93 @@
      </item>
     </layout>
    </item>
-   <item row="1" column="0">
-    <widget class="QSplitter" name="splitter">
-     <property name="sizePolicy">
-      <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-       <horstretch>0</horstretch>
-       <verstretch>0</verstretch>
-      </sizepolicy>
-     </property>
-     <property name="orientation">
-      <enum>Qt::Horizontal</enum>
-     </property>
-     <property name="handleWidth">
-      <number>10</number>
-     </property>
-     <widget class="QWidget" name="verticalLayoutWidget">
-      <layout class="QVBoxLayout" name="verticalLayout" stretch="0,0">
-       <property name="spacing">
-        <number>6</number>
-       </property>
-       <property name="sizeConstraint">
-        <enum>QLayout::SetDefaultConstraint</enum>
-       </property>
-       <item>
-        <widget class="PyDMFrame" name="RE_Plan_Editor">
-         <property name="enabled">
-          <bool>true</bool>
-         </property>
-         <property name="sizePolicy">
-          <sizepolicy hsizetype="MinimumExpanding" vsizetype="Expanding">
-           <horstretch>0</horstretch>
-           <verstretch>0</verstretch>
-          </sizepolicy>
-         </property>
-         <property name="minimumSize">
-          <size>
-           <width>350</width>
-           <height>0</height>
-          </size>
-         </property>
-         <property name="baseSize">
-          <size>
-           <width>350</width>
-           <height>0</height>
-          </size>
-         </property>
-         <property name="toolTip">
-          <string/>
-         </property>
-         <layout class="QVBoxLayout" name="verticalLayout_2"/>
-        </widget>
-       </item>
-       <item>
-        <widget class="PyDMFrame" name="RE_Queue">
-         <property name="sizePolicy">
-          <sizepolicy hsizetype="MinimumExpanding" vsizetype="Expanding">
-           <horstretch>0</horstretch>
-           <verstretch>0</verstretch>
-          </sizepolicy>
-         </property>
-         <property name="minimumSize">
-          <size>
-           <width>350</width>
-           <height>0</height>
-          </size>
-         </property>
-         <property name="baseSize">
-          <size>
-           <width>350</width>
-           <height>0</height>
-          </size>
-         </property>
-         <property name="toolTip">
-          <string/>
-         </property>
-         <layout class="QVBoxLayout" name="verticalLayout_3"/>
-        </widget>
-       </item>
-      </layout>
-     </widget>
-     <widget class="PyDMTabWidget" name="PyDMTabWidget">
-      <property name="enabled">
-       <bool>true</bool>
-      </property>
-      <property name="sizePolicy">
-       <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-        <horstretch>1</horstretch>
-        <verstretch>0</verstretch>
-       </sizepolicy>
-      </property>
-      <property name="minimumSize">
-       <size>
-        <width>0</width>
-        <height>0</height>
-       </size>
-      </property>
-      <property name="sizeIncrement">
-       <size>
-        <width>0</width>
-        <height>0</height>
-       </size>
-      </property>
-      <property name="baseSize">
-       <size>
-        <width>0</width>
-        <height>0</height>
-       </size>
-      </property>
-      <property name="toolTip">
-       <string/>
-      </property>
-      <property name="whatsThis">
-       <string/>
-      </property>
-      <property name="currentIndex">
-       <number>2</number>
-      </property>
-      <property name="iconSize">
-       <size>
-        <width>30</width>
-        <height>30</height>
-       </size>
-      </property>
-      <property name="alarmChannels">
-       <stringlist>
-        <string></string>
-        <string></string>
-        <string></string>
-       </stringlist>
-      </property>
-      <widget class="QWidget" name="Viewer_Tab">
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout_3">
+     <item>
+      <widget class="QSplitter" name="splitter">
        <property name="sizePolicy">
-        <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+        <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
          <horstretch>0</horstretch>
          <verstretch>0</verstretch>
         </sizepolicy>
        </property>
-       <attribute name="title">
-        <string>Viewer</string>
-       </attribute>
-       <layout class="QVBoxLayout" name="verticalLayout_10">
-        <item>
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_4">
+        <property name="minimumSize">
+         <size>
+          <width>350</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="toolTip">
+         <string/>
+        </property>
+        <property name="filename" stdset="0">
+         <string>re_plans.py</string>
+        </property>
+       </widget>
+       <widget class="PyDMTabWidget" name="PyDMTabWidget">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+          <horstretch>1</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>500</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="sizeIncrement">
+         <size>
+          <width>0</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="baseSize">
+         <size>
+          <width>0</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="toolTip">
+         <string/>
+        </property>
+        <property name="whatsThis">
+         <string/>
+        </property>
+        <property name="currentIndex">
+         <number>0</number>
+        </property>
+        <property name="iconSize">
+         <size>
+          <width>30</width>
+          <height>30</height>
+         </size>
+        </property>
+        <property name="alarmChannels">
+         <stringlist>
+          <string></string>
+          <string></string>
+          <string></string>
+         </stringlist>
+        </property>
+        <widget class="QWidget" name="Viewer_Tab">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <attribute name="title">
+          <string>Viewer</string>
+         </attribute>
          <layout class="QVBoxLayout" name="verticalLayout_9">
           <item>
            <widget class="PyDMFrame" name="Data_Viewer">
@@ -224,33 +173,167 @@
               <verstretch>1</verstretch>
              </sizepolicy>
             </property>
+            <property name="minimumSize">
+             <size>
+              <width>500</width>
+              <height>500</height>
+             </size>
+            </property>
             <property name="toolTip">
              <string/>
             </property>
-            <layout class="QVBoxLayout" name="verticalLayout_4"/>
+            <layout class="QVBoxLayout" name="verticalLayout_12"/>
            </widget>
           </item>
           <item>
-           <layout class="QHBoxLayout" name="horizontalLayout">
+           <layout class="QHBoxLayout" name="horizontalLayout_4">
             <item>
-             <widget class="QPushButton" name="pushButton">
-              <property name="text">
-               <string>PushButton</string>
+             <widget class="PyDMByteIndicator" name="PyDMByteIndicator">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>40</width>
+                <height>40</height>
+               </size>
+              </property>
+              <property name="baseSize">
+               <size>
+                <width>0</width>
+                <height>0</height>
+               </size>
+              </property>
+              <property name="toolTip">
+               <string/>
+              </property>
+              <property name="alarmSensitiveBorder" stdset="0">
+               <bool>false</bool>
+              </property>
+              <property name="channel" stdset="0">
+               <string>ca://${P}he3PSD:Acquire_RBV</string>
+              </property>
+              <property name="showLabels" stdset="0">
+               <bool>false</bool>
+              </property>
+              <property name="circles" stdset="0">
+               <bool>true</bool>
               </property>
              </widget>
             </item>
             <item>
+             <layout class="QVBoxLayout" name="verticalLayout_4">
+              <item>
+               <widget class="PyDMLabel" name="PyDMLabel_2">
+                <property name="font">
+                 <font>
+                  <pointsize>11</pointsize>
+                 </font>
+                </property>
+                <property name="toolTip">
+                 <string/>
+                </property>
+                <property name="layoutDirection">
+                 <enum>Qt::LeftToRight</enum>
+                </property>
+                <property name="text">
+                 <string>Acquire Time</string>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignCenter</set>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayout">
+                <item>
+                 <widget class="PyDMLineEdit" name="PyDMLineEdit">
+                  <property name="sizePolicy">
+                   <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                    <horstretch>0</horstretch>
+                    <verstretch>0</verstretch>
+                   </sizepolicy>
+                  </property>
+                  <property name="minimumSize">
+                   <size>
+                    <width>40</width>
+                    <height>0</height>
+                   </size>
+                  </property>
+                  <property name="toolTip">
+                   <string/>
+                  </property>
+                  <property name="channel" stdset="0">
+                   <string>ca://${P}he3PSD:AcquireTime</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="PyDMLabel" name="PyDMLabel">
+                  <property name="toolTip">
+                   <string/>
+                  </property>
+                  <property name="showUnits" stdset="0">
+                   <bool>true</bool>
+                  </property>
+                  <property name="channel" stdset="0">
+                   <string>ca://${P}he3PSD:AcquireTime_RBV</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+             </layout>
+            </item>
+            <item>
              <widget class="PyDMRelatedDisplayButton" name="PyDMRelatedDisplayButton">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>150</width>
+                <height>0</height>
+               </size>
+              </property>
+              <property name="maximumSize">
+               <size>
+                <width>16777215</width>
+                <height>16777215</height>
+               </size>
+              </property>
               <property name="toolTip">
                <string/>
               </property>
+              <property name="text">
+               <string>Configure Detectors</string>
+              </property>
               <property name="filenames" stdset="0">
                <stringlist>
-                <string>/home/mitr_4dh4/EPICS/IOCs/4dh4/4dh4App/op/adl/ioc_motors.adl</string>
+                <string>he3_detectors.ui</string>
+                <string>he3_detectors.ui</string>
                </stringlist>
               </property>
+              <property name="titles" stdset="0">
+               <stringlist>
+                <string>Detector 0</string>
+                <string>Detector 7</string>
+               </stringlist>
+              </property>
+              <property name="showIcon" stdset="0">
+               <bool>false</bool>
+              </property>
               <property name="macros" stdset="0">
-               <stringlist/>
+               <stringlist>
+                <string>DN=0</string>
+                <string>DN=7</string>
+               </stringlist>
               </property>
               <property name="openInNewWindow" stdset="0">
                <bool>true</bool>
@@ -260,73 +343,343 @@
            </layout>
           </item>
          </layout>
-        </item>
-       </layout>
-      </widget>
-      <widget class="QWidget" name="RE_Extras_Tab">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <attribute name="title">
-        <string>Run Engine Extras</string>
-       </attribute>
-       <layout class="QVBoxLayout" name="verticalLayout_11">
-        <item>
-         <layout class="QVBoxLayout" name="verticalLayout_6">
+        </widget>
+        <widget class="QWidget" name="RE_Extras_Tab">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <attribute name="title">
+          <string>Run Engine Extras</string>
+         </attribute>
+         <layout class="QVBoxLayout" name="verticalLayout_11">
           <item>
-           <widget class="PyDMFrame" name="RE_Queue_History">
-            <property name="sizePolicy">
-             <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
-              <horstretch>0</horstretch>
-              <verstretch>0</verstretch>
-             </sizepolicy>
-            </property>
+           <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_3">
             <property name="toolTip">
              <string/>
             </property>
-            <layout class="QVBoxLayout" name="verticalLayout_7"/>
-           </widget>
-          </item>
-          <item>
-           <widget class="PyDMFrame" name="RE_Console">
-            <property name="sizePolicy">
-             <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
-              <horstretch>0</horstretch>
-              <verstretch>0</verstretch>
-             </sizepolicy>
+            <property name="filename" stdset="0">
+             <string>re_extras.py</string>
             </property>
-            <property name="toolTip">
-             <string/>
-            </property>
-            <layout class="QVBoxLayout" name="verticalLayout_5"/>
            </widget>
           </item>
          </layout>
-        </item>
-       </layout>
+        </widget>
+        <widget class="QWidget" name="tab">
+         <attribute name="title">
+          <string>Analyzer calcuations</string>
+         </attribute>
+         <layout class="QVBoxLayout" name="verticalLayout_8">
+          <item>
+           <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_2">
+            <property name="toolTip">
+             <string/>
+            </property>
+            <property name="filename" stdset="0">
+             <string>analyzer_calculation.py</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </widget>
       </widget>
-      <widget class="QWidget" name="tab">
-       <attribute name="title">
-        <string>Analyzer calcuations</string>
-       </attribute>
-       <layout class="QVBoxLayout" name="verticalLayout_8">
-        <item>
-         <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_2">
-          <property name="toolTip">
-           <string/>
-          </property>
-          <property name="filename" stdset="0">
-           <string>analyzer_calculation.py</string>
-          </property>
+     </item>
+     <item>
+      <layout class="QVBoxLayout" name="verticalLayout_6">
+       <property name="sizeConstraint">
+        <enum>QLayout::SetDefaultConstraint</enum>
+       </property>
+       <item>
+        <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_5">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>300</width>
+           <height>0</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>300</width>
+           <height>16777215</height>
+          </size>
+         </property>
+         <property name="toolTip">
+          <string/>
+         </property>
+         <property name="macros" stdset="0">
+          <string>M=m10</string>
+         </property>
+         <property name="filename" stdset="0">
+          <string>motors_square.ui</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="PyDMTabWidget" name="PyDMTabWidget_2">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>300</width>
+           <height>0</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>300</width>
+           <height>16777215</height>
+          </size>
+         </property>
+         <property name="toolTip">
+          <string/>
+         </property>
+         <property name="whatsThis">
+          <string/>
+         </property>
+         <property name="currentIndex">
+          <number>0</number>
+         </property>
+         <property name="alarmChannels">
+          <stringlist>
+           <string></string>
+           <string></string>
+          </stringlist>
+         </property>
+         <widget class="QWidget" name="tab_2">
+          <attribute name="title">
+           <string>Analyzer1</string>
+          </attribute>
+          <layout class="QVBoxLayout" name="verticalLayout">
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
+            <number>0</number>
+           </property>
+           <item>
+            <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_6">
+             <property name="toolTip">
+              <string/>
+             </property>
+             <property name="macros" stdset="0">
+              <string>M=m11</string>
+             </property>
+             <property name="filename" stdset="0">
+              <string>motors_square.ui</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_7">
+             <property name="toolTip">
+              <string/>
+             </property>
+             <property name="macros" stdset="0">
+              <string>M=m13</string>
+             </property>
+             <property name="filename" stdset="0">
+              <string>motors_square.ui</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_8">
+             <property name="toolTip">
+              <string/>
+             </property>
+             <property name="macros" stdset="0">
+              <string>M=m16</string>
+             </property>
+             <property name="filename" stdset="0">
+              <string>motors_square.ui</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
          </widget>
-        </item>
-       </layout>
-      </widget>
-     </widget>
-    </widget>
+         <widget class="QWidget" name="tab_3">
+          <attribute name="title">
+           <string>Analyzer2</string>
+          </attribute>
+          <layout class="QVBoxLayout" name="verticalLayout_2">
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
+            <number>0</number>
+           </property>
+           <item>
+            <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_9">
+             <property name="toolTip">
+              <string/>
+             </property>
+             <property name="macros" stdset="0">
+              <string>M=m15</string>
+             </property>
+             <property name="filename" stdset="0">
+              <string>motors_square.ui</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_10">
+             <property name="toolTip">
+              <string/>
+             </property>
+             <property name="macros" stdset="0">
+              <string/>
+             </property>
+             <property name="filename" stdset="0">
+              <string>motors_square.ui</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_11">
+             <property name="toolTip">
+              <string/>
+             </property>
+             <property name="macros" stdset="0">
+              <string/>
+             </property>
+             <property name="filename" stdset="0">
+              <string>motors_square.ui</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </widget>
+       </item>
+       <item>
+        <widget class="PyDMTabWidget" name="PyDMTabWidget_3">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>300</width>
+           <height>0</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>300</width>
+           <height>16777215</height>
+          </size>
+         </property>
+         <property name="toolTip">
+          <string/>
+         </property>
+         <property name="whatsThis">
+          <string/>
+         </property>
+         <property name="currentIndex">
+          <number>0</number>
+         </property>
+         <property name="alarmChannels">
+          <stringlist>
+           <string></string>
+           <string></string>
+          </stringlist>
+         </property>
+         <widget class="QWidget" name="tab_4">
+          <attribute name="title">
+           <string>Detector 0</string>
+          </attribute>
+          <layout class="QVBoxLayout" name="verticalLayout_5">
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
+            <number>0</number>
+           </property>
+           <item>
+            <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_13">
+             <property name="toolTip">
+              <string/>
+             </property>
+             <property name="macros" stdset="0">
+              <string>M=m9</string>
+             </property>
+             <property name="filename" stdset="0">
+              <string>motors_square.ui</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+         <widget class="QWidget" name="tab_Detector7">
+          <attribute name="title">
+           <string>Detector7</string>
+          </attribute>
+          <layout class="QVBoxLayout" name="verticalLayout_3">
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
+            <number>0</number>
+           </property>
+           <item>
+            <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_12">
+             <property name="toolTip">
+              <string/>
+             </property>
+             <property name="macros" stdset="0">
+              <string/>
+             </property>
+             <property name="filename" stdset="0">
+              <string>motors_square.ui</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </widget>
+       </item>
+      </layout>
+     </item>
+    </layout>
    </item>
   </layout>
  </widget>
@@ -335,6 +688,16 @@
    <class>PyDMTabWidget</class>
    <extends>QTabWidget</extends>
    <header>pydm.widgets.tab_bar</header>
+  </customwidget>
+  <customwidget>
+   <class>PyDMLabel</class>
+   <extends>QLabel</extends>
+   <header>pydm.widgets.label</header>
+  </customwidget>
+  <customwidget>
+   <class>PyDMByteIndicator</class>
+   <extends>QWidget</extends>
+   <header>pydm.widgets.byte</header>
   </customwidget>
   <customwidget>
    <class>PyDMEmbeddedDisplay</class>
@@ -346,6 +709,11 @@
    <extends>QFrame</extends>
    <header>pydm.widgets.frame</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>PyDMLineEdit</class>
+   <extends>QLineEdit</extends>
+   <header>pydm.widgets.line_edit</header>
   </customwidget>
   <customwidget>
    <class>PyDMRelatedDisplayButton</class>
