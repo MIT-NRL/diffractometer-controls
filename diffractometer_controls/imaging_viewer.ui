@@ -149,6 +149,9 @@
                 <property name="text">
                  <string>Exposure (s)</string>
                 </property>
+                <property name="alignment">
+                 <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+                </property>
                </widget>
               </item>
               <item>
@@ -178,6 +181,16 @@
                 </property>
                 <property name="toolTip">
                  <string/>
+                </property>
+                <property name="styleSheet">
+                 <string notr="true">PyDMLineEdit {
+  color: rgb(0, 0, 0);
+  background-color: rgb(115, 223, 255);
+  border: 1px solid black;
+  margin: 0px;
+  padding: 0px;
+  spacing: 0px;
+  }</string>
                 </property>
                 <property name="showUnits" stdset="0">
                  <bool>true</bool>
@@ -366,7 +379,7 @@ background-color: rgb(213, 213, 213)</string>
             </property>
             <property name="minimumSize">
              <size>
-              <width>0</width>
+              <width>70</width>
               <height>0</height>
              </size>
             </property>
@@ -390,6 +403,9 @@ Camera</string>
               <string>Camera Controls</string>
              </stringlist>
             </property>
+            <property name="showIcon" stdset="0">
+             <bool>false</bool>
+            </property>
             <property name="macros" stdset="0">
              <stringlist>
               <string>R=cam1:</string>
@@ -410,7 +426,7 @@ Camera</string>
             </property>
             <property name="minimumSize">
              <size>
-              <width>60</width>
+              <width>70</width>
               <height>0</height>
              </size>
             </property>
@@ -425,6 +441,9 @@ Input</string>
              <stringlist>
               <string>metadata_input.ui</string>
              </stringlist>
+            </property>
+            <property name="showIcon" stdset="0">
+             <bool>false</bool>
             </property>
             <property name="macros" stdset="0">
              <stringlist>
