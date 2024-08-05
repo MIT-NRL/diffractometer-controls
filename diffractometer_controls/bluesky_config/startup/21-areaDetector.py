@@ -5,12 +5,21 @@ from ophyd import (Device, Component as Cpt,
 from ophyd.device import DeviceStatus
 from ophyd.status import Status, SubscriptionStatus
 
-from ophyd.areadetector import AreaDetector, SingleTrigger, SimDetector, ImagePlugin, StatsPlugin, TIFFPlugin, HDF5Plugin
+from ophyd.areadetector import (AreaDetector, SingleTrigger, SimDetector, 
+                                ImagePlugin, StatsPlugin, TIFFPlugin, HDF5Plugin, 
+                                CamBase, ADComponent as ADCpt, EpicsSignalWithRBV as SignalWithRBV,
+                                DetectorBase)
 from ophyd.areadetector.filestore_mixins import FileStoreTIFFIterativeWrite, FileStoreHDF5IterativeWrite
 from ophyd import cam
 from epics import caput, caget, cainfo
 import uuid
 from datetime import datetime
+
+class ZWODetectorCam(CamBase):
+    offset = ADCpt(SignalWithRBV, "Offset")
+
+class ZWODetector(DetectorBase):
+    cam = ADCpt(ZWODetectorCam, "cam1:")
 
 
 class MyTIFFPlugin(FileStoreTIFFIterativeWrite,TIFFPlugin):
@@ -23,7 +32,7 @@ class MyTIFFPlugin(FileStoreTIFFIterativeWrite,TIFFPlugin):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
         self.stage_sigs.update(
-            [("file_template","%s%s_%3.3d.tif"),
+            [("file_template","%s%s_%4.4d.tif"),
             ]
         )
     # pass
@@ -33,8 +42,8 @@ class MyHDF5Plugin(FileStoreHDF5IterativeWrite,HDF5Plugin):
     layout_filename_valid = Cpt(EpicsSignal, "XMLValid_RBV", kind="omitted", string=True)
     nd_attr_status = Cpt(EpicsSignal, "NDAttributesStatus", kind="omitted", string=True)
 
-class ZWODetector(SingleTrigger, AreaDetector):
-    cam = Cpt(cam.AreaDetectorCam, "cam1:")
+class MyZWODetector(SingleTrigger, ZWODetector):
+    cam = Cpt(ZWODetectorCam, "cam1:")
     image = Cpt(ImagePlugin, suffix='image1:')
     stats1 = Cpt(StatsPlugin, 'Stats1:')
 
@@ -72,7 +81,10 @@ class SimAreaDetector(SingleTrigger, SimDetector):
     # )
 
 
-cam_zwo = ZWODetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total'])
+cam_zwo = MyZWODetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total'])
+# cam_zwo.cam.temperature.set(-20).wait()
+cam_zwo.stage_sigs["cam.num_images"] = 1
+cam_zwo.cam.nd_attributes_file.set("/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml") 
 # cam_zwo.hdf1.stage_sigs["layout_filename"] = "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoLayoutDX.xml"
 # cam_zwo.cam.stage_sigs["nd_attributes_file"] = "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml"
 # cam_zwo.hdf1.stage_sigs["store_attr"] = "Yes"
