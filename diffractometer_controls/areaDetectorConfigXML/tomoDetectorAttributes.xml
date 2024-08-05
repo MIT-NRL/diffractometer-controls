@@ -14,12 +14,12 @@
 
     <Attribute name="MaxSizeX"                      type="EPICS_PV"     source="4dh4:cam1:MaxSizeX_RBV"                 dbrtype="DBR_NATIVE"  description="Detector total X pixels"/>
     <Attribute name="MaxSizeY"                      type="EPICS_PV"     source="4dh4:cam1:MaxSizeY_RBV"                 dbrtype="DBR_NATIVE"  description="Detector total Y pixels"/>
-    <Attribute name="MinX"                          type="EPICS_PV"     source="4dh4:cam1:MinX"                         dbrtype="DBR_NATIVE"  description="Detector readout min X"/>
-    <Attribute name="MinY"                          type="EPICS_PV"     source="4dh4:cam1:MinY"                         dbrtype="DBR_NATIVE"  description="Detector readout min Y"/>
-    <Attribute name="SizeX"                         type="EPICS_PV"     source="4dh4:cam1:SizeX"                        dbrtype="DBR_NATIVE"  description="Detector readout size X"/>
-    <Attribute name="SizeY"                         type="EPICS_PV"     source="4dh4:cam1:SizeY"                        dbrtype="DBR_NATIVE"  description="Detector readout size Y"/>
-    <Attribute name="BinX"                          type="EPICS_PV"     source="4dh4:cam1:BinX"                         dbrtype="DBR_NATIVE"  description="Detector readout bin X"/>
-    <Attribute name="BinY"                          type="EPICS_PV"     source="4dh4:cam1:BinY"                         dbrtype="DBR_NATIVE"  description="Detector readout bin Y"/>
+    <Attribute name="MinX"                          type="EPICS_PV"     source="4dh4:cam1:MinX_RBV"                         dbrtype="DBR_NATIVE"  description="Detector readout min X"/>
+    <Attribute name="MinY"                          type="EPICS_PV"     source="4dh4:cam1:MinY_RBV"                         dbrtype="DBR_NATIVE"  description="Detector readout min Y"/>
+    <Attribute name="SizeX"                         type="EPICS_PV"     source="4dh4:cam1:SizeX_RBV"                        dbrtype="DBR_NATIVE"  description="Detector readout size X"/>
+    <Attribute name="SizeY"                         type="EPICS_PV"     source="4dh4:cam1:SizeY_RBV"                        dbrtype="DBR_NATIVE"  description="Detector readout size Y"/>
+    <Attribute name="BinX"                          type="EPICS_PV"     source="4dh4:cam1:BinX_RBV"                         dbrtype="DBR_NATIVE"  description="Detector readout bin X"/>
+    <Attribute name="BinY"                          type="EPICS_PV"     source="4dh4:cam1:BinY_RBV"                         dbrtype="DBR_NATIVE"  description="Detector readout bin Y"/>
 
     <Attribute name="AcquireTime"                   type="EPICS_PV"     source="4dh4:cam1:AcquireTime_RBV"              dbrtype="DBR_NATIVE"  description="Exposure time"/>
     <Attribute name="AcquirePeriod"                 type="EPICS_PV"     source="4dh4:cam1:AcquirePeriod_RBV"            dbrtype="DBR_NATIVE"  description="Exposure period"/>
@@ -60,11 +60,13 @@
 
     <Attribute name="HDF5FrameLocation"             type="EPICS_PV"     source="4dh4:cam1:FrameType"                dbrtype="DBR_STRING"  description="Where to store frame in HDF5 file"/>
 
-    <Attribute name="SampleTheta"                   type="EPICS_PV"     source="4dh4:m3.VAL"                        dbrtype="DBR_DOUBLE"   description="Rotational angle of sample"/>
-    <Attribute name="SampleX"                       type="EPICS_PV"     source="4dh4:m14.VAL"                        dbrtype="DBR_DOUBLE"   description="Sample x position"/>
+    <Attribute name="SampleTheta_VAL"                   type="EPICS_PV"     source="4dh4:m3.VAL"                        dbrtype="DBR_DOUBLE"   description="Rotational angle of sample set value"/>
+    <Attribute name="SampleTheta_RVAL"                   type="EPICS_PV"     source="4dh4:m3.RBV"                        dbrtype="DBR_DOUBLE"   description="Rotational angle of sample readback value"/>
+    <Attribute name="SampleX"                       type="EPICS_PV"     source="4dh4:m14.VAL"                        dbrtype="DBR_DOUBLE"   description="Sample x position set value"/>
+    <Attribute name="SampleX_RBV"                       type="EPICS_PV"     source="4dh4:m14.RBV"                        dbrtype="DBR_DOUBLE"   description="Sample x position readback value"/>
 
     <Attribute name="CcdCameraX"                    type="EPICS_PV" source="4dh4:m4.VAL"                        dbrtype="DBR_DOUBLE"     description="Camera x position in the beam"/>
-    <Attribute name="CcdCameraXDial"                type="EPICS_PV" source="4dh4:m4.DVAL"                       dbrtype="DBR_DOUBLE"/>
+    <Attribute name="CcdCameraX_RBV"                type="EPICS_PV" source="4dh4:m4.RBV"                       dbrtype="DBR_DOUBLE"/>
 
     <Attribute name="CcdCameraFocusDist"            type="EPICS_PV" source="4dh4:m12.VAL"                        dbrtype="DBR_DOUBLE"    description="Camera distance from scintillator box"/>
 
