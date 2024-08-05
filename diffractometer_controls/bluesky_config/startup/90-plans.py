@@ -169,15 +169,29 @@ monitor_and_count = bpp.monitor_during_decorator([he3psd.counts])(bp.count)
 def tomo_scan(file_name:str, 
               detector, 
               motor, 
-              start_angle:float = 0, 
-              stop_angle:float = 359, 
               angle_step:float = 1,
+              start_angle:float = None, 
+              stop_angle:float = None,
+              move_to_start:bool = True, 
               md:dict = None):
     '''
     Tomography scan that performs dark field scans, flat field scans, and then the actual tomography scan.
     '''
+    if (start_angle is None) and (stop_angle is None):
+        start_angle, stop_angle = 0, 360-angle_step
+    elif (start_angle is not None) and (stop_angle is None):
+        stop_angle = 360 + start_angle - angle_step
+    num_angles = int((stop_angle - start_angle + angle_step) // angle_step)
+    while num_angles*angle_step > 360:
+        num_angles -= 1
+    if ((stop_angle-start_angle+angle_step) % angle_step) != 0:
+        angle_step_new = (stop_angle-start_angle+angle_step) / num_angles
+        print(f"\n#===============#\n360 not divisible by {angle_step}.\nUsing a step size of {angle_step_new} instead.\n#===============#\n")
+        angle_step = angle_step_new
 
-    num_angles = (stop_angle-start_angle+1)/angle_step
+    print("#===============#")
+    print(f"Starting tomography scan from {start_angle} to {stop_angle} \nin {num_angles} steps of {angle_step} degrees.")
+    print("#===============#")
 
     caput("4dh4:TS:RotationStart",start_angle)
     caput("4dh4:TS:RotationStop",stop_angle)
@@ -261,6 +275,9 @@ def tomo_scan(file_name:str,
         # yield from bps.checkpoint()
         # yield from bps.pause()
         yield from inner_scan_nd()
+
+        if move_to_start:
+            yield from bps.mv(motor, start_angle)
 
     return(yield from main_plan())
 
