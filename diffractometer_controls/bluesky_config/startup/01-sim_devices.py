@@ -6,4 +6,4 @@ from ophyd.device import DeviceStatus
 from ophyd.status import Status, SubscriptionStatus
 
 
-sim_motor = EpicsMotor("4dh4:m6",name="sim_motor")
+motor_sim = EpicsMotor("4dh4:m6",name="sim_motor")

@@ -23,7 +23,16 @@ RE.preprocessors.append(sd)
 
 # Set up a Broker.
 from databroker import Broker
-db = Broker.named("temp")
+from tiled.client import from_uri
+
+client = from_uri("http://127.0.0.1:8000", api_key="e752bc7528d4dd7bcca206fa8adbdc727b726d42e0f3564663ec3a06bb66b4b1")
+
+# Use persistent database backed by MongoDB
+# db = Broker(client['4dh4_imaging'])
+# db = Broker(client['4dh4_diffraction'])
+db = Broker(client['testdb'])
+
+# db = Broker.named("temp")
 # and subscribe it to the RunEngine
 RE.subscribe(db.insert)
 
