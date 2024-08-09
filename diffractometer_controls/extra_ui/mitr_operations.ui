@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>Form</class>
+ <widget class="QWidget" name="Form">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>707</width>
+    <height>589</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Form</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout_3">
+   <item>
+    <widget class="PyDMTabWidget" name="PyDMTabWidget">
+     <property name="toolTip">
+      <string/>
+     </property>
+     <property name="whatsThis">
+      <string/>
+     </property>
+     <property name="styleSheet">
+      <string notr="true">QTabBar::tab
+{
+	border-style: solid;
+	border-width: 2px;
+	border-color: rgb(117, 0, 20);
+
+	margin-left: 5px;
+	margin-right: 5px;
+	margin-bottom: 3px;
+
+	padding-top: 3px;
+	padding-bottom: 3px;
+	padding-right: 4px;
+	padding-left: 4px;
+
+	background: rgb(96, 0, 16);
+	color: rgb(228, 228, 228);
+}
+
+QTabBar::tab:hover
+{
+	background: rgb(125, 0, 25);
+}
+
+QTabWidget::pane
+{
+	border-style: solid;
+	border-width: 3px;
+	border-color: rgb(117, 0, 20);
+	background-color: rgba(0,0,0,0);
+}
+
+QTabBar::tab:selected
+{
+	background: rgb(255, 20, 35)
+}
+
+QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
+     </property>
+     <property name="currentIndex">
+      <number>0</number>
+     </property>
+     <property name="alarmChannels">
+      <stringlist>
+       <string></string>
+       <string></string>
+      </stringlist>
+     </property>
+     <widget class="QWidget" name="tab">
+      <attribute name="title">
+       <string>Reactor Power</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayout">
+       <item>
+        <widget class="PyDMArchiverTimePlot" name="PyDMArchiverTimePlot">
+         <property name="toolTip">
+          <string/>
+         </property>
+         <property name="showXGrid">
+          <bool>false</bool>
+         </property>
+         <property name="showYGrid">
+          <bool>false</bool>
+         </property>
+         <property name="backgroundColor">
+          <color>
+           <red>255</red>
+           <green>255</green>
+           <blue>255</blue>
+          </color>
+         </property>
+         <property name="axisColor">
+          <color>
+           <red>0</red>
+           <green>0</green>
+           <blue>0</blue>
+          </color>
+         </property>
+         <property name="yAxes">
+          <stringlist>
+           <string>{&quot;name&quot;: &quot;Axis 1&quot;, &quot;orientation&quot;: &quot;left&quot;, &quot;label&quot;: &quot;Reactor Power&quot;, &quot;minRange&quot;: -0.50957568, &quot;maxRange&quot;: 6.50957568, &quot;autoRange&quot;: true, &quot;logMode&quot;: false}</string>
+          </stringlist>
+         </property>
+         <property name="showLegend">
+          <bool>true</bool>
+         </property>
+         <property name="bufferSize">
+          <number>200</number>
+         </property>
+         <property name="timeSpan">
+          <double>3600.000000000000000</double>
+         </property>
+         <property name="autoRangeY">
+          <bool>true</bool>
+         </property>
+         <property name="maxYRange">
+          <double>6.000000000000000</double>
+         </property>
+         <property name="curves">
+          <stringlist>
+           <string>{&quot;useArchiveData&quot;: true, &quot;liveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:PowerThm&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Power Thm&quot;, &quot;color&quot;: &quot;black&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+           <string>{&quot;useArchiveData&quot;: true, &quot;liveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:Power6&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Power 6\&quot;&quot;, &quot;color&quot;: &quot;red&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+           <string>{&quot;useArchiveData&quot;: true, &quot;liveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:Power4&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Power 4\&quot;&quot;, &quot;color&quot;: &quot;dodgerblue&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+          </stringlist>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="tab_2">
+      <attribute name="title">
+       <string>Reactor Blades</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayout_2">
+       <item>
+        <widget class="PyDMArchiverTimePlot" name="PyDMArchiverTimePlot_2">
+         <property name="toolTip">
+          <string/>
+         </property>
+         <property name="backgroundColor">
+          <color>
+           <red>255</red>
+           <green>255</green>
+           <blue>255</blue>
+          </color>
+         </property>
+         <property name="axisColor">
+          <color>
+           <red>0</red>
+           <green>0</green>
+           <blue>0</blue>
+          </color>
+         </property>
+         <property name="yAxes">
+          <stringlist>
+           <string>{&quot;name&quot;: &quot;Axis 1&quot;, &quot;orientation&quot;: &quot;left&quot;, &quot;label&quot;: &quot;Shim Blade Height (in)&quot;, &quot;minRange&quot;: -1.2166529024, &quot;maxRange&quot;: 1.2166529024, &quot;autoRange&quot;: true, &quot;logMode&quot;: false}</string>
+           <string>{&quot;name&quot;: &quot;Axis 2&quot;, &quot;orientation&quot;: &quot;right&quot;, &quot;label&quot;: &quot;Reg Rod Height (in)&quot;, &quot;minRange&quot;: -1.16985856, &quot;maxRange&quot;: 1.16985856, &quot;autoRange&quot;: true, &quot;logMode&quot;: false}</string>
+          </stringlist>
+         </property>
+         <property name="showLegend">
+          <bool>true</bool>
+         </property>
+         <property name="bufferSize">
+          <number>200</number>
+         </property>
+         <property name="timeSpan">
+          <double>3600.000000000000000</double>
+         </property>
+         <property name="curves">
+          <stringlist>
+           <string>{&quot;useArchiveData&quot;: true, &quot;liveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:ShimBladeHeight&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Shim Blade&quot;, &quot;color&quot;: &quot;black&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+           <string>{&quot;useArchiveData&quot;: true, &quot;liveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:RegRodHeight&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Reg Rod&quot;, &quot;color&quot;: &quot;red&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 2&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+          </stringlist>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>PyDMTabWidget</class>
+   <extends>QTabWidget</extends>
+   <header>pydm.widgets.tab_bar</header>
+  </customwidget>
+  <customwidget>
+   <class>PyDMTimePlot</class>
+   <extends>QGraphicsView</extends>
+   <header>pydm.widgets.timeplot</header>
+  </customwidget>
+  <customwidget>
+   <class>PyDMArchiverTimePlot</class>
+   <extends>PyDMTimePlot</extends>
+   <header>pydm.widgets.archiver_time_plot</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>
