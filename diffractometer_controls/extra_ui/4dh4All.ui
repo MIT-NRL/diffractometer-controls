@@ -3852,6 +3852,11 @@ background-color: rgb(25, 102, 255);</string>
        <property name="text">
         <string>MITR Operations</string>
        </property>
+       <property name="filenames" stdset="0">
+        <stringlist>
+         <string>mitr_operations.ui</string>
+        </stringlist>
+       </property>
        <property name="showIcon" stdset="0">
         <bool>false</bool>
        </property>
