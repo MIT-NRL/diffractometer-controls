@@ -2,6 +2,7 @@ import argparse
 import cProfile
 import logging
 import os
+import platform
 import pstats
 import sys
 import faulthandler
@@ -25,11 +26,22 @@ def main():
     config.DEFAULT_PROTOCOL = "ca"
 
     # Define EPICS Support dir where all display files are stored
+    if platform.system() == "Windows":
+        separator = ';'
+    else:
+        separator = ':'
+    path_list = [dirs.as_posix() for dirs in [Path('./extra_ui').absolute(),Path('./extra_ui/autoconvert').absolute()]]
     EPICS_SUPPORT = Path('/home/mitr_4dh4/EPICS/synApps-6-3/support')
     DISPLAY_PATH = os.getenv("PYDM_DISPLAYS_PATH",None)
+
     if DISPLAY_PATH is None:
-        path_list = [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*op/adl*')] + [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*opi/medm*')]
-        DISPLAY_PATH = ':'.join(path_list)
+        path_list_adl = [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*op/adl*')] + [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*opi/medm*')]
+        print(path_list_adl,len(path_list_adl))
+        if len(path_list_adl) != 0:
+            path_list.extend(path_list_adl)
+        print(path_list)
+        DISPLAY_PATH = separator.join(path_list)
+        
     os.environ['PYDM_DISPLAYS_PATH'] = DISPLAY_PATH
 
     from pydm.utilities import setup_renderer
@@ -137,6 +149,7 @@ def main():
         macros = dict(P='4dh4:',ioc='4dh4')
 
     # Set the EPICS CA and PVA addresses
+    os.environ["EPICS_CA_AUTO_ADDR_LIST"] = "NO"
     os.environ["EPICS_CA_ADDR_LIST"] = pydm_args.ip_addr + " 10.149.0.101"
     os.environ["EPICS_PVA_ADDR_LIST"] = pydm_args.ip_addr + " 10.149.0.101"
 
@@ -174,6 +187,15 @@ def main():
     app.setApplicationName("MITR")
 
     pydm.utilities.shortcuts.install_connection_inspector(parent=app.main_window)
+
+    def quit_print():
+        print("About to quit")
+
+    app.aboutToQuit.connect(quit_print)
+
+    from bluesky_widgets.qt.threading import wait_for_workers_to_quit, active_thread_count
+
+    app.aboutToQuit.connect(wait_for_workers_to_quit)
 
     exit_code = app.exec_()
 

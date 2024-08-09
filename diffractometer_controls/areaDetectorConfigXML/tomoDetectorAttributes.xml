@@ -14,19 +14,19 @@
 
     <Attribute name="MaxSizeX"                      type="EPICS_PV"     source="4dh4:cam1:MaxSizeX_RBV"                 dbrtype="DBR_NATIVE"  description="Detector total X pixels"/>
     <Attribute name="MaxSizeY"                      type="EPICS_PV"     source="4dh4:cam1:MaxSizeY_RBV"                 dbrtype="DBR_NATIVE"  description="Detector total Y pixels"/>
-    <Attribute name="MinX"                          type="EPICS_PV"     source="4dh4:cam1:MinX"                         dbrtype="DBR_NATIVE"  description="Detector readout min X"/>
-    <Attribute name="MinY"                          type="EPICS_PV"     source="4dh4:cam1:MinY"                         dbrtype="DBR_NATIVE"  description="Detector readout min Y"/>
-    <Attribute name="SizeX"                         type="EPICS_PV"     source="4dh4:cam1:SizeX"                        dbrtype="DBR_NATIVE"  description="Detector readout size X"/>
-    <Attribute name="SizeY"                         type="EPICS_PV"     source="4dh4:cam1:SizeY"                        dbrtype="DBR_NATIVE"  description="Detector readout size Y"/>
-    <Attribute name="BinX"                          type="EPICS_PV"     source="4dh4:cam1:BinX"                         dbrtype="DBR_NATIVE"  description="Detector readout bin X"/>
-    <Attribute name="BinY"                          type="EPICS_PV"     source="4dh4:cam1:BinY"                         dbrtype="DBR_NATIVE"  description="Detector readout bin Y"/>
+    <Attribute name="MinX"                          type="EPICS_PV"     source="4dh4:cam1:MinX_RBV"                         dbrtype="DBR_NATIVE"  description="Detector readout min X"/>
+    <Attribute name="MinY"                          type="EPICS_PV"     source="4dh4:cam1:MinY_RBV"                         dbrtype="DBR_NATIVE"  description="Detector readout min Y"/>
+    <Attribute name="SizeX"                         type="EPICS_PV"     source="4dh4:cam1:SizeX_RBV"                        dbrtype="DBR_NATIVE"  description="Detector readout size X"/>
+    <Attribute name="SizeY"                         type="EPICS_PV"     source="4dh4:cam1:SizeY_RBV"                        dbrtype="DBR_NATIVE"  description="Detector readout size Y"/>
+    <Attribute name="BinX"                          type="EPICS_PV"     source="4dh4:cam1:BinX_RBV"                         dbrtype="DBR_NATIVE"  description="Detector readout bin X"/>
+    <Attribute name="BinY"                          type="EPICS_PV"     source="4dh4:cam1:BinY_RBV"                         dbrtype="DBR_NATIVE"  description="Detector readout bin Y"/>
 
     <Attribute name="AcquireTime"                   type="EPICS_PV"     source="4dh4:cam1:AcquireTime_RBV"              dbrtype="DBR_NATIVE"  description="Exposure time"/>
     <Attribute name="AcquirePeriod"                 type="EPICS_PV"     source="4dh4:cam1:AcquirePeriod_RBV"            dbrtype="DBR_NATIVE"  description="Exposure period"/>
     <Attribute name="FrameRate"                     type="EPICS_PV"     source="4dh4:cam1:FrameRate_RBV"                dbrtype="DBR_NATIVE"  description="Frame rate"/>
     <Attribute name="FrameRateEnable"               type="EPICS_PV"     source="4dh4:cam1:FrameRateEnable_RBV"          dbrtype="DBR_STRING"  description="Frame rate enable"/>
     <Attribute name="Gain"                          type="EPICS_PV"     source="4dh4:cam1:Gain_RBV"                     dbrtype="DBR_NATIVE"  description="Gain"/>
-    <Attribute name="GainAuto"                      type="EPICS_PV"     source="4dh4:cam1:GainAuto_RBV"                 dbrtype="DBR_NATIVE"  description="Gain auto"/>
+    <Attribute name="Offset"                        type="EPICS_PV"     source="4dh4:cam1:Offset_RBV"                   dbrtype="DBR_NATIVE"  description="Offset"/>
     <Attribute name="PixelFormat"                   type="EPICS_PV"     source="4dh4:cam1:PixelFormat_RBV"              dbrtype="DBR_STRING"  description="Readout pixel format"/>
     <Attribute name="ConvertPixelFormat"            type="EPICS_PV"     source="4dh4:cam1:ConvertPixelFormat_RBV"       dbrtype="DBR_STRING"  description="Converted pixel format"/>
     <Attribute name="ArrayCounter"                  type="EPICS_PV"     source="4dh4:cam1:ArrayCounter_RBV"             dbrtype="DBR_NATIVE"  description="Frames collected to date"/>
@@ -37,12 +37,12 @@
     <Attribute name="FilePath"                      type="EPICS_PV"     source="4dh4:HDF1:FilePath_RBV"                 dbrtype="DBR_STRING"  description="File path"/>
     <Attribute name="HDFPluginVersion"              type="EPICS_PV"     source="4dh4:HDF1:PluginType_RBV"               dbrtype="DBR_STRING"  description="File plugin type"/>
 
-    <Attribute name="ReactorPower"                   type="EPICS_PV"     source="mitr:power_6"                             dbrtype="DBR_NATIVE"  description="Ring current (mA)"/>
+    <Attribute name="ReactorPower"                   type="EPICS_PV"     source="mitr:Power6"                             dbrtype="DBR_NATIVE"  description="Reactor power (MW)"/>
     
     <Attribute name="ScintillatorType"              type="EPICS_PV"     source="4dh4:TS:ScintillatorType"             dbrtype="DBR_STRING"  description="Scintillator type"/>
     <Attribute name="ScintillatorThickness"         type="EPICS_PV"     source="4dh4:TS:ScintillatorThickness"        dbrtype="DBR_NATIVE"  description="Scintillator thickness (microns)"/>
  
-    <Attribute name="ImagePixelSize"                type="EPICS_PV"     source="4dh4:TS:ImagePixelSize"               dbrtype="DBR_NATIVE"  description="Pixel size on sample (microns)"/>
+    <Attribute name="SensorPixelSize"                type="EPICS_PV"     source="4dh4:TS:SensorPixelSize"               dbrtype="DBR_NATIVE"  description="Pixel size on sample (microns)"/>
     <Attribute name="DetectorPixelSize"             type="EPICS_PV"     source="4dh4:TS:DetectorPixelSize"            dbrtype="DBR_NATIVE"  description="Detector pixel size (microns)"/>
     <Attribute name="CameraObjective"               type="EPICS_PV"     source="4dh4:TS:CameraObjective"              dbrtype="DBR_STRING"  description="Objective Magnification"/>
     <Attribute name="CameraTubeLength"              type="EPICS_PV"     source="4dh4:TS:CameraTubeLength"             dbrtype="DBR_NATIVE"  description="Tube length (mm)"/>
@@ -60,12 +60,15 @@
 
     <Attribute name="HDF5FrameLocation"             type="EPICS_PV"     source="4dh4:cam1:FrameType"                dbrtype="DBR_STRING"  description="Where to store frame in HDF5 file"/>
 
-    <Attribute name="SampleTheta"                   type="EPICS_PV"     source="4dh4:m6.VAL"                        dbrtype="DBR_DOUBLE"   description="Rotational angle of sample"/>
+    <Attribute name="SampleTheta_VAL"                   type="EPICS_PV"     source="4dh4:m3.VAL"                        dbrtype="DBR_DOUBLE"   description="Rotational angle of sample set value"/>
+    <Attribute name="SampleTheta_RVAL"                   type="EPICS_PV"     source="4dh4:m3.RBV"                        dbrtype="DBR_DOUBLE"   description="Rotational angle of sample readback value"/>
+    <Attribute name="SampleX"                       type="EPICS_PV"     source="4dh4:m14.VAL"                        dbrtype="DBR_DOUBLE"   description="Sample x position set value"/>
+    <Attribute name="SampleX_RBV"                       type="EPICS_PV"     source="4dh4:m14.RBV"                        dbrtype="DBR_DOUBLE"   description="Sample x position readback value"/>
 
-    <Attribute name="CcdCameraX"                    type="EPICS_PV" source="4dh4:m12.VAL"                        dbrtype="DBR_DOUBLE"     description="Camera x position in the beam"/>
-    <Attribute name="CcdCameraXDial"                type="EPICS_PV" source="4dh4:m12.DVAL"                       dbrtype="DBR_DOUBLE"/>
+    <Attribute name="CcdCameraX"                    type="EPICS_PV" source="4dh4:m4.VAL"                        dbrtype="DBR_DOUBLE"     description="Camera x position in the beam"/>
+    <Attribute name="CcdCameraX_RBV"                type="EPICS_PV" source="4dh4:m4.RBV"                       dbrtype="DBR_DOUBLE"/>
 
-    <Attribute name="CcdCameraFocusDist"            type="EPICS_PV" source="4dh4:m4.VAL"                        dbrtype="DBR_DOUBLE"    description="Camera distance from scintillator box"/>
+    <Attribute name="CcdCameraFocusDist"            type="EPICS_PV" source="4dh4:m12.VAL"                        dbrtype="DBR_DOUBLE"    description="Camera distance from scintillator box"/>
 
 </Attributes>
 
