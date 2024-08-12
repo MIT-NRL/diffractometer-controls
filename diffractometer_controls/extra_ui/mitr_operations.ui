@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>707</width>
-    <height>589</height>
+    <width>873</width>
+    <height>655</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -16,6 +16,11 @@
   <layout class="QVBoxLayout" name="verticalLayout_3">
    <item>
     <widget class="PyDMTabWidget" name="PyDMTabWidget">
+     <property name="font">
+      <font>
+       <pointsize>16</pointsize>
+      </font>
+     </property>
      <property name="toolTip">
       <string/>
      </property>
@@ -63,7 +68,7 @@ QTabBar::tab:selected
 QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
      </property>
      <property name="currentIndex">
-      <number>0</number>
+      <number>1</number>
      </property>
      <property name="alarmChannels">
       <stringlist>
@@ -75,9 +80,291 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
       <attribute name="title">
        <string>Reactor Power</string>
       </attribute>
-      <layout class="QVBoxLayout" name="verticalLayout">
+      <layout class="QHBoxLayout" name="horizontalLayout">
+       <item>
+        <layout class="QVBoxLayout" name="verticalLayout_6">
+         <property name="spacing">
+          <number>50</number>
+         </property>
+         <item>
+          <widget class="PyDMFrame" name="PyDMFrame">
+           <property name="minimumSize">
+            <size>
+             <width>130</width>
+             <height>150</height>
+            </size>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>130</width>
+             <height>150</height>
+            </size>
+           </property>
+           <property name="toolTip">
+            <string/>
+           </property>
+           <property name="frameShape">
+            <enum>QFrame::Box</enum>
+           </property>
+           <property name="lineWidth">
+            <number>2</number>
+           </property>
+           <layout class="QVBoxLayout" name="verticalLayout">
+            <property name="leftMargin">
+             <number>6</number>
+            </property>
+            <property name="topMargin">
+             <number>6</number>
+            </property>
+            <property name="rightMargin">
+             <number>6</number>
+            </property>
+            <property name="bottomMargin">
+             <number>6</number>
+            </property>
+            <item>
+             <widget class="PyDMLabel" name="PyDMLabel">
+              <property name="font">
+               <font>
+                <pointsize>16</pointsize>
+               </font>
+              </property>
+              <property name="toolTip">
+               <string/>
+              </property>
+              <property name="text">
+               <string>Power Thermal</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignCenter</set>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="PyDMLabel" name="PyDMLabel_2">
+              <property name="font">
+               <font>
+                <pointsize>20</pointsize>
+               </font>
+              </property>
+              <property name="toolTip">
+               <string/>
+              </property>
+              <property name="autoFillBackground">
+               <bool>true</bool>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignCenter</set>
+              </property>
+              <property name="showUnits" stdset="0">
+               <bool>true</bool>
+              </property>
+              <property name="alarmSensitiveContent" stdset="0">
+               <bool>true</bool>
+              </property>
+              <property name="alarmSensitiveBorder" stdset="0">
+               <bool>false</bool>
+              </property>
+              <property name="channel" stdset="0">
+               <string>ca://mitr:PowerThm</string>
+              </property>
+              <property name="enableRichText" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="PyDMFrame" name="PyDMFrame_2">
+           <property name="minimumSize">
+            <size>
+             <width>130</width>
+             <height>150</height>
+            </size>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>130</width>
+             <height>150</height>
+            </size>
+           </property>
+           <property name="toolTip">
+            <string/>
+           </property>
+           <property name="frameShape">
+            <enum>QFrame::Box</enum>
+           </property>
+           <property name="lineWidth">
+            <number>2</number>
+           </property>
+           <layout class="QVBoxLayout" name="verticalLayout_5">
+            <property name="leftMargin">
+             <number>6</number>
+            </property>
+            <property name="topMargin">
+             <number>6</number>
+            </property>
+            <property name="rightMargin">
+             <number>6</number>
+            </property>
+            <property name="bottomMargin">
+             <number>6</number>
+            </property>
+            <item>
+             <widget class="PyDMLabel" name="PyDMLabel_3">
+              <property name="font">
+               <font>
+                <pointsize>16</pointsize>
+               </font>
+              </property>
+              <property name="toolTip">
+               <string/>
+              </property>
+              <property name="text">
+               <string>Power 6&quot;</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignCenter</set>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="PyDMLabel" name="PyDMLabel_4">
+              <property name="font">
+               <font>
+                <pointsize>20</pointsize>
+               </font>
+              </property>
+              <property name="toolTip">
+               <string/>
+              </property>
+              <property name="autoFillBackground">
+               <bool>true</bool>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignCenter</set>
+              </property>
+              <property name="showUnits" stdset="0">
+               <bool>true</bool>
+              </property>
+              <property name="alarmSensitiveContent" stdset="0">
+               <bool>true</bool>
+              </property>
+              <property name="alarmSensitiveBorder" stdset="0">
+               <bool>false</bool>
+              </property>
+              <property name="channel" stdset="0">
+               <string>ca://mitr:Power6</string>
+              </property>
+              <property name="enableRichText" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="PyDMFrame" name="PyDMFrame_3">
+           <property name="minimumSize">
+            <size>
+             <width>130</width>
+             <height>150</height>
+            </size>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>130</width>
+             <height>150</height>
+            </size>
+           </property>
+           <property name="toolTip">
+            <string/>
+           </property>
+           <property name="frameShape">
+            <enum>QFrame::Box</enum>
+           </property>
+           <property name="lineWidth">
+            <number>2</number>
+           </property>
+           <layout class="QVBoxLayout" name="verticalLayout_4">
+            <property name="leftMargin">
+             <number>6</number>
+            </property>
+            <property name="topMargin">
+             <number>6</number>
+            </property>
+            <property name="rightMargin">
+             <number>6</number>
+            </property>
+            <property name="bottomMargin">
+             <number>6</number>
+            </property>
+            <item>
+             <widget class="PyDMLabel" name="PyDMLabel_7">
+              <property name="font">
+               <font>
+                <pointsize>16</pointsize>
+               </font>
+              </property>
+              <property name="toolTip">
+               <string/>
+              </property>
+              <property name="text">
+               <string>Power 4&quot;</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignCenter</set>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="PyDMLabel" name="PyDMLabel_8">
+              <property name="font">
+               <font>
+                <pointsize>20</pointsize>
+               </font>
+              </property>
+              <property name="toolTip">
+               <string/>
+              </property>
+              <property name="autoFillBackground">
+               <bool>true</bool>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignCenter</set>
+              </property>
+              <property name="showUnits" stdset="0">
+               <bool>true</bool>
+              </property>
+              <property name="alarmSensitiveContent" stdset="0">
+               <bool>true</bool>
+              </property>
+              <property name="alarmSensitiveBorder" stdset="0">
+               <bool>false</bool>
+              </property>
+              <property name="channel" stdset="0">
+               <string>ca://mitr:Power4</string>
+              </property>
+              <property name="enableRichText" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+        </layout>
+       </item>
        <item>
         <widget class="PyDMArchiverTimePlot" name="PyDMArchiverTimePlot">
+         <property name="font">
+          <font>
+           <pointsize>15</pointsize>
+          </font>
+         </property>
          <property name="toolTip">
           <string/>
          </property>
@@ -103,7 +390,12 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
          </property>
          <property name="yAxes">
           <stringlist>
-           <string>{&quot;name&quot;: &quot;Axis 1&quot;, &quot;orientation&quot;: &quot;left&quot;, &quot;label&quot;: &quot;Reactor Power&quot;, &quot;minRange&quot;: -0.50957568, &quot;maxRange&quot;: 6.50957568, &quot;autoRange&quot;: true, &quot;logMode&quot;: false}</string>
+           <string>{&quot;name&quot;: &quot;Axis 1&quot;, &quot;orientation&quot;: &quot;left&quot;, &quot;label&quot;: &quot;Reactor Power&quot;, &quot;minRange&quot;: -4.995220521931166, &quot;maxRange&quot;: 4.995220521931166, &quot;autoRange&quot;: true, &quot;logMode&quot;: false}</string>
+          </stringlist>
+         </property>
+         <property name="xLabels">
+          <stringlist>
+           <string>Time</string>
           </stringlist>
          </property>
          <property name="showLegend">
@@ -119,11 +411,11 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
           <bool>true</bool>
          </property>
          <property name="maxYRange">
-          <double>6.000000000000000</double>
+          <double>1.000000000000000</double>
          </property>
          <property name="curves">
           <stringlist>
-           <string>{&quot;useArchiveData&quot;: true, &quot;liveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:PowerThm&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Power Thm&quot;, &quot;color&quot;: &quot;black&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+           <string>{&quot;useArchiveData&quot;: true, &quot;liveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:PowerThm&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Power Thm&quot;, &quot;color&quot;: &quot;black&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 3, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
            <string>{&quot;useArchiveData&quot;: true, &quot;liveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:Power6&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Power 6\&quot;&quot;, &quot;color&quot;: &quot;red&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
            <string>{&quot;useArchiveData&quot;: true, &quot;liveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:Power4&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Power 4\&quot;&quot;, &quot;color&quot;: &quot;dodgerblue&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
           </stringlist>
@@ -136,9 +428,195 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
       <attribute name="title">
        <string>Reactor Blades</string>
       </attribute>
-      <layout class="QVBoxLayout" name="verticalLayout_2">
+      <layout class="QHBoxLayout" name="horizontalLayout_3">
+       <item>
+        <layout class="QVBoxLayout" name="verticalLayout_12">
+         <property name="spacing">
+          <number>50</number>
+         </property>
+         <item>
+          <widget class="PyDMFrame" name="PyDMFrame_4">
+           <property name="minimumSize">
+            <size>
+             <width>130</width>
+             <height>150</height>
+            </size>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>130</width>
+             <height>150</height>
+            </size>
+           </property>
+           <property name="toolTip">
+            <string/>
+           </property>
+           <property name="frameShape">
+            <enum>QFrame::Panel</enum>
+           </property>
+           <property name="lineWidth">
+            <number>2</number>
+           </property>
+           <layout class="QVBoxLayout" name="verticalLayout_11">
+            <property name="leftMargin">
+             <number>6</number>
+            </property>
+            <property name="topMargin">
+             <number>6</number>
+            </property>
+            <property name="rightMargin">
+             <number>6</number>
+            </property>
+            <property name="bottomMargin">
+             <number>6</number>
+            </property>
+            <item>
+             <widget class="PyDMLabel" name="PyDMLabel_16">
+              <property name="font">
+               <font>
+                <pointsize>16</pointsize>
+               </font>
+              </property>
+              <property name="toolTip">
+               <string/>
+              </property>
+              <property name="text">
+               <string>Blade 6</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignCenter</set>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="PyDMLabel" name="PyDMLabel_15">
+              <property name="font">
+               <font>
+                <pointsize>20</pointsize>
+               </font>
+              </property>
+              <property name="toolTip">
+               <string/>
+              </property>
+              <property name="autoFillBackground">
+               <bool>true</bool>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignCenter</set>
+              </property>
+              <property name="showUnits" stdset="0">
+               <bool>true</bool>
+              </property>
+              <property name="alarmSensitiveContent" stdset="0">
+               <bool>true</bool>
+              </property>
+              <property name="alarmSensitiveBorder" stdset="0">
+               <bool>false</bool>
+              </property>
+              <property name="channel" stdset="0">
+               <string>ca://mitr:ShimBladeHeight</string>
+              </property>
+              <property name="enableRichText" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="PyDMFrame" name="PyDMFrame_9">
+           <property name="minimumSize">
+            <size>
+             <width>130</width>
+             <height>150</height>
+            </size>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>130</width>
+             <height>150</height>
+            </size>
+           </property>
+           <property name="toolTip">
+            <string/>
+           </property>
+           <layout class="QVBoxLayout" name="verticalLayout_10">
+            <property name="leftMargin">
+             <number>6</number>
+            </property>
+            <property name="topMargin">
+             <number>6</number>
+            </property>
+            <property name="rightMargin">
+             <number>6</number>
+            </property>
+            <property name="bottomMargin">
+             <number>6</number>
+            </property>
+            <item>
+             <widget class="PyDMLabel" name="PyDMLabel_17">
+              <property name="font">
+               <font>
+                <pointsize>16</pointsize>
+               </font>
+              </property>
+              <property name="toolTip">
+               <string/>
+              </property>
+              <property name="text">
+               <string>Reg Rod</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignCenter</set>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="PyDMLabel" name="PyDMLabel_18">
+              <property name="font">
+               <font>
+                <pointsize>20</pointsize>
+               </font>
+              </property>
+              <property name="toolTip">
+               <string/>
+              </property>
+              <property name="autoFillBackground">
+               <bool>true</bool>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignCenter</set>
+              </property>
+              <property name="showUnits" stdset="0">
+               <bool>true</bool>
+              </property>
+              <property name="alarmSensitiveContent" stdset="0">
+               <bool>true</bool>
+              </property>
+              <property name="alarmSensitiveBorder" stdset="0">
+               <bool>false</bool>
+              </property>
+              <property name="channel" stdset="0">
+               <string>ca://mitr:RegRodHeight</string>
+              </property>
+              <property name="enableRichText" stdset="0">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+        </layout>
+       </item>
        <item>
         <widget class="PyDMArchiverTimePlot" name="PyDMArchiverTimePlot_2">
+         <property name="font">
+          <font>
+           <pointsize>25</pointsize>
+          </font>
+         </property>
          <property name="toolTip">
           <string/>
          </property>
@@ -158,8 +636,12 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
          </property>
          <property name="yAxes">
           <stringlist>
-           <string>{&quot;name&quot;: &quot;Axis 1&quot;, &quot;orientation&quot;: &quot;left&quot;, &quot;label&quot;: &quot;Shim Blade Height (in)&quot;, &quot;minRange&quot;: -1.2166529024, &quot;maxRange&quot;: 1.2166529024, &quot;autoRange&quot;: true, &quot;logMode&quot;: false}</string>
-           <string>{&quot;name&quot;: &quot;Axis 2&quot;, &quot;orientation&quot;: &quot;right&quot;, &quot;label&quot;: &quot;Reg Rod Height (in)&quot;, &quot;minRange&quot;: -1.16985856, &quot;maxRange&quot;: 1.16985856, &quot;autoRange&quot;: true, &quot;logMode&quot;: false}</string>
+           <string>{&quot;name&quot;: &quot;Axis 1&quot;, &quot;orientation&quot;: &quot;left&quot;, &quot;label&quot;: &quot;Height (in)&quot;, &quot;minRange&quot;: -1.4233118124214843, &quot;maxRange&quot;: 1.4233118124214843, &quot;autoRange&quot;: true, &quot;logMode&quot;: false}</string>
+          </stringlist>
+         </property>
+         <property name="xLabels">
+          <stringlist>
+           <string>Time</string>
           </stringlist>
          </property>
          <property name="showLegend">
@@ -174,7 +656,7 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
          <property name="curves">
           <stringlist>
            <string>{&quot;useArchiveData&quot;: true, &quot;liveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:ShimBladeHeight&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Shim Blade&quot;, &quot;color&quot;: &quot;black&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
-           <string>{&quot;useArchiveData&quot;: true, &quot;liveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:RegRodHeight&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Reg Rod&quot;, &quot;color&quot;: &quot;red&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 2&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+           <string>{&quot;useArchiveData&quot;: true, &quot;liveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:RegRodHeight&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Reg Rod&quot;, &quot;color&quot;: &quot;red&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
           </stringlist>
          </property>
         </widget>
@@ -192,6 +674,11 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
    <header>pydm.widgets.tab_bar</header>
   </customwidget>
   <customwidget>
+   <class>PyDMLabel</class>
+   <extends>QLabel</extends>
+   <header>pydm.widgets.label</header>
+  </customwidget>
+  <customwidget>
    <class>PyDMTimePlot</class>
    <extends>QGraphicsView</extends>
    <header>pydm.widgets.timeplot</header>
@@ -200,6 +687,12 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
    <class>PyDMArchiverTimePlot</class>
    <extends>PyDMTimePlot</extends>
    <header>pydm.widgets.archiver_time_plot</header>
+  </customwidget>
+  <customwidget>
+   <class>PyDMFrame</class>
+   <extends>QFrame</extends>
+   <header>pydm.widgets.frame</header>
+   <container>1</container>
   </customwidget>
  </customwidgets>
  <resources/>

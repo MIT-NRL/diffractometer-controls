@@ -150,9 +150,9 @@ def main():
 
     # Set the EPICS CA and PVA addresses
     os.environ["EPICS_CA_AUTO_ADDR_LIST"] = "NO"
-    os.environ["EPICS_CA_ADDR_LIST"] = pydm_args.ip_addr + " 10.149.0.101"
-    os.environ["EPICS_PVA_ADDR_LIST"] = pydm_args.ip_addr + " 10.149.0.101"
-    os.environ["PYDM_ARCHIVER_URL"] = "http://192.168.64.4:17665"
+    os.environ["EPICS_CA_ADDR_LIST"] = pydm_args.ip_addr + " s-spectrometer.mit.edu"
+    os.environ["EPICS_PVA_ADDR_LIST"] = pydm_args.ip_addr + " s-spectrometer.mit.edu"
+    os.environ["PYDM_ARCHIVER_URL"] = "http://ice-11.mit.edu:17668"
 
     if pydm_args.ip_addr == 'localhost':
         os.environ["EPICS_CA_AUTO_ADDR_LIST"] = "NO"
