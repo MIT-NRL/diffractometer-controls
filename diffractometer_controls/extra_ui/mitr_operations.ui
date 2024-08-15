@@ -401,17 +401,26 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
          <property name="showLegend">
           <bool>true</bool>
          </property>
+         <property name="maxRedrawRate" stdset="0">
+          <number>15</number>
+         </property>
          <property name="bufferSize">
-          <number>200</number>
+          <number>86400</number>
+         </property>
+         <property name="updateMode" stdset="0">
+          <enum>PyDMTimePlot::AtFixedRate</enum>
          </property>
          <property name="timeSpan">
-          <double>3600.000000000000000</double>
+          <double>43200.000000000000000</double>
+         </property>
+         <property name="updateInterval">
+          <double>0.500000000000000</double>
          </property>
          <property name="autoRangeY">
           <bool>true</bool>
          </property>
          <property name="maxYRange">
-          <double>1.000000000000000</double>
+          <double>6.000000000000000</double>
          </property>
          <property name="curves">
           <stringlist>
@@ -647,11 +656,20 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
          <property name="showLegend">
           <bool>true</bool>
          </property>
+         <property name="maxRedrawRate" stdset="0">
+          <number>15</number>
+         </property>
          <property name="bufferSize">
-          <number>200</number>
+          <number>86400</number>
+         </property>
+         <property name="updateMode" stdset="0">
+          <enum>PyDMTimePlot::AtFixedRate</enum>
          </property>
          <property name="timeSpan">
-          <double>3600.000000000000000</double>
+          <double>43200.000000000000000</double>
+         </property>
+         <property name="updateInterval">
+          <double>0.500000000000000</double>
          </property>
          <property name="curves">
           <stringlist>
