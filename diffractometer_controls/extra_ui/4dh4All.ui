@@ -119,7 +119,7 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
       <enum>QTabWidget::Rounded</enum>
      </property>
      <property name="currentIndex">
-      <number>0</number>
+      <number>2</number>
      </property>
      <property name="iconSize">
       <size>
@@ -1421,7 +1421,7 @@ background-color: rgb(25, 102, 255);</string>
          <property name="macros" stdset="0">
           <stringlist>
            <string>R=cam1:</string>
-           <string>R=cam1:</string>
+           <string>R=cam1:,im=image1:</string>
           </stringlist>
          </property>
          <property name="openInNewWindow" stdset="0">
@@ -1722,8 +1722,32 @@ background-color: rgb(25, 102, 255);</string>
           <string notr="true">color: rgb(228, 228, 228);
 background-color: rgb(25, 102, 255);</string>
          </property>
+         <property name="text">
+          <string>Camera URL</string>
+         </property>
+         <property name="filenames" stdset="0">
+          <stringlist>
+           <string>URLDriver.ui</string>
+           <string>URLDriverSetup.ui</string>
+           <string>cam.ui</string>
+          </stringlist>
+         </property>
+         <property name="titles" stdset="0">
+          <stringlist>
+           <string>URL Driver</string>
+           <string>URL Driver Setup</string>
+           <string>URL Viewer</string>
+          </stringlist>
+         </property>
          <property name="showIcon" stdset="0">
           <bool>false</bool>
+         </property>
+         <property name="macros" stdset="0">
+          <stringlist>
+           <string>R=camURL:</string>
+           <string>R=camURL:</string>
+           <string>R=camURL:,im=urlimage1:</string>
+          </stringlist>
          </property>
          <property name="openInNewWindow" stdset="0">
           <bool>true</bool>
