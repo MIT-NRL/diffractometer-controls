@@ -71,7 +71,7 @@ class MainScreen(display.MITRDisplay):
             # app.re_dispatcher.subscribe(stream_documents_into_runs(figModel.add_run))
 
             viewer = QtFigure()
-            app.re_dispatcher.subscribe(NewLivePlot('he3psd_counts',x='he3psd_position_x',ax=viewer.axes,marker='o',lw=1,mfc='none'))
+            app.re_dispatcher.subscribe(NewLivePlot('he3psd0_counts',x='he3psd0_position_x',ax=viewer.axes,marker='o',lw=1,mfc='none'))
 
             app.re_dispatcher.start()
             # install_remote_qt_kicker()
@@ -87,5 +87,5 @@ class MainScreen(display.MITRDisplay):
 
             # self.ui.psdDisplay.addChannel(y_channel=f"ca://{self.macros['P']}det1:LiveCountsD0",color='black',symbolSize=5,symbol='o')
 
-    def printstuff(self):
-         print(self.runs)
+
+         
