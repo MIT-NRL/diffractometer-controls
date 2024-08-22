@@ -20,5 +20,5 @@ sd.baseline.append(reactor_power_4)
 sd.baseline.append(reactor_power_thm)
 
 # Install suspenders depending on the reactor power
-sus = SuspendFloor(reactor_power_6, 4, resume_thresh=5)
+sus = SuspendFloor(reactor_power_6, 5, resume_thresh=5.2)
 RE.install_suspender(sus)
