@@ -1356,14 +1356,16 @@ background-color: rgb(25, 102, 255);</string>
          </property>
          <property name="filenames" stdset="0">
           <stringlist>
+           <string>he3_detector_config.ui</string>
            <string>he3_detectors.ui</string>
            <string>he3_detectors.ui</string>
           </stringlist>
          </property>
          <property name="titles" stdset="0">
           <stringlist>
-           <string>Detector 0</string>
-           <string>Detector 7</string>
+           <string>Detector Config</string>
+           <string>Detector 0 Viewer</string>
+           <string>Detector 7 Viewer</string>
           </stringlist>
          </property>
          <property name="showIcon" stdset="0">
@@ -1371,8 +1373,9 @@ background-color: rgb(25, 102, 255);</string>
          </property>
          <property name="macros" stdset="0">
           <stringlist>
-           <string>DN=0</string>
-           <string>DN=7</string>
+           <string>R=he3PSD:</string>
+           <string>R=he3PSD:,DN=0</string>
+           <string>R=he3PSD:,DN=7</string>
           </stringlist>
          </property>
          <property name="openInNewWindow" stdset="0">
