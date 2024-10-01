@@ -25,13 +25,14 @@ from functools import partial
 def tomo_scan(file_name:str, 
               detector, 
               motor, 
+              exposure_time:float = None,
               angle_step:float = 1,
               start_angle:float = None, 
               stop_angle:float = None,
               return_to_start:bool = True, 
               md:dict = None):
     '''
-    Tomography scan that performs dark field scans, flat field scans, and then the actual tomography scan.
+    Tomography scan that defaults to 360-step degrees.
     '''
     if (start_angle is None) and (stop_angle is None):
         start_angle, stop_angle = 0, 360-angle_step
@@ -57,6 +58,13 @@ def tomo_scan(file_name:str,
     file_name = str(file_name).strip().replace(" ","_").replace("__","_")
 
     detector = [detector]
+
+    old_exposure_time = detector[0].cam.acquire_time.get()
+
+    if exposure_time is not None:
+        for det in detector:
+            yield from bps.mov(det.cam.acquire_time, exposure_time)
+
     # md_args = list(chain(*((repr(motor), start, stop) for motor, start_angle, stop_angle)))
     motor_names = motor.name
     md = md or {}
@@ -132,6 +140,8 @@ def tomo_scan(file_name:str,
         # yield from bps.pause()
         yield from inner_scan_nd()
 
+        yield from bps.mov(detector[0].cam.acquire_time, old_exposure_time)
+
         if return_to_start:
             yield from bps.mv(motor, start_angle)
 
@@ -142,6 +152,7 @@ def tomo_scan(file_name:str,
 
 def imaging(file_name:str, 
               detector, 
+              exposure_time:float = None,
               num_exposures:int = 1,
               md:dict = None):
     '''
@@ -151,6 +162,12 @@ def imaging(file_name:str,
     file_name = str(file_name).strip().replace(" ","_").replace("__","_")
 
     detector = [detector]
+
+    old_exposure_time = detector[0].cam.acquire_time.get()
+    if exposure_time is not None:
+        for det in detector:
+            yield from bps.mov(det.cam.acquire_time, exposure_time)
+
     # md_args = list(chain(*((repr(motor), start, stop) for motor, start_angle, stop_angle)))
     md = md or {}
     _md = {
@@ -178,6 +195,8 @@ def imaging(file_name:str,
 
         yield from bps.repeater(num_exposures,exposure)
 
+        yield from bps.mov(detector[0].cam.acquire_time, old_exposure_time)
+
     return(yield from main_plan())
 
 
@@ -189,16 +208,39 @@ def imaging_scan(file_name:str,
               start_pos:float, 
               stop_pos:float, 
               step:float,
+              exposure_time:float = None,
+              return_to_original_position:bool = True,
               md:dict = None):
     '''
     General scan for the imaging detector system.
     '''
 
+    original_pos = motor.position
+
+    num_steps = int(round((stop_pos-start_pos)/step) + 1)
+    step = (stop_pos-start_pos)/(num_steps-1)
+    total_time = num_steps*detector.cam.acquire_time.get() # in seconds
+
+    print("#===============#")
+    print(f"Starting scan of {motor.name} from {start_pos} to {stop_pos} \nin {num_steps} steps of {step} {motor.egu}.")
+    hours = total_time // 3600
+    minutes = (total_time % 3600) // 60
+    seconds = total_time % 60
+    print(f"The scan time is estimated to be {hours} hours, {minutes} minutes, and {seconds} seconds.")
+    print("#===============#")
+
+
     file_name = str(file_name).strip().replace(" ","_").replace("__","_")
 
-    num_steps = int(round(stop_pos-start_pos)/step) + 1
 
     detector = [detector]
+
+    old_exposure_time = detector[0].cam.acquire_time.get()
+
+    if exposure_time is not None:
+        for det in detector:
+            yield from bps.mov(det.cam.acquire_time, exposure_time)
+
     # md_args = list(chain(*((repr(motor), start, stop) for motor, start_angle, stop_angle)))
     motor_names = motor.name
     md = md or {}
@@ -251,5 +293,10 @@ def imaging_scan(file_name:str,
         # yield from bps.checkpoint()
         # yield from bps.pause()
         yield from inner_scan_nd()
+
+        yield from bps.mov(detector[0].cam.acquire_time, old_exposure_time)
+
+        if return_to_original_position:
+            yield from bps.mv(motor, original_pos)
 
     return(yield from main_plan())
