@@ -20,6 +20,7 @@ cam_x = EpicsMotor("4dh4:m1",name="cam_x",labels=["positioner"])
 #===============================================================================#
 # Diffraction motors
 sample_th = EpicsMotor("4dh4:m10",name="sample_th",labels=["positioner"])
+sample_x = EpicsMotor("4dh4:m14",name="sample_x",labels=["positioner"])
 
 det_psd_x = EpicsMotor("4dh4:m9",name="det_psd_x",labels=["positioner"])
 
@@ -54,6 +55,7 @@ analyzer2_curve = AnalyzerCurvature("4dh4:m15",name="analyzer2_curve")
 
 
 sd.baseline.append(sample_th)
+sd.baseline.append(sample_x)
 sd.baseline.append(det_psd_x)
 sd.baseline.append(analyzer1_angle)
 sd.baseline.append(analyzer1_x)
