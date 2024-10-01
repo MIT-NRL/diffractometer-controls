@@ -1,9 +1,17 @@
 import numpy as np
 from ophyd import (Device, Component as Cpt,FormattedComponent as FCpt,
                    EpicsSignal, EpicsSignalRO, EpicsSignalWithRBV, 
-                   EpicsMotor, Signal)
+                   EpicsMotor, Signal, DerivedSignal)
 from ophyd.device import DeviceStatus
 from ophyd.status import Status, SubscriptionStatus
+
+
+class PositionSignal(DerivedSignal):
+    def forward(self, value):
+        return np.linspace(175.20821972700517,175.20821972700517,value)
+
+    def inverse(self, value):
+        return len(value)
 
 
 class HE3PSD(Device):
@@ -12,35 +20,13 @@ class HE3PSD(Device):
     acquire_time = Cpt(EpicsSignalWithRBV, "AcquireTime",kind='config')
     nbins = Cpt(EpicsSignalWithRBV, "NBins",kind='config')
 
-    position_x = Cpt(Signal,value=np.linspace(-150,150,350),kind="hinted")
-
-    # counts0 = Cpt(EpicsSignalRO, ":CountsD0")
-    # counts1 = Cpt(EpicsSignalRO, ":CountsD1")
-    # counts2 = Cpt(EpicsSignalRO, ":CountsD2")
-    # counts3 = Cpt(EpicsSignalRO, ":CountsD3")
-    # counts4 = Cpt(EpicsSignalRO, ":CountsD4")
-    # counts5 = Cpt(EpicsSignalRO, ":CountsD5")
-    # counts6 = Cpt(EpicsSignalRO, ":CountsD6")
-    # counts7 = Cpt(EpicsSignalRO, ":CountsD7")
-    # total_counts = Cpt(EpicsSignalRO, ":TotalCounts")
+    # position_x = Cpt(PositionSignal,derived_from="nbins",kind="hinted")
+    position_x = Cpt(Signal,value=np.linspace(-209.21799055746422,209.21799055746422,350),kind="hinted")
 
     counts = FCpt(EpicsSignalRO, "{prefix}{_det_num}:LiveCounts",name="counts",kind="hinted")
 
     total_counts = FCpt(EpicsSignalRO, "{prefix}{_det_num}:LiveTotalCounts",name="total_counts",kind="hinted")
     
-    # total_counts = Cpt(EpicsSignalRO, ":LiveTotalCounts")
-
-    # _default_read_attrs = (
-    #     "counts0",
-    #     "counts7",
-    #     "total_counts"
-    # )
-
-    # _default_configuration_attrs = (
-    #     "acquire_time",
-    #     "nbins"
-    # )
-
     def trigger(self):
         def check_value(*, old_value, value, **kwargs):
             "Return True when the acquisition is complete, False otherwise."
