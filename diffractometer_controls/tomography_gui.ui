@@ -79,6 +79,12 @@
        <property name="filename" stdset="0">
         <string>re_screen.py</string>
        </property>
+       <property name="loadWhenShown" stdset="0">
+        <bool>false</bool>
+       </property>
+       <property name="disconnectWhenHidden" stdset="0">
+        <bool>false</bool>
+       </property>
       </widget>
      </item>
     </layout>
@@ -112,6 +118,12 @@
       </property>
       <property name="filename" stdset="0">
        <string>re_plans.py</string>
+      </property>
+      <property name="loadWhenShown" stdset="0">
+       <bool>false</bool>
+      </property>
+      <property name="disconnectWhenHidden" stdset="0">
+       <bool>false</bool>
       </property>
      </widget>
      <widget class="QWidget" name="layoutWidget">
@@ -183,6 +195,12 @@
              </property>
              <property name="filename" stdset="0">
               <string>re_extras.py</string>
+             </property>
+             <property name="loadWhenShown" stdset="0">
+              <bool>false</bool>
+             </property>
+             <property name="disconnectWhenHidden" stdset="0">
+              <bool>false</bool>
              </property>
             </widget>
            </item>
