@@ -107,7 +107,8 @@ class NewLivePlot(LivePlot):
         #     # wrong event stream, skip it
         #     return
         new_y = doc["data"][self.y]
-        new_x = np.linspace(-150,150,300)
+        new_x = np.linspace(-209.21799055746422,209.21799055746422,350)
+        # new_x = doc["data"][self.x]
         
         # print(len(new_x))
         # print(new_x.shape,new_y.shape)
