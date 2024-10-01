@@ -49,11 +49,17 @@ class AnalyzerCalcuation(display.MITRDisplay):
         self.comboBox_sample_hkl.activated.connect(self.updateLineEdit_sample)
 
         #Add the samples to the comboBox
-        self.SampleOptions = {'PG':{'006':1.1183},'Fe':{'211':1.16939,'220':1.01273,'311':0.90581},'Ni':{'311':1.06253,'220':1.24592,'222':1.01729},'Al':{'111':2.33188,'200':2.01946,'220':1.42798,'311':1.21778,'222':1.16594,'400':1.00973}}
+        self.SampleOptions = {'PG':{'006':1.1183},
+                              'Fe':{'211':1.16939,'220':1.01273,'311':0.90581},
+                              'Ni':{'311':1.06253,'220':1.24592,'222':1.01729},
+                              'Al':{'111':2.33188,'200':2.01946,'220':1.42798,'311':1.21778,'222':1.16594,'400':1.00973},
+                              'Graphite':{'002':3.348,'100':2.12696,'101':2.02715,'102':1.7953,'004':1.674,'006':1.116,'200':1.06348},
+                              }
         self.comboBox_sample.addItem('PG',self.SampleOptions['PG'].keys())
         self.comboBox_sample.addItem('Fe',self.SampleOptions['Fe'].keys())
         self.comboBox_sample.addItem('Ni',self.SampleOptions['Ni'].keys())
         self.comboBox_sample.addItem('Al',self.SampleOptions['Al'].keys())
+        self.comboBox_sample.addItem('Graphite',self.SampleOptions['Graphite'].keys())
         self.comboBox_sample_hkl.addItems(self.comboBox_sample.itemData(0))
 
  
