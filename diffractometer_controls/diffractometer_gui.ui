@@ -73,6 +73,12 @@
        <property name="filename" stdset="0">
         <string>re_screen.py</string>
        </property>
+       <property name="loadWhenShown" stdset="0">
+        <bool>false</bool>
+       </property>
+       <property name="disconnectWhenHidden" stdset="0">
+        <bool>false</bool>
+       </property>
       </widget>
      </item>
     </layout>
@@ -102,6 +108,12 @@
         </property>
         <property name="filename" stdset="0">
          <string>re_plans.py</string>
+        </property>
+        <property name="loadWhenShown" stdset="0">
+         <bool>false</bool>
+        </property>
+        <property name="disconnectWhenHidden" stdset="0">
+         <bool>false</bool>
         </property>
        </widget>
        <widget class="PyDMTabWidget" name="PyDMTabWidget">
@@ -139,7 +151,7 @@
          <string/>
         </property>
         <property name="currentIndex">
-         <number>0</number>
+         <number>1</number>
         </property>
         <property name="iconSize">
          <size>
@@ -362,6 +374,12 @@
             </property>
             <property name="filename" stdset="0">
              <string>re_extras.py</string>
+            </property>
+            <property name="loadWhenShown" stdset="0">
+             <bool>false</bool>
+            </property>
+            <property name="disconnectWhenHidden" stdset="0">
+             <bool>false</bool>
             </property>
            </widget>
           </item>
