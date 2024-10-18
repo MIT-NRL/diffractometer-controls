@@ -81,10 +81,18 @@ class SimAreaDetector(SingleTrigger, SimDetector):
     # )
 
 
-cam_zwo = MyZWODetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total'])
+# cam_zwo = MyZWODetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total'])
+# cam_zwo.cam.nd_attributes_file.set("/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml") 
+
+
+
+
+# cam_zwo.stage_sigs["cam.num_images"] = 1
+
+# Need to add stage sigs for create directory depth
+# cam_zwo.tiff1.stage_sigs[""]
+
 # cam_zwo.cam.temperature.set(-20).wait()
-cam_zwo.stage_sigs["cam.num_images"] = 1
-cam_zwo.cam.nd_attributes_file.set("/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml") 
 # cam_zwo.hdf1.stage_sigs["layout_filename"] = "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoLayoutDX.xml"
 # cam_zwo.cam.stage_sigs["nd_attributes_file"] = "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml"
 # cam_zwo.hdf1.stage_sigs["store_attr"] = "Yes"
