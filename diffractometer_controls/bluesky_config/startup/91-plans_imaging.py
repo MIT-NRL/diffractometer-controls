@@ -19,6 +19,39 @@ from ophyd.status import Status, SubscriptionStatus
 from epics import caput, caget, cainfo
 from functools import partial
 
+def inner_product_custom(args, num:int = None, step:float = None, offset:float = 0, endpoint=True):
+    """Scan over one multi-motor trajectory.
+
+    Parameters
+    ----------
+    num : integer
+        number of steps
+    args : list of {Positioner, Positioner, int}
+        patterned like (``motor1, start1, stop1, ..., motorN, startN, stopN``)
+        Motors can be any 'setable' object (motor, temp controller, etc.)
+
+    Returns
+    -------
+    cyc : cycler
+    """
+    if len(args) % 3 != 0:
+        raise ValueError("Wrong number of positional arguments for 'inner_product'")
+
+    cyclers = []
+    for (
+        motor,
+        start,
+        stop,
+    ) in partition(3, args):
+        if num is not None:
+            steps = np.linspace(start + offset, stop, num=num, endpoint=endpoint)
+        elif step is not None:
+            steps = np.arange(start + offset, stop + step*endpoint, step)
+        else:
+            raise ValueError("Must provide either 'num' or 'step'")
+        c = cycler(motor, steps)
+        cyclers.append(c)
+    return functools.reduce(operator.add, cyclers)
 
 
 
@@ -26,35 +59,16 @@ def tomo_scan(file_name:str,
               detector, 
               motor, 
               exposure_time:float = None,
-              angle_step:float = 1,
-              start_angle:float = None, 
-              stop_angle:float = None,
+              num_projections:int = None,
+              angle_step:float = None,
+              start_angle:float = 0, 
+              stop_angle:float = 360,
+              include_stop_angle:bool = False,
               return_to_start:bool = True, 
               md:dict = None):
     '''
     Tomography scan that defaults to 360-step degrees.
     '''
-    if (start_angle is None) and (stop_angle is None):
-        start_angle, stop_angle = 0, 360-angle_step
-    elif (start_angle is not None) and (stop_angle is None):
-        stop_angle = 360 + start_angle - angle_step
-    num_angles = int((stop_angle - start_angle + angle_step) / angle_step)
-    while num_angles*angle_step > 360:
-        num_angles -= 1
-    if ((stop_angle-start_angle+angle_step) % angle_step) != 0:
-        angle_step_new = (stop_angle-start_angle+angle_step) / num_angles
-        print(f"\n#===============#\n360 not divisible by {angle_step}.\nUsing a step size of {angle_step_new} instead.\n#===============#\n")
-        angle_step = angle_step_new
-
-    print("#===============#")
-    print(f"Starting tomography scan from {start_angle} to {stop_angle} \nin {num_angles} steps of {angle_step} degrees.")
-    print("#===============#")
-
-    caput("4dh4:TS:RotationStart",start_angle)
-    caput("4dh4:TS:RotationStop",stop_angle)
-    caput("4dh4:TS:NumAngles",num_angles)
-    caput("4dh4:TS:RotationStep", angle_step)
-
     file_name = str(file_name).strip().replace(" ","_").replace("__","_")
 
     detector = [detector]
@@ -64,6 +78,39 @@ def tomo_scan(file_name:str,
     if exposure_time is not None:
         for det in detector:
             yield from bps.mov(det.cam.acquire_time, exposure_time)
+
+    if num_projections is not None:
+        num_projections_calc = num_projections
+        if include_stop_angle:
+            angle_step_calc = (stop_angle-start_angle)/(num_projections-1)
+            actual_stop_angle = stop_angle
+        else:
+            angle_step_calc = (stop_angle-start_angle)/num_projections
+            actual_stop_angle = stop_angle - angle_step_calc
+    elif angle_step is not None:
+        angle_step_calc = angle_step
+        if include_stop_angle:
+            num_projections_calc = int((stop_angle-start_angle)/angle_step) + 1
+            actual_stop_angle = stop_angle
+        else:
+            num_projections_calc = int((stop_angle-start_angle)/angle_step)
+            actual_stop_angle = stop_angle - angle_step
+
+    total_time = num_projections_calc*detector[0].cam.acquire_time.get() # in seconds
+
+    print("#===============#")
+    print(f"Starting tomography scan from {start_angle} to {actual_stop_angle} \nin {num_projections_calc} steps of {angle_step_calc} degrees.")
+    hours = total_time // 3600
+    minutes = (total_time % 3600) // 60
+    seconds = total_time % 60
+    print(f"The scan time is estimated to be {hours} hours, {minutes} minutes, and {seconds} seconds.")
+    print("#===============#")
+
+    caput("4dh4:TS:RotationStart",start_angle)
+    caput("4dh4:TS:RotationStop",actual_stop_angle)
+    caput("4dh4:TS:NumAngles",num_projections_calc)
+    caput("4dh4:TS:RotationStep", angle_step_calc)
+
 
     # md_args = list(chain(*((repr(motor), start, stop) for motor, start_angle, stop_angle)))
     motor_names = motor.name
@@ -77,7 +124,7 @@ def tomo_scan(file_name:str,
         "plan_name": "tomo_scan",
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,
-        "plan_pattern_args": dict(motor=motor.name, start_angle=start_angle, stop_angle=stop_angle, num_angles=num_angles),  # noqa: C408
+        "plan_pattern_args": dict(motor=motor.name, start_angle=start_angle, stop_angle=actual_stop_angle, num_projections=num_projections, angle_step=angle_step, include_stop_angle=include_stop_angle),  # noqa: C408
         "motors": motor_names,
     }
     _md.update(md)
@@ -128,7 +175,10 @@ def tomo_scan(file_name:str,
         #     yield from bps.mov(det.cam.frame_type, 0)
         
         pos_cache = defaultdict(lambda: None)
-        cycler = plan_patterns.inner_product(num=num_angles, args=[motor, start_angle, stop_angle])
+        # if num_projections is not None:
+        cycler = inner_product_custom(num=num_projections, step=angle_step, endpoint=include_stop_angle, args=[motor, start_angle, stop_angle])
+        # elif angle_step is not None:
+            # cycle = inner_product_custom(step=angle_step, endpoint=include_stop_angle, args=[motor, start_angle, stop_angle])
 
         def inner_scan_nd():
             # yield from bps.declare_stream(motor, *detector, name="primary")
@@ -154,6 +204,8 @@ def imaging(file_name:str,
               detector, 
               exposure_time:float = None,
               num_exposures:int = 1,
+              gain:int = None,
+              offset:int = None,
               md:dict = None):
     '''
     Tomography scan that performs dark field scans, flat field scans, and then the actual tomography scan.
@@ -167,6 +219,15 @@ def imaging(file_name:str,
     if exposure_time is not None:
         for det in detector:
             yield from bps.mov(det.cam.acquire_time, exposure_time)
+    
+    old_gain = detector[0].cam.gain.get()
+    old_offset = detector[0].cam.offset.get()
+    if gain is not None:
+        for det in detector:
+            yield from bps.mov(det.cam.gain, gain)
+    if offset is not None:
+        for det in detector:
+            yield from bps.mov(det.cam.offset, offset)
 
     # md_args = list(chain(*((repr(motor), start, stop) for motor, start_angle, stop_angle)))
     md = md or {}
@@ -196,6 +257,8 @@ def imaging(file_name:str,
         yield from bps.repeater(num_exposures,exposure)
 
         yield from bps.mov(detector[0].cam.acquire_time, old_exposure_time)
+        yield from bps.mov(detector[0].cam.gain, old_gain)
+        yield from bps.mov(detector[0].cam.offset, old_offset)
 
     return(yield from main_plan())
 
@@ -209,6 +272,8 @@ def imaging_scan(file_name:str,
               stop_pos:float, 
               step:float,
               exposure_time:float = None,
+              gain:int = None,
+              offset:int = None,
               return_to_original_position:bool = True,
               md:dict = None):
     '''
@@ -217,7 +282,7 @@ def imaging_scan(file_name:str,
 
     original_pos = motor.position
 
-    num_steps = int(round((stop_pos-start_pos)/step) + 1)
+    num_steps = abs(int(round((stop_pos-start_pos)/step)) + 1)
     step = (stop_pos-start_pos)/(num_steps-1)
     total_time = num_steps*detector.cam.acquire_time.get() # in seconds
 
@@ -240,6 +305,15 @@ def imaging_scan(file_name:str,
     if exposure_time is not None:
         for det in detector:
             yield from bps.mov(det.cam.acquire_time, exposure_time)
+
+    old_gain = detector[0].cam.gain.get()
+    old_offset = detector[0].cam.offset.get()
+    if gain is not None:
+        for det in detector:
+            yield from bps.mov(det.cam.gain, gain)
+    if offset is not None:
+        for det in detector:
+            yield from bps.mov(det.cam.offset, offset)
 
     # md_args = list(chain(*((repr(motor), start, stop) for motor, start_angle, stop_angle)))
     motor_names = motor.name
@@ -282,7 +356,8 @@ def imaging_scan(file_name:str,
         yield from bps.stage(motor)
         
         pos_cache = defaultdict(lambda: None)
-        cycler = plan_patterns.inner_product(num=num_steps, args=[motor, start_pos, stop_pos])
+        # cycler = plan_patterns.inner_product(num=num_steps, args=[motor, start_pos, stop_pos])
+        cycler = inner_product_custom(step=step, args=[motor, start_pos, stop_pos])
 
         def inner_scan_nd():
             # yield from bps.declare_stream(motor, *detector, name="primary")
@@ -295,7 +370,9 @@ def imaging_scan(file_name:str,
         yield from inner_scan_nd()
 
         yield from bps.mov(detector[0].cam.acquire_time, old_exposure_time)
-
+        yield from bps.mov(detector[0].cam.gain, old_gain)
+        yield from bps.mov(detector[0].cam.offset, old_offset)
+        
         if return_to_original_position:
             yield from bps.mv(motor, original_pos)
 
