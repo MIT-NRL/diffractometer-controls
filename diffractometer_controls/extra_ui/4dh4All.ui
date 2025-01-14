@@ -206,8 +206,27 @@ background-color: rgb(25, 102, 255);</string>
           <string notr="true">color: rgb(228, 228, 228);
 background-color: rgb(25, 102, 255);</string>
          </property>
+         <property name="text">
+          <string>Soft Motors</string>
+         </property>
+         <property name="filenames" stdset="0">
+          <stringlist>
+           <string>softMotors10.adl</string>
+          </stringlist>
+         </property>
+         <property name="titles" stdset="0">
+          <stringlist>
+           <string>soft motors 1-10</string>
+           <string>other</string>
+          </stringlist>
+         </property>
          <property name="showIcon" stdset="0">
           <bool>false</bool>
+         </property>
+         <property name="macros" stdset="0">
+          <stringlist>
+           <string>SM1=SM1,SM2=SM2,SM3=SM3,SM4=SM4,SM5=SM5,SM6=SM6,SM7=SM7,SM8=SM8,SM9=SM9,SM10=SM10</string>
+          </stringlist>
          </property>
          <property name="openInNewWindow" stdset="0">
           <bool>true</bool>
@@ -1357,8 +1376,8 @@ background-color: rgb(25, 102, 255);</string>
          <property name="filenames" stdset="0">
           <stringlist>
            <string>he3_detector_config.ui</string>
-           <string>he3_detectors.ui</string>
-           <string>he3_detectors.ui</string>
+           <string>he3_detector_viewer.ui</string>
+           <string>he3_detector_viewer.ui</string>
           </stringlist>
          </property>
          <property name="titles" stdset="0">
