@@ -65,10 +65,10 @@
     <Attribute name="SampleX"                       type="EPICS_PV"     source="4dh4:m14.VAL"                        dbrtype="DBR_DOUBLE"   description="Sample x position set value"/>
     <Attribute name="SampleX_RBV"                       type="EPICS_PV"     source="4dh4:m14.RBV"                        dbrtype="DBR_DOUBLE"   description="Sample x position readback value"/>
 
-    <Attribute name="CcdCameraX"                    type="EPICS_PV" source="4dh4:m4.VAL"                        dbrtype="DBR_DOUBLE"     description="Camera x position in the beam"/>
-    <Attribute name="CcdCameraX_RBV"                type="EPICS_PV" source="4dh4:m4.RBV"                       dbrtype="DBR_DOUBLE"/>
+    <Attribute name="DetCameraX"                    type="EPICS_PV" source="4dh4:m1.VAL"                        dbrtype="DBR_DOUBLE"     description="Camera x position in the beam"/>
+    <Attribute name="DetCameraX_RBV"                type="EPICS_PV" source="4dh4:m1.RBV"                       dbrtype="DBR_DOUBLE"/>
 
-    <Attribute name="CcdCameraFocusDist"            type="EPICS_PV" source="4dh4:m12.VAL"                        dbrtype="DBR_DOUBLE"    description="Camera distance from scintillator box"/>
+    <Attribute name="DetCameraFocusDist"            type="EPICS_PV" source="4dh4:m12.VAL"                        dbrtype="DBR_DOUBLE"    description="Camera distance from scintillator box"/>
 
 </Attributes>
 
