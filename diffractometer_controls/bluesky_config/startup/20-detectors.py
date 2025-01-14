@@ -8,7 +8,7 @@ from ophyd.status import Status, SubscriptionStatus
 
 class PositionSignal(DerivedSignal):
     def forward(self, value):
-        return np.linspace(175.20821972700517,175.20821972700517,value)
+        return np.linspace(-209.21799055746422,209.21799055746422,value)
 
     def inverse(self, value):
         return len(value)
@@ -19,6 +19,7 @@ class HE3PSD(Device):
     acquire = Cpt(EpicsSignalWithRBV, "Acquire",kind='config')
     acquire_time = Cpt(EpicsSignalWithRBV, "AcquireTime",kind='config')
     nbins = Cpt(EpicsSignalWithRBV, "NBins",kind='config')
+    soft_lld = Cpt(EpicsSignalWithRBV, "SoftLLD",kind='config')
 
     # position_x = Cpt(PositionSignal,derived_from="nbins",kind="hinted")
     position_x = Cpt(Signal,value=np.linspace(-209.21799055746422,209.21799055746422,350),kind="hinted")
