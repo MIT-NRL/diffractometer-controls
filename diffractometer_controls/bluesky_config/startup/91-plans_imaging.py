@@ -19,6 +19,51 @@ from ophyd.status import Status, SubscriptionStatus
 from epics import caput, caget, cainfo
 from functools import partial
 
+
+def one_nd_step_repeat(
+    detectors,
+    step,
+    pos_cache,
+    take_reading=None,
+    num_exposures=1,
+):
+    """
+    Inner loop of an N-dimensional step scan
+
+    This is the default function for ``per_step`` param`` in ND plans.
+
+    Parameters
+    ----------
+    detectors : list or tuple
+        devices to read
+    step : dict
+        mapping motors to positions in this step
+    pos_cache : dict
+        mapping motors to their last-set positions
+    take_reading : plan, optional
+        function to do the actual acquisition ::
+
+           def take_reading(dets, name='primary'):
+                yield from ...
+
+        Callable[List[OphydObj], Optional[str]] -> Generator[Msg], optional
+
+        Defaults to `trigger_and_read`
+
+    Yields
+    ------
+    msg : Msg
+    """
+
+    def exposure():
+        yield from bps.trigger_and_read(list(detectors) + list(motors))
+
+
+    # take_reading = trigger_and_read if take_reading is None else take_reading
+    motors = step.keys()
+    yield from bps.move_per_step(step, pos_cache)
+    yield from bps.repeater(num_exposures,exposure)  # type: ignore  # Movable issue
+
 def inner_product_custom(args, num:int = None, step:float = None, offset:float = 0, endpoint=True):
     """Scan over one multi-motor trajectory.
 
@@ -63,6 +108,7 @@ def tomo_scan(file_name:str,
               angle_step:float = None,
               start_angle:float = 0, 
               stop_angle:float = 360,
+              num_exposures:int = 1,
               include_stop_angle:bool = False,
               return_to_start:bool = True, 
               md:dict = None):
@@ -96,10 +142,10 @@ def tomo_scan(file_name:str,
             num_projections_calc = int((stop_angle-start_angle)/angle_step)
             actual_stop_angle = stop_angle - angle_step
 
-    total_time = num_projections_calc*detector[0].cam.acquire_time.get() # in seconds
+    total_time = num_exposures*num_projections_calc*detector[0].cam.acquire_time.get() # in seconds
 
     print("#===============#")
-    print(f"Starting tomography scan from {start_angle} to {actual_stop_angle} \nin {num_projections_calc} steps of {angle_step_calc} degrees.")
+    print(f"Starting tomography scan from {start_angle} to {actual_stop_angle} \nin {num_projections_calc} steps of {angle_step_calc} degrees with {num_exposures} exposured per step.")
     hours = total_time // 3600
     minutes = (total_time % 3600) // 60
     seconds = total_time % 60
@@ -183,7 +229,7 @@ def tomo_scan(file_name:str,
         def inner_scan_nd():
             # yield from bps.declare_stream(motor, *detector, name="primary")
             for step in list(cycler):
-                yield from bps.one_nd_step(detector, step, pos_cache)
+                yield from one_nd_step_repeat(detector, step, pos_cache,num_exposures=num_exposures)
 
         # print("Replace the sample, open the shutter, and press Resume to start the scan")
         # yield from bps.checkpoint()
@@ -270,8 +316,10 @@ def imaging_scan(file_name:str,
               motor, 
               start_pos:float, 
               stop_pos:float, 
-              step:float,
+              step:float = None,
+              num_steps:int = None,
               exposure_time:float = None,
+              num_exposures:int = 1,
               gain:int = None,
               offset:int = None,
               return_to_original_position:bool = True,
@@ -282,17 +330,26 @@ def imaging_scan(file_name:str,
 
     original_pos = motor.position
 
-    num_steps = abs(int(round((stop_pos-start_pos)/step)) + 1)
-    step = (stop_pos-start_pos)/(num_steps-1)
-    total_time = num_steps*detector.cam.acquire_time.get() # in seconds
+    # if num_steps is not None:
+    #     list = np.linspace(start=start_pos,step=stop_pos,num=num_steps,endpoint=True,retstep=True)
+    #     num_steps_calc = num_steps
+    #     step_cal = list[-1]
+    #     stop_pos_calc = list[0][-1]
+    # if step is not None:
+    #     list = np.arange(start=start_pos,stop=stop_pos,step=step)
+    #     num_steps_calc = len(list)
+    #     step_cal = step
+    #     stop_pos_calc = list[-1]
 
-    print("#===============#")
-    print(f"Starting scan of {motor.name} from {start_pos} to {stop_pos} \nin {num_steps} steps of {step} {motor.egu}.")
-    hours = total_time // 3600
-    minutes = (total_time % 3600) // 60
-    seconds = total_time % 60
-    print(f"The scan time is estimated to be {hours} hours, {minutes} minutes, and {seconds} seconds.")
-    print("#===============#")
+    # total_time = num_exposures*num_steps_calc*detector.cam.acquire_time.get() # in seconds
+
+    # print("#===============#")
+    # print(f"Starting scan of {motor.name} from {start_pos} to {stop_pos_calc} \nin {num_steps_calc} steps of {step_cal} {motor.egu} with {num_exposures} exposures at each position.")
+    # hours = total_time // 3600
+    # minutes = (total_time % 3600) // 60
+    # seconds = total_time % 60
+    # print(f"The scan time is estimated to be {hours} hours, {minutes} minutes, and {seconds} seconds.")
+    # print("#===============#")
 
 
     file_name = str(file_name).strip().replace(" ","_").replace("__","_")
@@ -320,14 +377,14 @@ def imaging_scan(file_name:str,
     md = md or {}
     _md = {
         "plan_args": {
-            "detectors": list(map(repr, detector)),
+            # "detectors": list(map(repr, detector)),
             # "num": num,
             # "args": md_args,
         },
         "plan_name": "imaging_scan",
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,
-        "plan_pattern_args": dict(motor=motor.name, start_pos=start_pos, stop_pos=stop_pos, step=step),  # noqa: C408
+        "plan_pattern_args": dict(motor=motor.name, start_pos=start_pos, stop_pos=stop_pos, step=step, num_steps=num_steps, num_exposures=num_exposures),  # noqa: C408
         "motors": motor_names,
     }
     _md.update(md)
@@ -357,12 +414,13 @@ def imaging_scan(file_name:str,
         
         pos_cache = defaultdict(lambda: None)
         # cycler = plan_patterns.inner_product(num=num_steps, args=[motor, start_pos, stop_pos])
-        cycler = inner_product_custom(step=step, args=[motor, start_pos, stop_pos])
+        cycler = inner_product_custom(step=step, num=num_steps, args=[motor, start_pos, stop_pos])
+        print(cycler)
 
         def inner_scan_nd():
             # yield from bps.declare_stream(motor, *detector, name="primary")
             for step in list(cycler):
-                yield from bps.one_nd_step(detector, step, pos_cache)
+                yield from one_nd_step_repeat(detector, step, pos_cache,num_exposures=num_exposures)
 
         # print("Replace the sample, open the shutter, and press Resume to start the scan")
         # yield from bps.checkpoint()
