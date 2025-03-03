@@ -80,12 +80,11 @@ class SimAreaDetector(SingleTrigger, SimDetector):
     #     read_path_template="/home/mitr_4dh4/Data/TestData/HDF/%Y/%m/%d/",        
     # )
 
-
-# cam_zwo = MyZWODetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total'])
-# cam_zwo.cam.nd_attributes_file.set("/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml") 
-
-
-
+# Enable when using the ZWO camera
+if 1:
+    cam_zwo = MyZWODetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total'])
+    cam_zwo.cam.nd_attributes_file.set("/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml") 
+    caput("4dh4:TIFF1:CreateDirectory", -3)
 
 # cam_zwo.stage_sigs["cam.num_images"] = 1
 
