@@ -47,7 +47,7 @@ class MITRMainWindow(PyDMMainWindow):
 
             bar.addPermanentWidget(heartbeat_indicator)
 
-            gear_icon = qta.icon('fa.gear')
+            gear_icon = qta.icon('fa6s.gear')
             # action = QAction(gear_icon, 'Controls', self)
             controls = PyDMRelatedDisplayButton(filename="/home/mitr_4dh4/EPICS/IOCs/4dh4/4dh4App/op/adl/ioc_motors.adl")
             controls.macros = ','.join(['='.join(items) for items in self.macros.items()])
