@@ -1,0 +1,19 @@
+name: bluesky-server
+channels:
+  - conda-forge
+dependencies:
+  - python
+  - bluesky
+  - pydm
+  - typhos
+  - bluesky-queueserver
+  - bluesky-queueserver-api
+  - tiled-client
+  - tiled-server
+  - suitcase-csv
+  - suitcase-tiff
+  - suitcase-mongo
+  - pyqt
+  - qtpy
+  - p4p
+  - bluesky-widgets
