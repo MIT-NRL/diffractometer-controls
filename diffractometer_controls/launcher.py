@@ -8,7 +8,6 @@ import sys
 import faulthandler
 from pathlib import Path
 from qtpy import QtCore, QtGui
-from icecream import ic
 
 
 def main():
