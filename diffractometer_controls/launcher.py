@@ -149,8 +149,8 @@ def main():
 
     # Set the EPICS CA and PVA addresses
     os.environ["EPICS_CA_AUTO_ADDR_LIST"] = "NO"
-    os.environ["EPICS_CA_ADDR_LIST"] += pydm_args.ip_addr 
-    os.environ["EPICS_PVA_ADDR_LIST"] += pydm_args.ip_addr 
+    os.environ["EPICS_CA_ADDR_LIST"] = os.environ.get("EPICS_CA_ADDR_LIST", "") + " " + pydm_args.ip_addr 
+    os.environ["EPICS_PVA_ADDR_LIST"] = os.environ.get("EPICS_PVA_ADDR_LIST", "") + " " + pydm_args.ip_addr 
  
 
     if pydm_args.ip_addr == 'localhost':
