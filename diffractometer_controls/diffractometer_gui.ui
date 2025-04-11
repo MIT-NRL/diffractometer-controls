@@ -151,7 +151,7 @@
          <string/>
         </property>
         <property name="currentIndex">
-         <number>1</number>
+         <number>0</number>
         </property>
         <property name="iconSize">
          <size>
@@ -407,6 +407,9 @@
      </item>
      <item>
       <layout class="QVBoxLayout" name="verticalLayout_6">
+       <property name="spacing">
+        <number>0</number>
+       </property>
        <property name="sizeConstraint">
         <enum>QLayout::SetDefaultConstraint</enum>
        </property>
@@ -442,6 +445,37 @@
         </widget>
        </item>
        <item>
+        <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_14">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>300</width>
+           <height>0</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>300</width>
+           <height>16777215</height>
+          </size>
+         </property>
+         <property name="toolTip">
+          <string/>
+         </property>
+         <property name="macros" stdset="0">
+          <string>M=m14</string>
+         </property>
+         <property name="filename" stdset="0">
+          <string>motors_square.ui</string>
+         </property>
+        </widget>
+       </item>
+       <item>
         <widget class="PyDMTabWidget" name="PyDMTabWidget_2">
          <property name="sizePolicy">
           <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
@@ -468,7 +502,7 @@
           <string/>
          </property>
          <property name="currentIndex">
-          <number>0</number>
+          <number>1</number>
          </property>
          <property name="alarmChannels">
           <stringlist>
@@ -481,6 +515,9 @@
            <string>Analyzer1</string>
           </attribute>
           <layout class="QVBoxLayout" name="verticalLayout">
+           <property name="spacing">
+            <number>0</number>
+           </property>
            <property name="leftMargin">
             <number>0</number>
            </property>
@@ -570,7 +607,7 @@
               <string/>
              </property>
              <property name="macros" stdset="0">
-              <string/>
+              <string>M=m12</string>
              </property>
              <property name="filename" stdset="0">
               <string>motors_square.ui</string>
@@ -583,7 +620,7 @@
               <string/>
              </property>
              <property name="macros" stdset="0">
-              <string/>
+              <string>M=m9</string>
              </property>
              <property name="filename" stdset="0">
               <string>motors_square.ui</string>

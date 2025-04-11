@@ -20,7 +20,7 @@ from bluesky_widgets.qt.run_engine_client import (
 
 # from bluesky_widgets.qt.figures import QtFigure, QtFigures
 # from bluesky_widgets.models.auto_plot_builders import AutoLines, AutoPlotter, AutoImages
-from bluesky_widgets.models.plot_builders import Lines, Images
+# from bluesky_widgets.models.plot_builders import Lines, Images
 from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher
 # from bluesky.callbacks.zmq import RemoteDispatcher
 from bluesky.utils import install_remote_qt_kicker
@@ -57,8 +57,8 @@ class MainScreen(display.MITRDisplay):
             # self.ui.RE_Plan_Editor.layout().addWidget(re_plan_editor)
 
             # figModel = Lines('motor',['det1','det2'],max_runs=3)
-            # figModel = AutoLines(max_runs=3)
-            # figModel = Lines('he3psd_position_x[0]',['he3psd_counts0[0]'],max_runs=3)
+            # figModel = AutoLines(max_runs=1)
+            # figModel = Lines('he3psd0_position_x[0]',['he3psd0_counts[0]'],max_runs=1)
             
             # viewer = QtFigures(figModel.figures)
             # self.runs = []
