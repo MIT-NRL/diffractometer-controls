@@ -91,7 +91,7 @@ def inner_product_custom(args, num:int = None, step:float = None, offset:float =
         if num is not None:
             steps = np.linspace(start + offset, stop, num=num, endpoint=endpoint)
         elif step is not None:
-            steps = np.arange(start + offset, stop + step*endpoint, step)
+            steps = np.arange(start + offset, stop + step/2*endpoint, step)
         else:
             raise ValueError("Must provide either 'num' or 'step'")
         c = cycler(motor, steps)
@@ -101,6 +101,7 @@ def inner_product_custom(args, num:int = None, step:float = None, offset:float =
 
 
 def tomo_scan(file_name:str, 
+              file_dir:str,
               detector, 
               motor, 
               exposure_time:float = None,
@@ -116,6 +117,7 @@ def tomo_scan(file_name:str,
     Tomography scan that defaults to 360-step degrees.
     '''
     file_name = str(file_name).strip().replace(" ","_").replace("__","_")
+    file_dir = str(file_dir).strip().replace(" ","_").replace("__","_")
 
     detector = [detector]
 
@@ -149,7 +151,8 @@ def tomo_scan(file_name:str,
     hours = total_time // 3600
     minutes = (total_time % 3600) // 60
     seconds = total_time % 60
-    print(f"The scan time is estimated to be {hours} hours, {minutes} minutes, and {seconds} seconds.")
+    print(f"The scan time is estimated to be {hours} hours, {minutes} minutes, and {seconds} seconds")
+    print(f"and finish at {datetime.now() + timedelta(seconds=total_time)}.")
     print("#===============#")
 
     caput("4dh4:TS:RotationStart",start_angle)
@@ -204,6 +207,7 @@ def tomo_scan(file_name:str,
 
         for det in detector:
             det.tiff1.file_name.put(file_name)
+            det.tiff1.folder_name.put(file_dir)
             yield from bps.stage(det)
         yield from bps.stage(motor)
 
@@ -246,18 +250,22 @@ def tomo_scan(file_name:str,
 
 
 
-def imaging(file_name:str, 
-              detector, 
-              exposure_time:float = None,
-              num_exposures:int = 1,
-              gain:int = None,
-              offset:int = None,
-              md:dict = None):
+def imaging(
+            file_name:str, 
+            file_dir:str,
+            detector, 
+            exposure_time:float = None,
+            num_exposures:int = 1,
+            gain:int = None,
+            offset:int = None,
+            md:dict = None
+            ):
     '''
     Tomography scan that performs dark field scans, flat field scans, and then the actual tomography scan.
     '''
 
     file_name = str(file_name).strip().replace(" ","_").replace("__","_")
+    file_dir = str(file_dir).strip().replace(" ","_").replace("__","_")
 
     detector = [detector]
 
@@ -265,6 +273,16 @@ def imaging(file_name:str,
     if exposure_time is not None:
         for det in detector:
             yield from bps.mov(det.cam.acquire_time, exposure_time)
+
+    total_time = num_exposures*detector[0].cam.acquire_time.get() # in seconds
+    print("#===============#")
+    print(f"Starting imaging with {num_exposures} exposures.")
+    hours = total_time // 3600
+    minutes = (total_time % 3600) // 60
+    seconds = total_time % 60
+    print(f"The measurement time is estimated to take {hours} hours, {minutes} minutes, and {seconds} seconds")
+    print(f"and finish at {datetime.now() + timedelta(seconds=total_time)}.")
+    print("#===============#")
     
     old_gain = detector[0].cam.gain.get()
     old_offset = detector[0].cam.offset.get()
@@ -298,7 +316,8 @@ def imaging(file_name:str,
 
         for det in detector:
             det.tiff1.file_name.put(file_name)
-            yield from bps.stage(det)     
+            det.tiff1.folder_name.put(file_dir)
+            yield from bps.stage(det)                 
 
         yield from bps.repeater(num_exposures,exposure)
 
@@ -311,49 +330,29 @@ def imaging(file_name:str,
 
 
 
-def imaging_scan(file_name:str, 
-              detector, 
-              motor, 
-              start_pos:float, 
-              stop_pos:float, 
-              step:float = None,
-              num_steps:int = None,
-              exposure_time:float = None,
-              num_exposures:int = 1,
-              gain:int = None,
-              offset:int = None,
-              return_to_original_position:bool = True,
-              md:dict = None):
+def imaging_scan(
+            file_name:str, 
+            file_dir:str,
+            detector, 
+            motor, 
+            start_pos:float, 
+            stop_pos:float, 
+            step:float = None,
+            num_steps:int = None,
+            exposure_time:float = None,
+            num_exposures:int = 1,
+            gain:int = None,
+            offset:int = None,
+            return_to_original_position:bool = True,
+            md:dict = None):
     '''
     General scan for the imaging detector system.
     '''
 
     original_pos = motor.position
 
-    # if num_steps is not None:
-    #     list = np.linspace(start=start_pos,step=stop_pos,num=num_steps,endpoint=True,retstep=True)
-    #     num_steps_calc = num_steps
-    #     step_cal = list[-1]
-    #     stop_pos_calc = list[0][-1]
-    # if step is not None:
-    #     list = np.arange(start=start_pos,stop=stop_pos,step=step)
-    #     num_steps_calc = len(list)
-    #     step_cal = step
-    #     stop_pos_calc = list[-1]
-
-    # total_time = num_exposures*num_steps_calc*detector.cam.acquire_time.get() # in seconds
-
-    # print("#===============#")
-    # print(f"Starting scan of {motor.name} from {start_pos} to {stop_pos_calc} \nin {num_steps_calc} steps of {step_cal} {motor.egu} with {num_exposures} exposures at each position.")
-    # hours = total_time // 3600
-    # minutes = (total_time % 3600) // 60
-    # seconds = total_time % 60
-    # print(f"The scan time is estimated to be {hours} hours, {minutes} minutes, and {seconds} seconds.")
-    # print("#===============#")
-
-
     file_name = str(file_name).strip().replace(" ","_").replace("__","_")
-
+    file_dir = str(file_dir).strip().replace(" ","_").replace("__","_")
 
     detector = [detector]
 
@@ -371,6 +370,29 @@ def imaging_scan(file_name:str,
     if offset is not None:
         for det in detector:
             yield from bps.mov(det.cam.offset, offset)
+
+    if num_steps is not None:
+        positions = np.linspace(start=start_pos, stop=stop_pos, num=num_steps, endpoint=True)
+        num_steps_calc = num_steps
+        step_cal = positions[1] - positions[0]
+        stop_pos_calc = positions[-1]
+    elif step is not None:
+        positions = np.arange(start=start_pos, stop=stop_pos + step/2, step=step)
+        num_steps_calc = len(positions)
+        step_cal = step
+        stop_pos_calc = positions[-1]
+
+    total_time = num_exposures*num_steps_calc*detector[0].cam.acquire_time.get() # in seconds
+
+    print("#===============#")
+    print(f"Starting scan of {motor.name} from {start_pos} to {stop_pos_calc} \nin {num_steps_calc} steps of {step_cal} {motor.egu} with {num_exposures} exposures at each position.")
+    hours = total_time // 3600
+    minutes = (total_time % 3600) // 60
+    seconds = total_time % 60
+    print(f"The scan time is estimated to be {hours} hours, {minutes} minutes, and {seconds} seconds")
+    print(f"and finish at {datetime.now() + timedelta(seconds=total_time)}.")
+    print("#===============#")
+
 
     # md_args = list(chain(*((repr(motor), start, stop) for motor, start_angle, stop_angle)))
     motor_names = motor.name
@@ -409,6 +431,7 @@ def imaging_scan(file_name:str,
 
         for det in detector:
             det.tiff1.file_name.put(file_name)
+            det.tiff1.folder_name.put(file_dir)
             yield from bps.stage(det)
         yield from bps.stage(motor)
         
