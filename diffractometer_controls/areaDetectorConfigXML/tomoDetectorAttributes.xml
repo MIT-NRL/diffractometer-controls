@@ -60,15 +60,19 @@
 
     <Attribute name="HDF5FrameLocation"             type="EPICS_PV"     source="4dh4:cam1:FrameType"                dbrtype="DBR_STRING"  description="Where to store frame in HDF5 file"/>
 
-    <Attribute name="SampleTheta_VAL"                   type="EPICS_PV"     source="4dh4:m3.VAL"                        dbrtype="DBR_DOUBLE"   description="Rotational angle of sample set value"/>
-    <Attribute name="SampleTheta_RVAL"                   type="EPICS_PV"     source="4dh4:m3.RBV"                        dbrtype="DBR_DOUBLE"   description="Rotational angle of sample readback value"/>
-    <Attribute name="SampleX"                       type="EPICS_PV"     source="4dh4:m14.VAL"                        dbrtype="DBR_DOUBLE"   description="Sample x position set value"/>
-    <Attribute name="SampleX_RBV"                       type="EPICS_PV"     source="4dh4:m14.RBV"                        dbrtype="DBR_DOUBLE"   description="Sample x position readback value"/>
+    <Attribute name="SampleTheta1_VAL"                   type="EPICS_PV"     source="4dh4:m3.VAL"                        dbrtype="DBR_DOUBLE"   description="Rotational angle of sample set value"/>
+    <Attribute name="SampleTheta1_RVAL"                   type="EPICS_PV"     source="4dh4:m3.RBV"                        dbrtype="DBR_DOUBLE"   description="Rotational angle of sample readback value"/>
+    
+    <Attribute name="SampleTheta2_VAL"                   type="EPICS_PV"     source="4dh4:m13.VAL"                        dbrtype="DBR_DOUBLE"   description="Rotational angle on linear stage of sample set value"/>
+    <Attribute name="SampleTheta2_RVAL"                   type="EPICS_PV"     source="4dh4:m13.RBV"                        dbrtype="DBR_DOUBLE"   description="Rotational angle on linear stage of sample readback value"/>
+    <Attribute name="SampleZ"                       type="EPICS_PV"     source="4dh4:m14.VAL"                        dbrtype="DBR_DOUBLE"   description="Sample x position set value"/>
+    <Attribute name="SampleZ_RBV"                       type="EPICS_PV"     source="4dh4:m14.RBV"                        dbrtype="DBR_DOUBLE"   description="Sample x position readback value"/>
 
     <Attribute name="DetCameraX"                    type="EPICS_PV" source="4dh4:m1.VAL"                        dbrtype="DBR_DOUBLE"     description="Camera x position in the beam"/>
     <Attribute name="DetCameraX_RBV"                type="EPICS_PV" source="4dh4:m1.RBV"                       dbrtype="DBR_DOUBLE"/>
 
     <Attribute name="DetCameraFocusDist"            type="EPICS_PV" source="4dh4:m12.VAL"                        dbrtype="DBR_DOUBLE"    description="Camera distance from scintillator box"/>
+    <Attribute name="Pinhole_y"                      type="EPICS_PV" source="4dh4:m16.VAL"                        dbrtype="DBR_DOUBLE"    description="Pinhole vertical position"/>
 
 </Attributes>
 
