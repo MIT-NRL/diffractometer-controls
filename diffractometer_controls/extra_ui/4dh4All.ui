@@ -119,7 +119,7 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
       <enum>QTabWidget::Rounded</enum>
      </property>
      <property name="currentIndex">
-      <number>2</number>
+      <number>3</number>
      </property>
      <property name="iconSize">
       <size>
@@ -1428,12 +1428,14 @@ background-color: rgb(25, 102, 255);</string>
          <property name="filenames" stdset="0">
           <stringlist>
            <string>ADZWO.ui</string>
+           <string>ADQHY.ui</string>
            <string>cam.ui</string>
           </stringlist>
          </property>
          <property name="titles" stdset="0">
           <stringlist>
            <string>ZWO Camera Settings</string>
+           <string>QHY Camera Settings</string>
            <string>Camera Viewer</string>
           </stringlist>
          </property>
@@ -2027,8 +2029,47 @@ background-color: rgb(25, 102, 255);</string>
           <string notr="true">color: rgb(228, 228, 228);
 background-color: rgb(25, 102, 255);</string>
          </property>
+         <property name="text">
+          <string>Serial 1-8</string>
+         </property>
+         <property name="filenames" stdset="0">
+          <stringlist>
+           <string>asynOctet.ui</string>
+           <string>asynOctet.ui</string>
+           <string>asynOctet.ui</string>
+           <string>asynOctet.ui</string>
+           <string>asynOctet.ui</string>
+           <string>asynOctet.ui</string>
+           <string>asynOctet.ui</string>
+           <string>asynOctet.ui</string>
+          </stringlist>
+         </property>
+         <property name="titles" stdset="0">
+          <stringlist>
+           <string>asyn record serial1</string>
+           <string>asyn record serial2</string>
+           <string>asyn record serial3</string>
+           <string>asyn record serial4</string>
+           <string>asyn record serial5</string>
+           <string>asyn record serial6</string>
+           <string>asyn record serial7</string>
+           <string>asyn record serial8</string>
+          </stringlist>
+         </property>
          <property name="showIcon" stdset="0">
           <bool>false</bool>
+         </property>
+         <property name="macros" stdset="0">
+          <stringlist>
+           <string>P=4dh4:,R=asyn_1</string>
+           <string>P=4dh4:,R=asyn_2</string>
+           <string>P=4dh4:,R=asyn_3</string>
+           <string>P=4dh4:,R=asyn_4</string>
+           <string>P=4dh4:,R=asyn_5</string>
+           <string>P=4dh4:,R=asyn_6</string>
+           <string>P=4dh4:,R=asyn_7</string>
+           <string>P=4dh4:,R=asyn_8</string>
+          </stringlist>
          </property>
          <property name="openInNewWindow" stdset="0">
           <bool>true</bool>
