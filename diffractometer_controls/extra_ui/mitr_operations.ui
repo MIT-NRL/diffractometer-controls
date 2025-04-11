@@ -90,7 +90,7 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
           <widget class="PyDMFrame" name="PyDMFrame">
            <property name="minimumSize">
             <size>
-             <width>130</width>
+             <width>140</width>
              <height>150</height>
             </size>
            </property>
@@ -133,7 +133,8 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
                <string/>
               </property>
               <property name="text">
-               <string>Power Thermal</string>
+               <string>Power
+ Thermal</string>
               </property>
               <property name="alignment">
                <set>Qt::AlignCenter</set>
@@ -180,7 +181,7 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
           <widget class="PyDMFrame" name="PyDMFrame_2">
            <property name="minimumSize">
             <size>
-             <width>130</width>
+             <width>140</width>
              <height>150</height>
             </size>
            </property>
@@ -270,7 +271,7 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
           <widget class="PyDMFrame" name="PyDMFrame_3">
            <property name="minimumSize">
             <size>
-             <width>130</width>
+             <width>140</width>
              <height>150</height>
             </size>
            </property>
@@ -404,6 +405,13 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
          <property name="maxRedrawRate" stdset="0">
           <number>15</number>
          </property>
+         <property name="curves">
+          <stringlist>
+           <string>{&quot;channel&quot;: &quot;ca://mitr:PowerThm&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Power Thm&quot;, &quot;color&quot;: &quot;black&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 3, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+           <string>{&quot;channel&quot;: &quot;ca://mitr:Power6&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Power 6\&quot;&quot;, &quot;color&quot;: &quot;red&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+           <string>{&quot;channel&quot;: &quot;ca://mitr:Power4&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Power 4\&quot;&quot;, &quot;color&quot;: &quot;dodgerblue&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+          </stringlist>
+         </property>
          <property name="bufferSize">
           <number>86400</number>
          </property>
@@ -420,14 +428,7 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
           <bool>true</bool>
          </property>
          <property name="maxYRange">
-          <double>6.000000000000000</double>
-         </property>
-         <property name="curves">
-          <stringlist>
-           <string>{&quot;useArchiveData&quot;: true, &quot;liveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:PowerThm&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Power Thm&quot;, &quot;color&quot;: &quot;black&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 3, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
-           <string>{&quot;useArchiveData&quot;: true, &quot;liveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:Power6&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Power 6\&quot;&quot;, &quot;color&quot;: &quot;red&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
-           <string>{&quot;useArchiveData&quot;: true, &quot;liveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:Power4&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Power 4\&quot;&quot;, &quot;color&quot;: &quot;dodgerblue&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
-          </stringlist>
+          <double>1.000000000000000</double>
          </property>
         </widget>
        </item>
@@ -447,7 +448,7 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
           <widget class="PyDMFrame" name="PyDMFrame_4">
            <property name="minimumSize">
             <size>
-             <width>130</width>
+             <width>140</width>
              <height>150</height>
             </size>
            </property>
@@ -516,6 +517,9 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
               <property name="showUnits" stdset="0">
                <bool>true</bool>
               </property>
+              <property name="precisionFromPV" stdset="0">
+               <bool>true</bool>
+              </property>
               <property name="alarmSensitiveContent" stdset="0">
                <bool>true</bool>
               </property>
@@ -537,7 +541,7 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
           <widget class="PyDMFrame" name="PyDMFrame_9">
            <property name="minimumSize">
             <size>
-             <width>130</width>
+             <width>140</width>
              <height>150</height>
             </size>
            </property>
@@ -659,6 +663,12 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
          <property name="maxRedrawRate" stdset="0">
           <number>15</number>
          </property>
+         <property name="curves">
+          <stringlist>
+           <string>{&quot;channel&quot;: &quot;ca://mitr:ShimBladeHeight&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Shim Blade&quot;, &quot;color&quot;: &quot;black&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+           <string>{&quot;channel&quot;: &quot;ca://mitr:RegRodHeight&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Reg Rod&quot;, &quot;color&quot;: &quot;red&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+          </stringlist>
+         </property>
          <property name="bufferSize">
           <number>86400</number>
          </property>
@@ -670,12 +680,6 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
          </property>
          <property name="updateInterval">
           <double>0.500000000000000</double>
-         </property>
-         <property name="curves">
-          <stringlist>
-           <string>{&quot;useArchiveData&quot;: true, &quot;liveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:ShimBladeHeight&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Shim Blade&quot;, &quot;color&quot;: &quot;black&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
-           <string>{&quot;useArchiveData&quot;: true, &quot;liveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:RegRodHeight&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Reg Rod&quot;, &quot;color&quot;: &quot;red&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
-          </stringlist>
          </property>
         </widget>
        </item>
@@ -702,15 +706,15 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
    <header>pydm.widgets.timeplot</header>
   </customwidget>
   <customwidget>
-   <class>PyDMArchiverTimePlot</class>
-   <extends>PyDMTimePlot</extends>
-   <header>pydm.widgets.archiver_time_plot</header>
-  </customwidget>
-  <customwidget>
    <class>PyDMFrame</class>
    <extends>QFrame</extends>
    <header>pydm.widgets.frame</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>PyDMArchiverTimePlot</class>
+   <extends>PyDMTimePlot</extends>
+   <header>pydm.widgets.archiver_time_plot</header>
   </customwidget>
  </customwidgets>
  <resources/>
