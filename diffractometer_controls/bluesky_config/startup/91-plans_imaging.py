@@ -20,7 +20,7 @@ from epics import caput, caget, cainfo
 from functools import partial
 
 
-def one_nd_step_repeat(
+def _one_nd_step_repeat(
     detectors,
     step,
     pos_cache,
@@ -64,7 +64,7 @@ def one_nd_step_repeat(
     yield from bps.move_per_step(step, pos_cache)
     yield from bps.repeater(num_exposures,exposure)  # type: ignore  # Movable issue
 
-def inner_product_custom(args, num:int = None, step:float = None, offset:float = 0, endpoint=True):
+def _inner_product_custom(args, num:int = None, step:float = None, offset:float = 0, endpoint=True):
     """Scan over one multi-motor trajectory.
 
     Parameters
@@ -99,7 +99,7 @@ def inner_product_custom(args, num:int = None, step:float = None, offset:float =
     return functools.reduce(operator.add, cyclers)
 
 
-def ensure_detector_temperature(detectors, target_temperature=-20, threshold=-15):
+def _ensure_detector_temperature(detectors, target_temperature=-20, threshold=-15, poll_interval=0.5):
     """
     Ensure all detectors are at or below the target temperature.
 
@@ -111,34 +111,37 @@ def ensure_detector_temperature(detectors, target_temperature=-20, threshold=-15
         The temperature to set for detectors that are above the threshold.
     threshold : float
         The temperature below which the detectors are considered ready.
+    poll_interval : float
+        Time (in seconds) to wait between temperature checks.
 
     Yields:
     -------
     Bluesky plan messages to set and wait for detector temperatures.
     """
-    # First loop: Set the temperature setpoints for all detectors
+    # First loop: Set the target temperature for all detectors
     for det in detectors:
         if det.cam.temperature_actual.get() > threshold:
-            setpoint = det.cam.temperature.get()
-            if setpoint > threshold:
-                print(f"Camera temperature for {det.name} is {det.cam.temperature_actual.get()} C, setting to {target_temperature} C.")
+            print("****************************************")
+            print(f"{det.name} temperature is currently {det.cam.temperature_actual.get()} C and above {threshold} C")         
+            if det.cam.temperature.get() > threshold:
+                print(f"Setting {det.name} target temperature to {target_temperature} C.")
                 yield from bps.mov(det.cam.temperature, target_temperature)
             else:
-                print(f"Camera temperature for {det.name} is {det.cam.temperature_actual.get()} C, no need to change the setpoint.")
+                print(f"{det.name} temperature set below threshold, will wait for it to cool down.")
+        print("****************************************")
 
-    # Second loop: Wait for each detector to reach the desired temperature
-    for det in detectors:
-        if det.cam.temperature_actual.get() > threshold:
-            print(f"Waiting for {det.name} to cool down to {threshold} C or below.")
-            
-            # Define a condition to wait until the temperature is below the threshold
-            def temperature_below_threshold(*, value, old_value, **kwargs):
-                return value <= threshold
+    # Second loop: Wait for all detectors to reach the desired temperature
+    print("Waiting for all detectors to cool down to the threshold...")
+    all_reached = False
+    while not all_reached:
+        all_reached = True
+        for det in detectors:
+            current_temp = det.cam.temperature_actual.get()
+            if current_temp > threshold:
+                all_reached = False
+        yield from bps.sleep(poll_interval)
 
-            # Use SubscriptionStatus to wait for the condition
-            status = SubscriptionStatus(det.cam.temperature_actual, temperature_below_threshold)
-            yield from bps.wait(status)
-            print(f"{det.name} has reached the desired temperature.")
+    print("All detectors have reached the desired temperature.")
 
 
 def tomo_scan(file_name:str, 
@@ -153,6 +156,7 @@ def tomo_scan(file_name:str,
               num_exposures:int = 1,
               include_stop_angle:bool = False,
               return_to_start:bool = True, 
+              check_temperature:bool = True,
               md:dict = None):
     '''
     Tomography scan that defaults to 360-step degrees.
@@ -161,6 +165,10 @@ def tomo_scan(file_name:str,
     file_dir = str(file_dir).strip().replace(" ","_").replace("__","_")
 
     detector = [detector]
+
+    # Ensure temperature is checked within the main plan
+    if check_temperature:
+        yield from _ensure_detector_temperature(detectors=detector, target_temperature=-20, threshold=-15)
 
     old_exposure_time = detector[0].cam.acquire_time.get()
 
@@ -267,14 +275,14 @@ def tomo_scan(file_name:str,
         
         pos_cache = defaultdict(lambda: None)
         # if num_projections is not None:
-        cycler = inner_product_custom(num=num_projections, step=angle_step, endpoint=include_stop_angle, args=[motor, start_angle, stop_angle])
+        cycler = _inner_product_custom(num=num_projections, step=angle_step, endpoint=include_stop_angle, args=[motor, start_angle, stop_angle])
         # elif angle_step is not None:
             # cycle = inner_product_custom(step=angle_step, endpoint=include_stop_angle, args=[motor, start_angle, stop_angle])
 
         def inner_scan_nd():
             # yield from bps.declare_stream(motor, *detector, name="primary")
             for step in list(cycler):
-                yield from one_nd_step_repeat(detector, step, pos_cache,num_exposures=num_exposures)
+                yield from _one_nd_step_repeat(detector, step, pos_cache,num_exposures=num_exposures)
 
         # print("Replace the sample, open the shutter, and press Resume to start the scan")
         # yield from bps.checkpoint()
@@ -311,6 +319,11 @@ def imaging(
 
     detector = [detector]
 
+    # Ensure temperature is checked within the main plan
+    if check_temperature:
+        yield from _ensure_detector_temperature(detectors=detector, target_temperature=-20, threshold=-15)
+
+
     old_exposure_time = detector[0].cam.acquire_time.get()
     if exposure_time is not None:
         for det in detector:
@@ -334,9 +347,6 @@ def imaging(
     if offset is not None:
         for det in detector:
             yield from bps.mov(det.cam.offset, offset)
-
-    if check_temperature:
-        yield from ensure_detector_temperature(detectors=detector, target_temperature=-20, threshold=-15)
 
     # md_args = list(chain(*((repr(motor), start, stop) for motor, start_angle, stop_angle)))
     md = md or {}
@@ -389,6 +399,7 @@ def imaging_scan(
             gain:int = None,
             offset:int = None,
             return_to_original_position:bool = True,
+            check_temperature:bool = True,
             md:dict = None):
     '''
     General scan for the imaging detector system.
@@ -400,6 +411,10 @@ def imaging_scan(
     file_dir = str(file_dir).strip().replace(" ","_").replace("__","_")
 
     detector = [detector]
+
+    # Ensure temperature is checked within the main plan
+    if check_temperature:
+        yield from _ensure_detector_temperature(detectors=detector, target_temperature=-20, threshold=-15)
 
     old_exposure_time = detector[0].cam.acquire_time.get()
 
@@ -482,13 +497,13 @@ def imaging_scan(
         
         pos_cache = defaultdict(lambda: None)
         # cycler = plan_patterns.inner_product(num=num_steps, args=[motor, start_pos, stop_pos])
-        cycler = inner_product_custom(step=step, num=num_steps, args=[motor, start_pos, stop_pos])
+        cycler = _inner_product_custom(step=step, num=num_steps, args=[motor, start_pos, stop_pos])
         print(cycler)
 
         def inner_scan_nd():
             # yield from bps.declare_stream(motor, *detector, name="primary")
             for step in list(cycler):
-                yield from one_nd_step_repeat(detector, step, pos_cache,num_exposures=num_exposures)
+                yield from _one_nd_step_repeat(detector, step, pos_cache,num_exposures=num_exposures)
 
         # print("Replace the sample, open the shutter, and press Resume to start the scan")
         # yield from bps.checkpoint()
