@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>300</width>
-    <height>786</height>
+    <width>378</width>
+    <height>838</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -318,7 +318,7 @@
   }</string>
           </property>
           <property name="text">
-           <string># Queued arrays</string>
+           <string>Percent complete</string>
           </property>
           <property name="alignment">
            <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
@@ -350,6 +350,9 @@
   background-color: rgb(187, 187, 187);
   }</string>
           </property>
+          <property name="text">
+           <string>ca://${P}${R}PercentComplete_RBV</string>
+          </property>
           <property name="alignment">
            <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
           </property>
@@ -357,7 +360,7 @@
            <set>Qt::TextSelectableByKeyboard|Qt::TextSelectableByMouse</set>
           </property>
           <property name="channel" stdset="0">
-           <string>ca://${P}${R}NumQueuedArrays</string>
+           <string>ca://${P}${R}PercentComplete_RBV</string>
           </property>
          </widget>
         </item>
@@ -1876,7 +1879,7 @@
   }</string>
           </property>
           <property name="text">
-           <string>######</string>
+           <string>ca://${P}${R}Temperature_RBV</string>
           </property>
           <property name="alignment">
            <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
