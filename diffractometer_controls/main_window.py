@@ -117,6 +117,13 @@ class MITRMainWindow(PyDMMainWindow):
             bluesky_proxy_reset.setIcon(qta.icon('fa5s.redo'))
             bluesky_proxy_reset.setToolTip("Reset the Bluesky Run Engine Proxy")
             bluesky_menu.addAction(bluesky_proxy_reset)
+
+            # Add Bluesky GUI reset action to the "Bluesky Controls" submenu
+            bluesky_gui_reset = bluesky_menu.addAction("GUI Reset")
+            bluesky_gui_reset.triggered.connect(lambda: self.control_servers("4dh4gui", "restart"))
+            bluesky_gui_reset.setIcon(qta.icon('fa5s.redo'))
+            bluesky_gui_reset.setToolTip("Reset the Bluesky GUI")
+            bluesky_menu.addAction(bluesky_gui_reset)
             
 
             # Add a "EPICS Controls" submenu
@@ -138,12 +145,26 @@ class MITRMainWindow(PyDMMainWindow):
             # add line to the menu
             epics_menu.addSeparator()
 
+            # Add start action to the "EPICS Controls" submenu
+            epics_ioc_start = epics_menu.addAction("IOC Start")
+            epics_ioc_start.triggered.connect(lambda: self.control_servers("4dh4ioc", "start"))
+            epics_ioc_start.setIcon(qta.icon('fa5s.play'))
+            epics_ioc_start.setToolTip("Start the EPICS IOC")
+            epics_menu.addAction(epics_ioc_start)
+
             # Add actions to the "EPICS Controls" submenu
             epics_ioc_reset = epics_menu.addAction("IOC Reset")
-            epics_ioc_reset.triggered.connect(self.reset_ioc)
+            epics_ioc_reset.triggered.connect(lambda: self.control_servers("4dh4ioc", "restart"))
             epics_ioc_reset.setIcon(qta.icon('fa5s.redo'))
             epics_ioc_reset.setToolTip("Reset the EPICS IOC")
             epics_menu.addAction(epics_ioc_reset)
+
+            # Add stop action to the "EPICS Controls" submenu
+            epics_ioc_stop = epics_menu.addAction("IOC Stop")
+            epics_ioc_stop.triggered.connect(lambda: self.control_servers("4dh4ioc", "stop"))
+            epics_ioc_stop.setIcon(qta.icon('fa5s.stop'))
+            epics_ioc_stop.setToolTip("Stop the EPICS IOC")
+            epics_menu.addAction(epics_ioc_stop)
 
             # Add the "Controls" action to the menu bar
             controls_action = QAction(gear_icon, "Old Control Menu", self)
@@ -197,33 +218,40 @@ class MITRMainWindow(PyDMMainWindow):
                     f"An unexpected error occurred while restarting {process_name}:\n\n{str(e)}",
                 )
 
-        def reset_ioc(self):
+        def control_servers(self, server_name, command):
             """
-            Resets the EPICS IOC by running the '4dh4ioc restart' command.
+            Controls a server by running the specified command in an interactive Bash shell.
+
+            Parameters:
+                server_name (str): The name of the server to control.
+                command (str): The command to execute (e.g., "restart", "start", "stop").
             """
             try:
-                # Run the '4dh4ioc restart' command in an interactive Bash shell
+                # Construct the full command
+                full_command = f"{server_name} {command}"
+                
+                # Run the command in an interactive Bash shell
                 subprocess.run(
-                    ["bash", "-i", "-c", "4dh4ioc restart"],
+                    ["bash", "-i", "-c", full_command],
                     check=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                 )
                 # Show a success message
-                QMessageBox.information(None, "Success", "EPICS IOC restarted successfully.")
+                QMessageBox.information(None, "Success", f"{server_name} {command} executed successfully.")
             except subprocess.CalledProcessError as e:
                 # Show an error message if the command fails
                 QMessageBox.critical(
                     None,
                     "Error",
-                    f"Failed to restart EPICS IOC.\n\nError: {e.stderr.decode('utf-8')}",
+                    f"Failed to execute {server_name} {command}.\n\nError: {e.stderr.decode('utf-8')}",
                 )
             except Exception as e:
                 # Catch any other exceptions
                 QMessageBox.critical(
                     None,
                     "Error",
-                    f"An unexpected error occurred while restarting EPICS IOC:\n\n{str(e)}",
+                    f"An unexpected error occurred while executing {server_name} {command}:\n\n{str(e)}",
                 )
 
 
