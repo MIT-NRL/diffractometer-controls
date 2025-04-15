@@ -3,6 +3,7 @@ channels:
   - conda-forge
 dependencies:
   - python
+  - pip
   - bluesky
   - pydm
   - typhos
@@ -17,3 +18,5 @@ dependencies:
   - qtpy
   - p4p
   - bluesky-widgets
+  - pip:
+    - git+https://github.com/sfayfar/adl2pydm.git
