@@ -318,7 +318,7 @@
   }</string>
           </property>
           <property name="text">
-           <string>Percent complete</string>
+           <string>Time Remaining</string>
           </property>
           <property name="alignment">
            <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
@@ -342,7 +342,7 @@
            </font>
           </property>
           <property name="toolTip">
-           <string>PV: ${P}${R}NumQueuedArrays</string>
+           <string>ca://${P}${R}TimeRemaining_RBV</string>
           </property>
           <property name="styleSheet">
            <string notr="true">PyDMLabel#text_update_12 {
@@ -351,7 +351,7 @@
   }</string>
           </property>
           <property name="text">
-           <string>ca://${P}${R}PercentComplete_RBV</string>
+           <string>#########</string>
           </property>
           <property name="alignment">
            <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
@@ -360,7 +360,7 @@
            <set>Qt::TextSelectableByKeyboard|Qt::TextSelectableByMouse</set>
           </property>
           <property name="channel" stdset="0">
-           <string>ca://${P}${R}PercentComplete_RBV</string>
+           <string>ca://${P}${R}TimeRemaining_RBV</string>
           </property>
          </widget>
         </item>
@@ -1879,7 +1879,7 @@
   }</string>
           </property>
           <property name="text">
-           <string>ca://${P}${R}Temperature_RBV</string>
+           <string>#######</string>
           </property>
           <property name="alignment">
            <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
