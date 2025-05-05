@@ -119,7 +119,7 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
       <enum>QTabWidget::Rounded</enum>
      </property>
      <property name="currentIndex">
-      <number>2</number>
+      <number>4</number>
      </property>
      <property name="iconSize">
       <size>
@@ -2637,10 +2637,25 @@ background-color: rgb(25, 102, 255);</string>
 background-color: rgb(25, 102, 255);</string>
          </property>
          <property name="text">
-          <string/>
+          <string>USB-2408</string>
+         </property>
+         <property name="filenames" stdset="0">
+          <stringlist>
+           <string>USB2408_module.ui</string>
+          </stringlist>
+         </property>
+         <property name="titles" stdset="0">
+          <stringlist>
+           <string>USB-2408 module</string>
+          </stringlist>
          </property>
          <property name="showIcon" stdset="0">
           <bool>false</bool>
+         </property>
+         <property name="macros" stdset="0">
+          <stringlist>
+           <string>P=${P}USB2408:,Bi=Bi,Li=Li,Bo=Bo,Lo=Lo,Bd=Bd,Ai=Ai,Ti=Ti,Ao=Ao,Ct=Counter,Wd=WaveDig,Wg=WaveGen,Tg=Trig</string>
+          </stringlist>
          </property>
          <property name="openInNewWindow" stdset="0">
           <bool>true</bool>
