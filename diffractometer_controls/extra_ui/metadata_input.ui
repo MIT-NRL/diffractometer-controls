@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>556</width>
-    <height>509</height>
+    <height>551</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -38,9 +38,9 @@
       <property name="geometry">
        <rect>
         <x>0</x>
-        <y>-283</y>
-        <width>529</width>
-        <height>780</height>
+        <y>-200</y>
+        <width>530</width>
+        <height>741</height>
        </rect>
       </property>
       <layout class="QVBoxLayout" name="verticalLayout_4">
@@ -882,24 +882,18 @@
              </widget>
             </item>
             <item>
-             <widget class="PyDMLineEdit" name="PyDMLineEdit_16">
-              <property name="minimumSize">
-               <size>
-                <width>0</width>
-                <height>25</height>
-               </size>
-              </property>
-              <property name="maximumSize">
-               <size>
-                <width>16777215</width>
-                <height>25</height>
-               </size>
+             <widget class="PyDMEnumComboBox" name="PyDMEnumComboBox">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
               </property>
               <property name="toolTip">
-               <string>${P}${R}CameraTubeName</string>
+               <string/>
               </property>
               <property name="channel" stdset="0">
-               <string>ca://${P}${R}CameraTubeName</string>
+               <string>ca://${P}${R}CameraExtensionTubes</string>
               </property>
              </widget>
             </item>
@@ -956,6 +950,89 @@
             </item>
            </layout>
           </item>
+          <item>
+           <layout class="QHBoxLayout" name="horizontalLayout_2">
+            <item>
+             <widget class="PyDMLabel" name="PyDMLabel_21">
+              <property name="minimumSize">
+               <size>
+                <width>160</width>
+                <height>25</height>
+               </size>
+              </property>
+              <property name="maximumSize">
+               <size>
+                <width>16777215</width>
+                <height>25</height>
+               </size>
+              </property>
+              <property name="toolTip">
+               <string/>
+              </property>
+              <property name="text">
+               <string>Detector Size (cm)</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="PyDMLabel" name="text_update_13">
+              <property name="font">
+               <font>
+                <pointsize>10</pointsize>
+               </font>
+              </property>
+              <property name="toolTip">
+               <string>${P}${R}DetectorSizeX</string>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">PyDMLabel {
+  color: rgb(10, 0, 184);
+  background-color: rgb(187, 187, 187);
+  }</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignCenter</set>
+              </property>
+              <property name="textInteractionFlags">
+               <set>Qt::TextSelectableByKeyboard|Qt::TextSelectableByMouse</set>
+              </property>
+              <property name="channel" stdset="0">
+               <string>ca://${P}${R}DetectorSizeX</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="PyDMLabel" name="text_update_14">
+              <property name="font">
+               <font>
+                <pointsize>10</pointsize>
+               </font>
+              </property>
+              <property name="toolTip">
+               <string>${P}${R}DetectorSizeY</string>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">PyDMLabel {
+  color: rgb(10, 0, 184);
+  background-color: rgb(187, 187, 187);
+  }</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignCenter</set>
+              </property>
+              <property name="textInteractionFlags">
+               <set>Qt::TextSelectableByKeyboard|Qt::TextSelectableByMouse</set>
+              </property>
+              <property name="channel" stdset="0">
+               <string>ca://${P}${R}DetectorSizeY</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
          </layout>
         </widget>
        </item>
@@ -970,6 +1047,11 @@
    <class>PyDMLabel</class>
    <extends>QLabel</extends>
    <header>pydm.widgets.label</header>
+  </customwidget>
+  <customwidget>
+   <class>PyDMEnumComboBox</class>
+   <extends>QComboBox</extends>
+   <header>pydm.widgets.enum_combo_box</header>
   </customwidget>
   <customwidget>
    <class>PyDMFrame</class>

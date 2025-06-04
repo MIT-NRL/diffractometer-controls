@@ -2370,6 +2370,125 @@
         </item>
        </layout>
       </item>
+      <item>
+       <widget class="PyDMDrawingLine" name="PyDMDrawingLine">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Preferred" vsizetype="Minimum">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>5</height>
+         </size>
+        </property>
+        <property name="toolTip">
+         <string/>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="horizontalLayout_18">
+        <item>
+         <widget class="PyDMRelatedDisplayButton" name="PyDMRelatedDisplayButton_2">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="MinimumExpanding" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>70</width>
+            <height>0</height>
+           </size>
+          </property>
+          <property name="toolTip">
+           <string/>
+          </property>
+          <property name="styleSheet">
+           <string notr="true">PyDMRelatedDisplayButton{
+  color: rgb(0, 0, 0);
+  background-color: rgb(115, 223, 255);
+  }</string>
+          </property>
+          <property name="text">
+           <string>Camera</string>
+          </property>
+          <property name="filenames" stdset="0">
+           <stringlist>
+            <string>ADZWO.ui</string>
+            <string>ADQHY.ui</string>
+           </stringlist>
+          </property>
+          <property name="titles" stdset="0">
+           <stringlist>
+            <string>ZWO Camera Settings</string>
+            <string>QHY Camera Settings</string>
+           </stringlist>
+          </property>
+          <property name="showIcon" stdset="0">
+           <bool>false</bool>
+          </property>
+          <property name="macros" stdset="0">
+           <stringlist>
+            <string>P=${P},R=${R}</string>
+            <string>P=${P},R=${R}</string>
+           </stringlist>
+          </property>
+          <property name="openInNewWindow" stdset="0">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="PyDMRelatedDisplayButton" name="PyDMRelatedDisplayButton_3">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="MinimumExpanding" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>70</width>
+            <height>0</height>
+           </size>
+          </property>
+          <property name="toolTip">
+           <string/>
+          </property>
+          <property name="styleSheet">
+           <string notr="true">PyDMRelatedDisplayButton{
+  color: rgb(0, 0, 0);
+  background-color: rgb(115, 223, 255);
+  }</string>
+          </property>
+          <property name="text">
+           <string>Metadata Input</string>
+          </property>
+          <property name="filenames" stdset="0">
+           <stringlist>
+            <string>metadata_input.ui</string>
+           </stringlist>
+          </property>
+          <property name="showIcon" stdset="0">
+           <bool>false</bool>
+          </property>
+          <property name="macros" stdset="0">
+           <stringlist>
+            <string>P=${P},R=TS:</string>
+           </stringlist>
+          </property>
+          <property name="openInNewWindow" stdset="0">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
      </layout>
     </widget>
    </item>
@@ -2380,6 +2499,11 @@
    <class>PyDMLabel</class>
    <extends>QLabel</extends>
    <header>pydm.widgets.label</header>
+  </customwidget>
+  <customwidget>
+   <class>PyDMDrawingLine</class>
+   <extends>QWidget</extends>
+   <header>pydm.widgets.drawing</header>
   </customwidget>
   <customwidget>
    <class>PyDMEnumComboBox</class>
