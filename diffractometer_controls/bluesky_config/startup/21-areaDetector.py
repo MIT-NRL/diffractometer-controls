@@ -6,7 +6,7 @@ from ophyd.device import DeviceStatus
 from ophyd.status import Status, SubscriptionStatus
 
 from ophyd.areadetector import (AreaDetector, SingleTrigger, SimDetector, 
-                                ImagePlugin, StatsPlugin, TIFFPlugin, HDF5Plugin, 
+                                ImagePlugin, StatsPlugin, TIFFPlugin, HDF5Plugin, TransformPlugin,
                                 CamBase, ADComponent as ADCpt, EpicsSignalWithRBV as SignalWithRBV,
                                 DetectorBase)
 from ophyd.areadetector.filestore_mixins import FileStoreTIFFIterativeWrite, FileStoreHDF5IterativeWrite
@@ -62,21 +62,16 @@ class MyZWODetector(SingleTrigger, ZWODetector):
     cam = Cpt(ZWODetectorCam, "cam1:")
     image = Cpt(ImagePlugin, suffix='image1:')
     stats1 = Cpt(StatsPlugin, 'Stats1:')
+    transform1 = Cpt(TransformPlugin, "Trans1:")
 
     tiff1 = Cpt(
         MyTIFFPlugin,
         "TIFF1:",
-        # write_path_template="/home/mitr_4dh4/Data/TestData/%Y/%m/%d/",
-        # read_path_template="/home/mitr_4dh4/Data/TestData/%Y/%m/%d/",
-        # write_path_template="/home/mitr_4dh4/Data/%Y/YttriumHydride/IrradiatedSamples2/",
-        # read_path_template="/home/mitr_4dh4/Data/%Y/YttriumHydride/IrradiatedSamples2/",
-        write_path_template="/home/mitr_4dh4/Data/%Y/YttriumHydride/Unirr_samples/",
-        read_path_template="/home/mitr_4dh4/Data/%Y/YttriumHydride/Unirr_samples/",
-        # write_path_template="/home/mitr_4dh4/Data/%Y/PSI_Experiment/",
-        # read_path_template="/home/mitr_4dh4/Data/%Y/PSI_Experiment/",
-        # write_path_template="/home/mitr_4dh4/Data/%Y/BeamlineFocusing/",
-        # read_path_template="/home/mitr_4dh4/Data/%Y/BeamlineFocusing/",
+        write_path_template="/home/mitr_4dh4/Data/%Y/",
+        read_path_template="/home/mitr_4dh4/Data/%Y/",
     )
+
+    
     # hdf1 = Cpt(
     #     MyHDF5Plugin,
     #     "HDF1:",
@@ -123,13 +118,14 @@ class SimAreaDetector(SingleTrigger, SimDetector):
     # )
 
 # Enable when using the ZWO camera
-if 0:
+if 1:
     cam_zwo = MyZWODetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total'])
     cam_zwo.cam.nd_attributes_file.set("/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml") 
     # caput("4dh4:TIFF1:CreateDirectory", -3)
+    caput("4dh4:TIFF1:AutoSave", 0) #Ensure the TIFF plugin does not auto save to prevent overwriting
 
 # Enable when using the QHY camera
-if 1:
+if 0:
     cam_qhy = MyQHYDetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total'])
     cam_qhy.cam.nd_attributes_file.set("/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml") 
     # caput("4dh4:TIFF1:CreateDirectory", -3)
