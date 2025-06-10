@@ -19,6 +19,7 @@ from ophyd.status import Status, SubscriptionStatus
 from epics import caput, caget, cainfo
 from functools import partial
 
+transfer_time_per_bytes = 4.1203007518796994e-08 # transfer speed in seconds per byte testing on the ASI294MM Pro
 
 def _one_nd_step_repeat(
     detectors,
@@ -168,7 +169,7 @@ def tomo_scan(file_name:str,
 
     # Ensure temperature is checked within the main plan
     if check_temperature:
-        yield from _ensure_detector_temperature(detectors=detector, target_temperature=-20, threshold=-15)
+        yield from _ensure_detector_temperature(detectors=detector, target_temperature=-20, threshold=-10)
 
     old_exposure_time = detector[0].cam.acquire_time.get()
 
@@ -193,7 +194,15 @@ def tomo_scan(file_name:str,
             num_projections_calc = int((stop_angle-start_angle)/angle_step)
             actual_stop_angle = stop_angle - angle_step
 
-    total_time = num_exposures*num_projections_calc*detector[0].cam.acquire_time.get() # in seconds
+    image_bytes = caget("4dh4:cam1:ArraySize_RBV")
+    transfer_time_per_image = image_bytes * transfer_time_per_bytes
+
+    total_time = (
+        num_exposures * num_projections_calc * detector[0].cam.acquire_time.get()
+        + num_exposures * num_projections_calc * transfer_time_per_image
+    )  # in seconds
+
+    
 
     print("#===============#")
     print(f"Starting tomography scan from {start_angle} to {actual_stop_angle} \nin {num_projections_calc} steps of {angle_step_calc} degrees with {num_exposures} exposured per step.")
@@ -321,7 +330,7 @@ def imaging(
 
     # Ensure temperature is checked within the main plan
     if check_temperature:
-        yield from _ensure_detector_temperature(detectors=detector, target_temperature=-20, threshold=-15)
+        yield from _ensure_detector_temperature(detectors=detector, target_temperature=-20, threshold=-10)
 
 
     old_exposure_time = detector[0].cam.acquire_time.get()
@@ -329,7 +338,14 @@ def imaging(
         for det in detector:
             yield from bps.mov(det.cam.acquire_time, exposure_time)
 
-    total_time = num_exposures*detector[0].cam.acquire_time.get() # in seconds
+    image_bytes = caget("4dh4:cam1:ArraySize_RBV")
+    transfer_time_per_image = image_bytes * transfer_time_per_bytes
+
+    total_time = (
+        num_exposures * detector[0].cam.acquire_time.get()
+        + num_exposures * transfer_time_per_image
+    )  # in seconds
+
     print("#===============#")
     print(f"Starting imaging with {num_exposures} exposures.")
     hours = total_time // 3600
@@ -414,7 +430,7 @@ def imaging_scan(
 
     # Ensure temperature is checked within the main plan
     if check_temperature:
-        yield from _ensure_detector_temperature(detectors=detector, target_temperature=-20, threshold=-15)
+        yield from _ensure_detector_temperature(detectors=detector, target_temperature=-20, threshold=-10)
 
     old_exposure_time = detector[0].cam.acquire_time.get()
 
@@ -442,7 +458,13 @@ def imaging_scan(
         step_cal = step
         stop_pos_calc = positions[-1]
 
-    total_time = num_exposures*num_steps_calc*detector[0].cam.acquire_time.get() # in seconds
+    image_bytes = caget("4dh4:cam1:ArraySize_RBV")
+    transfer_time_per_image = image_bytes * transfer_time_per_bytes
+
+    total_time = (
+        num_exposures * num_steps_calc * detector[0].cam.acquire_time.get()
+        + num_exposures * num_steps_calc * transfer_time_per_image
+    )  # in seconds
 
     print("#===============#")
     print(f"Starting scan of {motor.name} from {start_pos} to {stop_pos_calc} \nin {num_steps_calc} steps of {step_cal} {motor.egu} with {num_exposures} exposures at each position.")
