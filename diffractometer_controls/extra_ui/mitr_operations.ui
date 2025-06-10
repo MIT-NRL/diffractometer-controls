@@ -13,7 +13,7 @@
   <property name="windowTitle">
    <string>Form</string>
   </property>
-  <layout class="QVBoxLayout" name="verticalLayout_3">
+  <layout class="QVBoxLayout" name="verticalLayout_2">
    <item>
     <widget class="PyDMTabWidget" name="PyDMTabWidget">
      <property name="font">
@@ -74,6 +74,7 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
       <stringlist>
        <string></string>
        <string></string>
+       <string></string>
       </stringlist>
      </property>
      <widget class="QWidget" name="tab">
@@ -90,7 +91,7 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
           <widget class="PyDMFrame" name="PyDMFrame">
            <property name="minimumSize">
             <size>
-             <width>140</width>
+             <width>150</width>
              <height>150</height>
             </size>
            </property>
@@ -405,13 +406,6 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
          <property name="maxRedrawRate" stdset="0">
           <number>15</number>
          </property>
-         <property name="curves">
-          <stringlist>
-           <string>{&quot;channel&quot;: &quot;ca://mitr:PowerThm&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Power Thm&quot;, &quot;color&quot;: &quot;black&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 3, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
-           <string>{&quot;channel&quot;: &quot;ca://mitr:Power6&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Power 6\&quot;&quot;, &quot;color&quot;: &quot;red&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
-           <string>{&quot;channel&quot;: &quot;ca://mitr:Power4&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Power 4\&quot;&quot;, &quot;color&quot;: &quot;dodgerblue&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
-          </stringlist>
-         </property>
          <property name="bufferSize">
           <number>86400</number>
          </property>
@@ -419,7 +413,7 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
           <enum>PyDMTimePlot::AtFixedRate</enum>
          </property>
          <property name="timeSpan">
-          <double>43200.000000000000000</double>
+          <double>43200.000263214111328</double>
          </property>
          <property name="updateInterval">
           <double>0.500000000000000</double>
@@ -429,6 +423,13 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
          </property>
          <property name="maxYRange">
           <double>1.000000000000000</double>
+         </property>
+         <property name="curves">
+          <stringlist>
+           <string>{&quot;useArchiveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:PowerThm&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Power Thm&quot;, &quot;color&quot;: &quot;black&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 3, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+           <string>{&quot;useArchiveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:Power6&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Power 6\&quot;&quot;, &quot;color&quot;: &quot;red&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+           <string>{&quot;useArchiveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:Power4&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Power 4\&quot;&quot;, &quot;color&quot;: &quot;dodgerblue&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+          </stringlist>
          </property>
         </widget>
        </item>
@@ -448,7 +449,7 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
           <widget class="PyDMFrame" name="PyDMFrame_4">
            <property name="minimumSize">
             <size>
-             <width>140</width>
+             <width>150</width>
              <height>150</height>
             </size>
            </property>
@@ -663,11 +664,265 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
          <property name="maxRedrawRate" stdset="0">
           <number>15</number>
          </property>
+         <property name="bufferSize">
+          <number>86400</number>
+         </property>
+         <property name="updateMode" stdset="0">
+          <enum>PyDMTimePlot::AtFixedRate</enum>
+         </property>
+         <property name="timeSpan">
+          <double>43200.000222921371460</double>
+         </property>
+         <property name="updateInterval">
+          <double>0.500000000000000</double>
+         </property>
          <property name="curves">
           <stringlist>
-           <string>{&quot;channel&quot;: &quot;ca://mitr:ShimBladeHeight&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Shim Blade&quot;, &quot;color&quot;: &quot;black&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
-           <string>{&quot;channel&quot;: &quot;ca://mitr:RegRodHeight&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Reg Rod&quot;, &quot;color&quot;: &quot;red&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+           <string>{&quot;useArchiveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:ShimBladeHeight&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Shim Blade&quot;, &quot;color&quot;: &quot;black&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+           <string>{&quot;useArchiveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:RegRodHeight&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Reg Rod&quot;, &quot;color&quot;: &quot;red&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
           </stringlist>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="tab_3">
+      <attribute name="title">
+       <string>DWK Channels</string>
+      </attribute>
+      <layout class="QHBoxLayout" name="horizontalLayout_2">
+       <item>
+        <layout class="QVBoxLayout" name="verticalLayout_7">
+         <property name="spacing">
+          <number>10</number>
+         </property>
+         <item>
+          <widget class="PyDMLabel" name="PyDMLabel_5">
+           <property name="minimumSize">
+            <size>
+             <width>150</width>
+             <height>0</height>
+            </size>
+           </property>
+           <property name="font">
+            <font>
+             <pointsize>16</pointsize>
+            </font>
+           </property>
+           <property name="toolTip">
+            <string/>
+           </property>
+           <property name="text">
+            <string>DWK Power</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="PyDMLabel" name="PyDMLabel_6">
+           <property name="font">
+            <font>
+             <pointsize>20</pointsize>
+            </font>
+           </property>
+           <property name="toolTip">
+            <string>ca://mitr:DWK1</string>
+           </property>
+           <property name="autoFillBackground">
+            <bool>true</bool>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+           <property name="precision" stdset="0">
+            <number>3</number>
+           </property>
+           <property name="showUnits" stdset="0">
+            <bool>true</bool>
+           </property>
+           <property name="precisionFromPV" stdset="0">
+            <bool>false</bool>
+           </property>
+           <property name="alarmSensitiveContent" stdset="0">
+            <bool>true</bool>
+           </property>
+           <property name="alarmSensitiveBorder" stdset="0">
+            <bool>false</bool>
+           </property>
+           <property name="channel" stdset="0">
+            <string>ca://mitr:DWK1</string>
+           </property>
+           <property name="enableRichText" stdset="0">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="PyDMLabel" name="PyDMLabel_10">
+           <property name="font">
+            <font>
+             <pointsize>20</pointsize>
+            </font>
+           </property>
+           <property name="toolTip">
+            <string>ca://mitr:DWK2</string>
+           </property>
+           <property name="autoFillBackground">
+            <bool>true</bool>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+           <property name="precision" stdset="0">
+            <number>3</number>
+           </property>
+           <property name="showUnits" stdset="0">
+            <bool>true</bool>
+           </property>
+           <property name="precisionFromPV" stdset="0">
+            <bool>false</bool>
+           </property>
+           <property name="alarmSensitiveContent" stdset="0">
+            <bool>true</bool>
+           </property>
+           <property name="alarmSensitiveBorder" stdset="0">
+            <bool>false</bool>
+           </property>
+           <property name="channel" stdset="0">
+            <string>ca://mitr:DWK2</string>
+           </property>
+           <property name="enableRichText" stdset="0">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="PyDMLabel" name="PyDMLabel_12">
+           <property name="font">
+            <font>
+             <pointsize>20</pointsize>
+            </font>
+           </property>
+           <property name="toolTip">
+            <string>ca://mitr:DWK3</string>
+           </property>
+           <property name="autoFillBackground">
+            <bool>true</bool>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+           <property name="precision" stdset="0">
+            <number>3</number>
+           </property>
+           <property name="showUnits" stdset="0">
+            <bool>true</bool>
+           </property>
+           <property name="precisionFromPV" stdset="0">
+            <bool>false</bool>
+           </property>
+           <property name="alarmSensitiveContent" stdset="0">
+            <bool>true</bool>
+           </property>
+           <property name="alarmSensitiveBorder" stdset="0">
+            <bool>false</bool>
+           </property>
+           <property name="channel" stdset="0">
+            <string>ca://mitr:DWK3</string>
+           </property>
+           <property name="enableRichText" stdset="0">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="PyDMLabel" name="PyDMLabel_11">
+           <property name="font">
+            <font>
+             <pointsize>20</pointsize>
+            </font>
+           </property>
+           <property name="toolTip">
+            <string>ca://mitr:DWK4</string>
+           </property>
+           <property name="autoFillBackground">
+            <bool>true</bool>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+           <property name="precision" stdset="0">
+            <number>3</number>
+           </property>
+           <property name="showUnits" stdset="0">
+            <bool>true</bool>
+           </property>
+           <property name="precisionFromPV" stdset="0">
+            <bool>false</bool>
+           </property>
+           <property name="alarmSensitiveContent" stdset="0">
+            <bool>true</bool>
+           </property>
+           <property name="alarmSensitiveBorder" stdset="0">
+            <bool>false</bool>
+           </property>
+           <property name="channel" stdset="0">
+            <string>ca://mitr:DWK4</string>
+           </property>
+           <property name="enableRichText" stdset="0">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <widget class="PyDMArchiverTimePlot" name="PyDMArchiverTimePlot_3">
+         <property name="font">
+          <font>
+           <pointsize>15</pointsize>
+          </font>
+         </property>
+         <property name="toolTip">
+          <string/>
+         </property>
+         <property name="showXGrid">
+          <bool>false</bool>
+         </property>
+         <property name="showYGrid">
+          <bool>false</bool>
+         </property>
+         <property name="backgroundColor">
+          <color>
+           <red>255</red>
+           <green>255</green>
+           <blue>255</blue>
+          </color>
+         </property>
+         <property name="axisColor">
+          <color>
+           <red>0</red>
+           <green>0</green>
+           <blue>0</blue>
+          </color>
+         </property>
+         <property name="yAxes">
+          <stringlist>
+           <string>{&quot;name&quot;: &quot;Axis 1&quot;, &quot;orientation&quot;: &quot;left&quot;, &quot;label&quot;: &quot;Reactor Power&quot;, &quot;minRange&quot;: -4.995220521931166, &quot;maxRange&quot;: 4.995220521931166, &quot;autoRange&quot;: true, &quot;logMode&quot;: false}</string>
+          </stringlist>
+         </property>
+         <property name="xLabels">
+          <stringlist>
+           <string>Time</string>
+          </stringlist>
+         </property>
+         <property name="showLegend">
+          <bool>true</bool>
+         </property>
+         <property name="maxRedrawRate" stdset="0">
+          <number>15</number>
          </property>
          <property name="bufferSize">
           <number>86400</number>
@@ -676,10 +931,24 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
           <enum>PyDMTimePlot::AtFixedRate</enum>
          </property>
          <property name="timeSpan">
-          <double>43200.000000000000000</double>
+          <double>43200.876410245895386</double>
          </property>
          <property name="updateInterval">
           <double>0.500000000000000</double>
+         </property>
+         <property name="autoRangeY">
+          <bool>true</bool>
+         </property>
+         <property name="maxYRange">
+          <double>1.000000000000000</double>
+         </property>
+         <property name="curves">
+          <stringlist>
+           <string>{&quot;useArchiveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:DWK1&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;DWK1&quot;, &quot;color&quot;: &quot;black&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 3, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+           <string>{&quot;useArchiveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:DWK2&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;DWK2&quot;, &quot;color&quot;: &quot;red&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+           <string>{&quot;useArchiveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:DWK3&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;DWK3&quot;, &quot;color&quot;: &quot;dodgerblue&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+           <string>{&quot;useArchiveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:DWK4&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;DWK4&quot;, &quot;color&quot;: &quot;forestgreen&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 1, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 10, &quot;yAxisName&quot;: &quot;Axis 1&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+          </stringlist>
          </property>
         </widget>
        </item>
@@ -706,15 +975,15 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
    <header>pydm.widgets.timeplot</header>
   </customwidget>
   <customwidget>
+   <class>PyDMArchiverTimePlot</class>
+   <extends>PyDMTimePlot</extends>
+   <header>pydm.widgets.archiver_time_plot</header>
+  </customwidget>
+  <customwidget>
    <class>PyDMFrame</class>
    <extends>QFrame</extends>
    <header>pydm.widgets.frame</header>
    <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>PyDMArchiverTimePlot</class>
-   <extends>PyDMTimePlot</extends>
-   <header>pydm.widgets.archiver_time_plot</header>
   </customwidget>
  </customwidgets>
  <resources/>
