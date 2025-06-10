@@ -91,6 +91,12 @@
    </item>
    <item>
     <widget class="QSplitter" name="splitter_2">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
      <property name="orientation">
       <enum>Qt::Horizontal</enum>
      </property>
@@ -265,7 +271,7 @@
           <property name="minimumSize">
            <size>
             <width>300</width>
-            <height>0</height>
+            <height>326</height>
            </size>
           </property>
           <property name="maximumSize">
@@ -284,14 +290,53 @@
            <number>0</number>
           </property>
           <property name="alarmChannels">
-           <stringlist>
-            <string></string>
-            <string></string>
-           </stringlist>
+           <stringlist/>
           </property>
-          <widget class="QWidget" name="tab_2">
+          <widget class="QWidget" name="Stage_1_tab">
            <attribute name="title">
-            <string>Sample Motors</string>
+            <string>Stage 1</string>
+           </attribute>
+           <layout class="QVBoxLayout" name="verticalLayout_7">
+            <item>
+             <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_8">
+              <property name="toolTip">
+               <string/>
+              </property>
+              <property name="frameShape">
+               <enum>QFrame::Box</enum>
+              </property>
+              <property name="frameShadow">
+               <enum>QFrame::Plain</enum>
+              </property>
+              <property name="lineWidth">
+               <number>1</number>
+              </property>
+              <property name="macros" stdset="0">
+               <string>M=m3</string>
+              </property>
+              <property name="filename" stdset="0">
+               <string>motors_square.ui</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="verticalSpacer">
+              <property name="orientation">
+               <enum>Qt::Vertical</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>20</width>
+                <height>168</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </widget>
+          <widget class="QWidget" name="Stage_2_tab">
+           <attribute name="title">
+            <string>Stage 2</string>
            </attribute>
            <layout class="QVBoxLayout" name="verticalLayout_4">
             <item>
@@ -340,7 +385,7 @@
             </item>
            </layout>
           </widget>
-          <widget class="QWidget" name="tab_3">
+          <widget class="QWidget" name="Camera_tab">
            <attribute name="title">
             <string>Camera Motors</string>
            </attribute>
