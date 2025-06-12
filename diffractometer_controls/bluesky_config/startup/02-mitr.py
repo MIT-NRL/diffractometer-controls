@@ -21,5 +21,5 @@ sd.baseline.append(reactor_power_thm)
 
 # Install suspenders depending on the reactor power. Disable to test while the reactor is shutdown
 if 1:
-    sus = SuspendFloor(reactor_power_6, 5, resume_thresh=5.2)
-    RE.install_suspender(sus)
+    reactor_power_suspender = SuspendFloor(reactor_power_6, 5, resume_thresh=5.2)
+    RE.install_suspender(reactor_power_suspender)
