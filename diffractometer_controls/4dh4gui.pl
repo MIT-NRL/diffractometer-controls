@@ -42,8 +42,14 @@ sub start_gui {
     # Check if the screen session is already running
     my $screen_check = `screen -list | grep $screen_name`;
     if ($screen_check) {
-        print "The GUI is already running in a screen session ($screen_name).\n";
-        exit 1;
+        # Check if the session is dead (no process)
+        if ($screen_check =~ /$screen_name\s+\(Dead\)/i) {
+            print "Found dead screen session ($screen_name), cleaning up...\n";
+            system("screen -wipe") == 0 or warn "Failed to clean up dead screen session.\n";
+        } else {
+            print "The GUI is already running in a screen session ($screen_name).\n";
+            exit 1;
+        }
     }
 
     # Start the GUI in a new screen session
