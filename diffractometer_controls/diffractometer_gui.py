@@ -10,13 +10,13 @@ from bluesky_widgets.qt.run_engine_client import (
     QtReEnvironmentControls,
     QtReExecutionControls,
     QtReManagerConnection,
-    QtRePlanEditor,
     QtRePlanHistory,
     QtRePlanQueue,
     QtReQueueControls,
     QtReRunningPlan,
     QtReStatusMonitor,
 )
+from diffractometer_controls.re_plan_editor_widget import RePlanEditorWidget
 
 # from bluesky_widgets.qt.figures import QtFigure, QtFigures
 # from bluesky_widgets.models.auto_plot_builders import AutoLines, AutoPlotter, AutoImages
@@ -52,7 +52,7 @@ class MainScreen(display.MITRDisplay):
             re_client = app.re_client
 
             # re_queue = QtRePlanQueue(re_client)
-            # re_plan_editor = QtRePlanEditor(re_client)
+            # re_plan_editor = RePlanEditorWidget(re_client)
             # self.ui.RE_Queue.layout().addWidget(re_queue)
             # self.ui.RE_Plan_Editor.layout().addWidget(re_plan_editor)
 

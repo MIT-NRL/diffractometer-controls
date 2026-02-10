@@ -47,16 +47,25 @@ def _collect_movable_names():
             # If the global is a Device, inspect its public attributes
             # and collect any subdevices that are PositionerBase instances
             if isinstance(obj, Device):
-                for attr in dir(obj):
-                    if attr.startswith("_"):
-                        continue
-                    try:
-                        sub = getattr(obj, attr)
-                        if isinstance(sub, PositionerBase):
-                            names.append(f"{var}.{attr}")
-                            names.append(f"{var}_{attr}")
-                    except Exception:
-                        continue
+                # Prefer using ophyd component introspection to capture nested subdevices
+                try:
+                    for comp_name, comp in obj.walk_components():
+                        try:
+                            comp_cls = getattr(comp, "cls", None)
+                            if comp_cls and issubclass(comp_cls, PositionerBase):
+                                names.append(f"{var}.{comp_name}")
+                        except Exception:
+                            continue
+                except Exception:
+                    for attr in dir(obj):
+                        if attr.startswith("_"):
+                            continue
+                        try:
+                            sub = getattr(obj, attr)
+                            if isinstance(sub, PositionerBase):
+                                names.append(f"{var}.{attr}")
+                        except Exception:
+                            continue
         except Exception:
             continue
     # Deduplicate while preserving order

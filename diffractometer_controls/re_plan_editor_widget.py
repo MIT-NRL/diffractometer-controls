@@ -1,14 +1,12 @@
 import ast
 import inspect
-import os
-import io
 from qtpy.QtWidgets import QComboBox, QTableWidgetItem
 
 import bluesky_widgets.qt.run_engine_client as rec
 
 
-class MyRePlanEditorTable(rec._QtRePlanEditorTable):
-    """Local subclass that renders dropdowns for parameters when the
+class RePlanEditorTable(rec._QtRePlanEditorTable):
+    """Table subclass that renders dropdowns for parameters when the
     plan metadata exposes choices via 'values' or 'devices'.
     """
 
@@ -23,9 +21,31 @@ class MyRePlanEditorTable(rec._QtRePlanEditorTable):
                 item_params = self.model.get_allowed_plan_parameters(name=item_name) or {}
             else:
                 item_params = self.model.get_allowed_instruction_parameters(name=item_name) or {}
-            return item_params.get("parameters", {}).get(p_name, {}) or {}
+            return self._find_param_meta(item_params, p_name)
         except Exception:
             return {}
+
+    @staticmethod
+    def _find_param_meta(item_params, p_name):
+        """
+        Return parameter metadata for name `p_name` from allowed plan/instruction
+        payloads. The payload uses a list of dicts (qserver), but we also accept
+        dict-mapped shapes for compatibility.
+        """
+        if not isinstance(item_params, dict):
+            return {}
+        params = item_params.get("parameters", None)
+        if isinstance(params, list):
+            for p in params:
+                try:
+                    if isinstance(p, dict) and p.get("name") == p_name:
+                        return p
+                except Exception:
+                    continue
+            return {}
+        if isinstance(params, dict):
+            return params.get(p_name, {}) or {}
+        return {}
 
     def _show_row_value(self, *, row):
         # Based on original implementation but uses metadata from the model
@@ -84,7 +104,7 @@ class MyRePlanEditorTable(rec._QtRePlanEditorTable):
                 if item_name
                 else {}
             ) or {}
-            pmeta = item_params.get("parameters", {}).get(p_name, {}) or {}
+            pmeta = self._find_param_meta(item_params, p_name)
         except Exception:
             pmeta = {}
 
@@ -128,27 +148,6 @@ class MyRePlanEditorTable(rec._QtRePlanEditorTable):
         if isinstance(pmeta, dict):
             pmeta_devices_field = pmeta.get("devices") or (pmeta.get("annotation") or {}).get("devices")
 
-        # Debug: print metadata shapes to help inspect what the GUI actually
-        # receives from the model/worker. This helps determine if the worker
-        # provided device objects (unusable here) or plain string names.
-        try:
-            item_name_dbg = item_name or "<unknown>"
-            line = (
-                f"[plan-editor-debug] plan={item_name_dbg} param={p_name} "
-                f"values_field={type(values_field).__name__}({values_field!r}) "
-                f"devices_field={type(devices_field).__name__}({devices_field!r}) "
-                f"pmeta_devices_field={type(pmeta_devices_field).__name__}({pmeta_devices_field!r})\n"
-            )
-            try:
-                log_path = os.path.join(os.path.expanduser("~"), ".plan_editor_debug.log")
-                with open(log_path, "a") as fh:
-                    fh.write(line)
-            except Exception:
-                # Fallback to printing if file write fails for any reason
-                print(line, end="")
-        except Exception:
-            pass
-
         has_values_meta = isinstance(values_field, (list, tuple)) and bool(values_field)
 
         # Build choices preferentially from explicit 'values', then from any
@@ -188,7 +187,20 @@ class MyRePlanEditorTable(rec._QtRePlanEditorTable):
                     return bool(re.match(r"^[A-Za-z][_A-Za-z0-9\.\_]*$", s))
 
                 choices = [c for c in choices if _is_device_name(c)]
-                choices = list(dict.fromkeys(choices)) if choices else None
+                if choices:
+                    # Prefer dotted subdevice names when both dotted and
+                    # underscore aliases are present (e.g., stage1.theta over stage1_theta).
+                    choice_set = set(choices)
+                    filtered = []
+                    for c in choices:
+                        if "_" in c:
+                            dotted = c.replace("_", ".", 1)
+                            if dotted in choice_set:
+                                continue
+                        filtered.append(c)
+                    choices = list(dict.fromkeys(filtered)) if filtered else None
+                else:
+                    choices = None
 
         if choices:
             combo = QComboBox()
@@ -280,19 +292,10 @@ class MyRePlanEditorTable(rec._QtRePlanEditorTable):
         self.signal_parameters_valid.emit(data_valid)
 
 
-def install_plan_editor_overrides():
-    """Monkeypatch the run_engine_client module to use our table subclass.
+class RePlanEditorWidget(rec.QtRePlanEditor):
+    """QtRePlanEditor that uses the custom table implementation.
 
-    Call this before creating `QtRePlanEditor` instances so new editor
-    widgets will instantiate `MyRePlanEditorTable` instead of the original.
-    """
-    rec._QtRePlanEditorTable = MyRePlanEditorTable
-
-
-class MyQtRePlanEditor(rec.QtRePlanEditor):
-    """A QtRePlanEditor variant that uses the custom table implementation.
-
-    This class replaces the internal plan editor table with `MyRePlanEditorTable`
+    This class replaces the internal plan editor table with `RePlanEditorTable`
     so dropdowns and device choices provided by the model are rendered as
     combo boxes.
     """
@@ -300,17 +303,32 @@ class MyQtRePlanEditor(rec.QtRePlanEditor):
     def __init__(self, model, parent=None):
         super().__init__(model, parent)
         try:
-            # Replace the table used by the internal editor widget.
-            # `_plan_editor` is an instance of `_QtReEditor` and defines
-            # `_wd_editor` as the table widget used to edit plan parameters.
-            self._plan_editor._wd_editor = MyRePlanEditorTable(self.model, editable=True, detailed=True)
+            # Replace the table used by the internal editor widget and
+            # swap it into the layout so it is visible.
+            old = self._plan_editor._wd_editor
+            new = RePlanEditorTable(self.model, editable=old.editable, detailed=old.detailed)
+
+            # Preserve current item (if any).
+            try:
+                new.show_item(item=old.queue_item, editable=old.editable)
+            except Exception:
+                pass
 
             # Reconnect signals expected by the editor.
-            self._plan_editor._wd_editor.signal_parameters_valid.connect(self._plan_editor._slot_parameters_valid)
-            self._plan_editor._wd_editor.signal_item_description_changed.connect(
-                self._plan_editor._slot_item_description_changed
-            )
-            self._plan_editor._wd_editor.signal_cell_modified.connect(self._plan_editor._switch_to_editing_mode)
+            new.signal_parameters_valid.connect(self._plan_editor._slot_parameters_valid)
+            new.signal_item_description_changed.connect(self._plan_editor._slot_item_description_changed)
+            new.signal_cell_modified.connect(self._plan_editor._switch_to_editing_mode)
+
+            # Replace in layout to ensure the new table is shown.
+            layout = self._plan_editor.layout()
+            if layout is not None:
+                index = layout.indexOf(old)
+                if index >= 0:
+                    layout.removeWidget(old)
+                    old.setParent(None)
+                    layout.insertWidget(index, new)
+
+            self._plan_editor._wd_editor = new
         except Exception:
             # Fall back silently if internal layout changes in future versions
             # of bluesky-widgets and attribute names differ.
