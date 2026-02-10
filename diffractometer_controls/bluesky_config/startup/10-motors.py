@@ -40,13 +40,31 @@ class EpicsMotorCustom(EpicsMotor):
 
 
 # Tomography/Imaging motors
-sample_tomo_th = EpicsMotorCustom("4dh4:m3",name="sample_tomo_th",labels=["positioner"])
-sample_tomo_z = EpicsMotorCustom("4dh4:m14",name="sample_tomo_z",labels=["positioner"])
+# sample_tomo_th = EpicsMotorCustom("4dh4:m3",name="sample_tomo_th",labels=["positioner"])
+# sample_tomo_z = EpicsMotorCustom("4dh4:m14",name="sample_tomo_z",labels=["positioner"])
 
 cam_focus = EpicsMotorCustom("4dh4:m12",name="cam_focus",labels=["positioner"])
-cam_x = EpicsMotorCustom("4dh4:m1",name="cam_x",labels=["positioner"])
+# cam_x = EpicsMotorCustom("4dh4:m1",name="cam_x",labels=["positioner"])
 
-pinhole_y = EpicsMotorCustom("4dh4:m16",name="pinhole_y",labels=["positioner"])
+# pinhole_y = EpicsMotorCustom("4dh4:m16",name="pinhole_y",labels=["positioner"])
+
+class Pinhole(Device):
+    y = Cpt(EpicsMotorCustom, "m16", name="y", labels=["positioner"])
+
+# Define the pinhole
+pinhole = Pinhole("4dh4:", name="pinhole")
+
+# Define stages
+class Stage1(Device):
+    theta = Cpt(EpicsMotorCustom, "m3", name="theta", labels=["positioner"])
+
+class Stage2(Device):
+    theta = Cpt(EpicsMotorCustom, "m13", name="theta", labels=["positioner"])
+    x = Cpt(EpicsMotorCustom, "m14", name="phi", labels=["positioner"])
+
+# Define the stages
+stage1 = Stage1("4dh4:", name="stage1")
+stage2 = Stage2("4dh4:", name="stage2")
 
 
 #===============================================================================#
@@ -88,11 +106,11 @@ class AnalyzerCurvature(PseudoPositioner):
 analyzer1_curve = AnalyzerCurvature("4dh4:m11",name="analyzer1_curve")
 analyzer2_curve = AnalyzerCurvature("4dh4:m15",name="analyzer2_curve")
 
-sd.baseline.append(sample_tomo_th)
-sd.baseline.append(sample_tomo_z)
-sd.baseline.append(cam_focus)
-sd.baseline.append(cam_x)
-sd.baseline.append(pinhole_y)
+sd.baseline.append(stage1.theta)
+sd.baseline.append(stage2.theta)
+sd.baseline.append(stage2.x)
+sd.baseline.append(pinhole.y)
+# sd.baseline.append(pinhole_y)
 
 sd.baseline.append(sample_th)
 # sd.baseline.append(sample_x)
@@ -103,3 +121,34 @@ sd.baseline.append(analyzer1_curve)
 # sd.baseline.append(analyzer2_th)
 # sd.baseline.append(analyzer2_x)
 sd.baseline.append(analyzer2_curve)
+
+
+# class AnalyzerCurvature(PseudoPositioner):
+#     def __init__(self,
+#                  prefix: str,
+#                  curve_motor_pv: str,
+#                  x_motor_pv: str,
+#                  th_motor_pv: str,
+#                  *args,
+#                  **kwargs
+#                  ):
+#         self._curve_motor_pv = curve_motor_pv
+#         self._x_motor_pv = x_motor_pv
+#         self._th_motor_pv = th_motor_pv
+#         super().__init__(prefix,*args, **kwargs)
+        
+#     curve = Cpt(PseudoSingle, limits=(0,0.7), egu='1/m')
+#     counts = FCpt(EpicsMotor, "{prefix}{_curve_motor_pv}", name='counts')
+
+#     x = FCpt(EpicsMotor, "{prefix}{_x_motor_pv}", name='x')
+#     th = FCpt(EpicsMotor, "{prefix}{_th_motor_pv}", name='th')
+
+#     @pseudo_position_argument
+#     def forward(self, pseudo_pos):
+#         return self.RealPosition(counts=pseudo_pos.curve/0.0005516111545194904)
+    
+#     @real_position_argument
+#     def inverse(self, real_pos):
+#         return self.PseudoPosition(curve=real_pos.counts*0.0005516111545194904)
+    
+# analyzer1 = AnalyzerCurvature("4dh4:",curve_motor_pv="m11",x_motor_pv="m16",th_motor_pv="m13",name="analyzer1")
