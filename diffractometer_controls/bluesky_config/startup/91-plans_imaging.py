@@ -223,10 +223,18 @@ def tomo_scan(file_name:str,
     motor_names = motor.name
     md = md or {}
     _md = {
+        "file_name": file_name,
+        "file_dir": file_dir,
         "plan_args": {
             "detectors": list(map(repr, detector)),
             # "num": num,
             # "args": md_args,
+        },
+        "det_config": {
+            "exposure_time": detector[0].cam.acquire_time.get(),
+            "num_exposures": num_exposures,
+            "gain": detector[0].cam.gain.get(),
+            "offset": detector[0].cam.offset.get(),
         },
         "plan_name": "tomo_scan",
         "plan_pattern": "inner_product",
@@ -285,8 +293,10 @@ def tomo_scan(file_name:str,
         pos_cache = defaultdict(lambda: None)
         # if num_projections is not None:
         cycler = _inner_product_custom(num=num_projections, step=angle_step, endpoint=include_stop_angle, args=[motor, start_angle, stop_angle])
-        # elif angle_step is not None:
-            # cycle = inner_product_custom(step=angle_step, endpoint=include_stop_angle, args=[motor, start_angle, stop_angle])
+        positions = [step[motor] for step in list(cycler)]
+        if 180 not in positions and check_180_deg:
+            raise RuntimeError("\n\n****Warning****: 180 degrees not in the scan positions. Ending the scan. Please check the scan parameters or disable the check_180_deg parameter.\n\n")
+                        
 
         def inner_scan_nd():
             # yield from bps.declare_stream(motor, *detector, name="primary")
@@ -367,10 +377,18 @@ def imaging(
     # md_args = list(chain(*((repr(motor), start, stop) for motor, start_angle, stop_angle)))
     md = md or {}
     _md = {
+        "file_name": file_name,
+        "file_dir": file_dir,
         "plan_args": {
             "detectors": list(map(repr, detector)),
             # "num": num,
             # "args": md_args,
+        },
+        "det_config": {
+            "exposure_time": detector[0].cam.acquire_time.get(),
+            "num_exposures": num_exposures,
+            "gain": detector[0].cam.gain.get(),
+            "offset": detector[0].cam.offset.get(),
         },
         "plan_name": "imaging",
         "plan_pattern": "inner_product",
@@ -480,10 +498,18 @@ def imaging_scan(
     motor_names = motor.name
     md = md or {}
     _md = {
+        "file_name": file_name,
+        "file_dir": file_dir,
         "plan_args": {
             # "detectors": list(map(repr, detector)),
             # "num": num,
             # "args": md_args,
+        },
+        "det_config": {
+            "exposure_time": detector[0].cam.acquire_time.get(),
+            "num_exposures": num_exposures,
+            "gain": detector[0].cam.gain.get(),
+            "offset": detector[0].cam.offset.get(),
         },
         "plan_name": "imaging_scan",
         "plan_pattern": "inner_product",
