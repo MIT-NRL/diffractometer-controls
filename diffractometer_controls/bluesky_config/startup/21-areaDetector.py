@@ -64,6 +64,12 @@ class MyZWODetector(SingleTrigger, ZWODetector):
     stats1 = Cpt(StatsPlugin, 'Stats1:')
     transform1 = Cpt(TransformPlugin, "Trans1:")
 
+    # Add the motors to the detector
+    # cam_focus = EpicsMotorCustom("4dh4:m12",name="cam_focus",labels=["positioner"])
+    # cam_x = EpicsMotorCustom("4dh4:m1",name="cam_x",labels=["positioner"])
+    focus = Cpt(EpicsMotorCustom, "m12", name="focus", labels=["positioner"])
+    x = Cpt(EpicsMotorCustom, "m1", name="x", labels=["positioner"])
+
     tiff1 = Cpt(
         MyTIFFPlugin,
         "TIFF1:",
@@ -119,17 +125,19 @@ class SimAreaDetector(SingleTrigger, SimDetector):
 
 # Enable when using the ZWO camera
 if 1:
-    cam_zwo = MyZWODetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total'])
-    cam_zwo.cam.nd_attributes_file.set("/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml") 
+    cam1 = MyZWODetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total'])
+    cam1.cam.nd_attributes_file.set("/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml") 
     # caput("4dh4:TIFF1:CreateDirectory", -3)
     caput("4dh4:TIFF1:AutoSave", 0) #Ensure the TIFF plugin does not auto save to prevent overwriting
 
 # Enable when using the QHY camera
 if 0:
-    cam_qhy = MyQHYDetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total'])
-    cam_qhy.cam.nd_attributes_file.set("/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml") 
+    cam1 = MyQHYDetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total'])
+    cam1.cam.nd_attributes_file.set("/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml") 
     # caput("4dh4:TIFF1:CreateDirectory", -3)
 
+sd.baseline.append(cam1.focus)
+sd.baseline.append(cam1.x)
 
 # cam_zwo.stage_sigs["cam.num_images"] = 1
 
@@ -144,8 +152,3 @@ if 0:
 # cam_sim = SimAreaDetector(prefix='4dh4:',name='cam1',read_attrs=['hdf1','stats1.total'])
 # cam_sim.hdf1.stage_sigs["layout_filename"] = "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoLayoutDX.xml"
 # cam_sim.cam.stage_sigs["nd_attributes_file"] = "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml"
-
-
-# caput("4dh4:cam1:FrameType.ZRST", "/exchange/data")
-# caput("4dh4:cam1:FrameType.ONST", "/exchange/data_dark")
-# caput("4dh4:cam1:FrameType.TWST", "/exchange/data_white")
