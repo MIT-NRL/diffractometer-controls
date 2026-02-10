@@ -37,15 +37,20 @@
     <Attribute name="FilePath"                      type="EPICS_PV"     source="4dh4:HDF1:FilePath_RBV"                 dbrtype="DBR_STRING"  description="File path"/>
     <Attribute name="HDFPluginVersion"              type="EPICS_PV"     source="4dh4:HDF1:PluginType_RBV"               dbrtype="DBR_STRING"  description="File plugin type"/>
 
-    <Attribute name="ReactorPower"                   type="EPICS_PV"     source="mitr:Power6"                             dbrtype="DBR_NATIVE"  description="Reactor power (MW)"/>
-    
+    <Attribute name="ReactorPower"                   type="EPICS_PV"     source="mitr:Power6"                           dbrtype="DBR_NATIVE"  description="Reactor power (MW) Neutrons"/>
+    <Attribute name="ReactorPowerThm"                type="EPICS_PV"     source="mitr:PowerThm"                         dbrtype="DBR_NATIVE"  description="Reactor power (MW) Thermal"/>
+
     <Attribute name="ScintillatorType"              type="EPICS_PV"     source="4dh4:TS:ScintillatorType"             dbrtype="DBR_STRING"  description="Scintillator type"/>
     <Attribute name="ScintillatorThickness"         type="EPICS_PV"     source="4dh4:TS:ScintillatorThickness"        dbrtype="DBR_NATIVE"  description="Scintillator thickness (microns)"/>
  
-    <Attribute name="SensorPixelSize"                type="EPICS_PV"     source="4dh4:TS:SensorPixelSize"               dbrtype="DBR_NATIVE"  description="Pixel size on sample (microns)"/>
+    <Attribute name="SensorPixelSize"                type="EPICS_PV"     source="4dh4:TS:SensorPixelSize"             dbrtype="DBR_NATIVE"  description="Pixel size on sample (microns)"/>
     <Attribute name="DetectorPixelSize"             type="EPICS_PV"     source="4dh4:TS:DetectorPixelSize"            dbrtype="DBR_NATIVE"  description="Detector pixel size (microns)"/>
-    <Attribute name="CameraObjective"               type="EPICS_PV"     source="4dh4:TS:CameraObjective"              dbrtype="DBR_STRING"  description="Objective Magnification"/>
-    <Attribute name="CameraTubeLength"              type="EPICS_PV"     source="4dh4:TS:CameraTubeLength"             dbrtype="DBR_NATIVE"  description="Tube length (mm)"/>
+    <Attribute name="CameraObjective"               type="EPICS_PV"     source="4dh4:TS:CameraObjective"              dbrtype="DBR_STRING"  description="Objective Lens"/>
+    <Attribute name="CameraExtensionTubes"          type="EPICS_PV"     source="4dh4:TS:CameraExtensionTubes"          dbrtype="DBR_STRING"  description="Selected extension tube combination"/>
+    <Attribute name="CameraTubeLength"              type="EPICS_PV"     source="4dh4:TS:CameraTubeLength"             dbrtype="DBR_NATIVE" description="Total extension tube length (mm)"/>
+    <Attribute name="ReproductionRatio"             type="EPICS_PV"     source="4dh4:TS:ReproductionRatio"            dbrtype="DBR_NATIVE" description="Optical reproduction ratio"/>
+    <Attribute name="DetectorSizeX"                 type="EPICS_PV"     source="4dh4:TS:DetectorSizeX"                dbrtype="DBR_NATIVE" description="Detector size X (cm)"/>
+    <Attribute name="DetectorSizeY"                 type="EPICS_PV"     source="4dh4:TS:DetectorSizeY"                 dbrtype="DBR_NATIVE" description="Detector size Y (cm)"/>
 
     <Attribute name="SampleName"                    type="EPICS_PV"     source="4dh4:TS:SampleName"                  dbrtype="DBR_STRING"  description="Sample name"/>
     <Attribute name="SampleDescription1"            type="EPICS_PV"     source="4dh4:TS:SampleDescription1"          dbrtype="DBR_STRING"  description="Sample description 1"/>
