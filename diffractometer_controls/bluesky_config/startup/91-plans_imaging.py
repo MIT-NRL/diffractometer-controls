@@ -1,11 +1,16 @@
 # import bluesky.plans
 import bluesky.plans as bp
 from bluesky.plans import scan, count, grid_scan, rel_scan, rel_grid_scan
+from bluesky.protocols import Readable, Movable
+
+from bluesky_queueserver import parameter_annotation_decorator
+
 
 # import bluesky.plan_stubs
 import bluesky.plan_stubs as bps
 # from bluesky.plan_stubs import *
 from bluesky import plan_patterns, utils
+from typing import Annotated
 from collections import defaultdict
 
 import bluesky.preprocessors
@@ -14,12 +19,84 @@ import numpy as np
 from ophyd import (Device, Component as Cpt,
                    EpicsSignal, EpicsSignalRO, EpicsSignalWithRBV, 
                    EpicsMotor, Signal)
+from ophyd.positioner import PositionerBase
 from ophyd.device import DeviceStatus
 from ophyd.status import Status, SubscriptionStatus
 from epics import caput, caget, cainfo
 from functools import partial
 
 transfer_time_per_bytes = 4.1203007518796994e-08 # transfer speed in seconds per byte testing on the ASI294MM Pro
+
+
+def _collect_movable_names():
+    """Collect motor variable names from module globals.
+
+    The returned names are used with `convert_device_names=True`, so they
+    must be resolvable in the namespace (variable names, not device.name).
+    """
+    names = []
+    g = globals()
+    for var, obj in list(g.items()):
+        if var.startswith("_"):
+            continue
+        try:
+            # Prefer actual positioners/motors
+            if isinstance(obj, PositionerBase):
+                names.append(var)
+                continue
+            # If the global is a Device, inspect its public attributes
+            # and collect any subdevices that are PositionerBase instances
+            if isinstance(obj, Device):
+                for attr in dir(obj):
+                    if attr.startswith("_"):
+                        continue
+                    try:
+                        sub = getattr(obj, attr)
+                        if isinstance(sub, PositionerBase):
+                            names.append(f"{var}.{attr}")
+                            names.append(f"{var}_{attr}")
+                    except Exception:
+                        continue
+        except Exception:
+            continue
+    # Deduplicate while preserving order
+    seen = set()
+    out = []
+    for n in names:
+        if n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out
+
+def _collect_tomo_motor_names():
+    """Collect only tomography motors for the tomo_scan dropdown.
+
+    We create stable aliases in this module's globals so
+    `convert_device_names=True` can resolve them reliably.
+    """
+    g = globals()
+    aliases = []
+    # Prefer stage theta motors for tomography
+    candidates = [
+        ("tomo_stage1_theta", "stage1", "theta"),
+        ("tomo_stage2_theta", "stage2", "theta"),
+    ]
+    for alias, parent_name, attr in candidates:
+        parent = g.get(parent_name)
+        if parent is None or not hasattr(parent, attr):
+            continue
+        motor = getattr(parent, attr)
+        if isinstance(motor, PositionerBase):
+            # Register several name variants so the motor can be found by
+            # different naming conventions used in RE Worker namespaces.
+            names_to_add = [alias, f"{parent_name}.{attr}", f"{parent_name}_{attr}"]
+            for name in names_to_add:
+                # Avoid overwriting existing globals unintentionally
+                if name not in g:
+                    g[name] = motor
+                if name not in aliases:
+                    aliases.append(name)
+    return aliases
 
 def _one_nd_step_repeat(
     detectors,
@@ -100,7 +177,7 @@ def _inner_product_custom(args, num:int = None, step:float = None, offset:float 
     return functools.reduce(operator.add, cyclers)
 
 
-def _ensure_detector_temperature(detectors, target_temperature=-20, threshold=-15, poll_interval=0.5):
+def _ensure_detector_temperature(detectors, target_temperature=-15, threshold=-10, poll_interval=0.5):
     """
     Ensure all detectors are at or below the target temperature.
 
@@ -144,10 +221,23 @@ def _ensure_detector_temperature(detectors, target_temperature=-20, threshold=-1
 
     print("All detectors have reached the desired temperature.")
 
-
+@parameter_annotation_decorator({
+    "parameters": {
+        "detector": {
+            "annotation": "__READABLE__",
+            "default": "cam1",
+            "description": "Imaging detector (must be readable, default: cam1)"
+        },
+        "motor": {
+            "annotation": "typing.Union[str, Motors]",
+            "description": "Motor to scan (must be movable)",
+            "devices": {"Motors": _collect_tomo_motor_names()},
+            "convert_device_names": True,
+        }
+    }
+})
 def tomo_scan(file_name:str, 
-              file_dir:str,
-              detector, 
+              file_dir:str, 
               motor, 
               detector=cam1,
               exposure_time:float = None,
@@ -171,7 +261,7 @@ def tomo_scan(file_name:str,
 
     # Ensure temperature is checked within the main plan
     if check_temperature:
-        yield from _ensure_detector_temperature(detectors=detector, target_temperature=-20, threshold=-10)
+        yield from _ensure_detector_temperature(detectors=detector, target_temperature=-15, threshold=-10)
 
     old_exposure_time = detector[0].cam.acquire_time.get()
 
@@ -319,7 +409,15 @@ def tomo_scan(file_name:str,
 
 
 
-
+@parameter_annotation_decorator({
+    "parameters": {
+        "detector": {
+            "annotation": "__READABLE__",
+            "default": "cam1",
+            "description": "Imaging detector (must be readable, default: cam1)"
+        }
+    }
+})
 def imaging(
             file_name:str, 
             file_dir:str,
@@ -342,7 +440,7 @@ def imaging(
 
     # Ensure temperature is checked within the main plan
     if check_temperature:
-        yield from _ensure_detector_temperature(detectors=detector, target_temperature=-20, threshold=-10)
+        yield from _ensure_detector_temperature(detectors=detector, target_temperature=-15, threshold=-10)
 
 
     old_exposure_time = detector[0].cam.acquire_time.get()
@@ -420,14 +518,27 @@ def imaging(
 
 
 
-
+@parameter_annotation_decorator({
+    "parameters": {
+        "detector": {
+            "annotation": "__READABLE__",
+            "default": "cam1",
+            "description": "Imaging detector (must be readable, default: cam1)"
+        },
+        "motor": {
+            "annotation": "typing.Union[str, Motors]",
+            "description": "Motor to scan (must be movable)",
+            "devices": {"Motors": _collect_movable_names()},
+            "convert_device_names": True,
+        }
+    }
+})
 def imaging_scan(
             file_name:str, 
-            file_dir:str,
-            detector, 
+            file_dir:str, 
             motor, 
             start_pos:float, 
-            stop_pos:float, 
+            stop_pos:float,
             step:float = None,
             num_steps:int = None,
             detector=cam1, 
@@ -451,7 +562,7 @@ def imaging_scan(
 
     # Ensure temperature is checked within the main plan
     if check_temperature:
-        yield from _ensure_detector_temperature(detectors=detector, target_temperature=-20, threshold=-10)
+        yield from _ensure_detector_temperature(detectors=detector, target_temperature=-15, threshold=-10)
 
     old_exposure_time = detector[0].cam.acquire_time.get()
 
