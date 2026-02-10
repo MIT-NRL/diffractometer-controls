@@ -17,13 +17,16 @@ from bluesky_widgets.qt.run_engine_client import (
     QtReEnvironmentControls,
     QtReExecutionControls,
     QtReManagerConnection,
-    QtRePlanEditor,
     QtRePlanHistory,
     QtRePlanQueue,
     QtReQueueControls,
     QtReRunningPlan,
     QtReStatusMonitor,
 )
+try:
+    from diffractometer_controls.re_plan_editor_widget import RePlanEditorWidget
+except Exception:
+    from re_plan_editor_widget import RePlanEditorWidget
 from bluesky_widgets.models.run_engine_client import RunEngineClient
 from pydm.widgets import PyDMByteIndicator, PyDMRelatedDisplayButton
 from bluesky_queueserver_api.zmq import REManagerAPI
