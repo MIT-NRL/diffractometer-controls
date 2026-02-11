@@ -149,7 +149,23 @@ def _one_nd_step_repeat(
     # take_reading = trigger_and_read if take_reading is None else take_reading
     motors = step.keys()
     yield from bps.move_per_step(step, pos_cache)
-    yield from bps.repeater(num_exposures,exposure)  # type: ignore  # Movable issue
+    yield from _repeater_with_checkpoints(num_exposures, exposure)  # type: ignore  # Movable issue
+
+
+def _repeater_with_checkpoints(n, gen_func, *args, **kwargs):
+    """Repeat a plan with a checkpoint before each repetition.
+
+    A deferred pause is processed at checkpoints, so this creates one pause
+    boundary per exposure.
+    """
+    if n is None:
+        while True:
+            yield from bps.checkpoint()
+            yield from gen_func(*args, **kwargs)
+    else:
+        for _ in range(n):
+            yield from bps.checkpoint()
+            yield from gen_func(*args, **kwargs)
 
 def _inner_product_custom(args, num:int = None, step:float = None, offset:float = 0, endpoint=True):
     """Scan over one multi-motor trajectory.
@@ -517,7 +533,7 @@ def imaging(
             det.tiff1.folder_name.put(file_dir)
             yield from bps.stage(det)                 
 
-        yield from bps.repeater(num_exposures,exposure)
+        yield from _repeater_with_checkpoints(num_exposures, exposure)
 
         yield from bps.mov(detector[0].cam.acquire_time, old_exposure_time)
         yield from bps.mov(detector[0].cam.gain, old_gain)

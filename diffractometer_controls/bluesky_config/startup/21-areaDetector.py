@@ -58,7 +58,56 @@ class MyHDF5Plugin(FileStoreHDF5IterativeWrite,HDF5Plugin):
     layout_filename_valid = Cpt(EpicsSignal, "XMLValid_RBV", kind="omitted", string=True)
     nd_attr_status = Cpt(EpicsSignal, "NDAttributesStatus", kind="omitted", string=True)
 
-class MyZWODetector(SingleTrigger, ZWODetector):
+class SingleTriggerPause(SingleTrigger):
+    """SingleTrigger variant that aborts camera acquisition on stop().
+
+    This is important for immediate RunEngine pause, which calls stop() on
+    devices. If acquisition is in-flight, forcing cam.acquire=0 can prevent
+    finishing/writing the interrupted frame. We also restore TIFF file_number
+    to the value captured before trigger so resumed acquisition can reuse the
+    same slot.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._tiff_file_number_before_trigger = None
+
+    def trigger(self):
+        if hasattr(self, "tiff1") and hasattr(self.tiff1, "file_number"):
+            try:
+                self._tiff_file_number_before_trigger = int(self.tiff1.file_number.get())
+            except Exception:
+                self._tiff_file_number_before_trigger = None
+        return super().trigger()
+
+    def stop(self, *, success=False):
+        was_acquiring = False
+
+        # Abort in-flight camera exposure ASAP.
+        if hasattr(self, "cam") and hasattr(self.cam, "acquire"):
+            try:
+                was_acquiring = bool(self.cam.acquire.get())
+            except Exception:
+                was_acquiring = False
+            try:
+                if was_acquiring:
+                    self.cam.acquire.put(0, wait=False)
+            except Exception:
+                pass
+
+        # If stop interrupted an exposure, roll back file_number so resume
+        # can overwrite/reuse the interrupted slot.
+        if was_acquiring and self._tiff_file_number_before_trigger is not None:
+            if hasattr(self, "tiff1") and hasattr(self.tiff1, "file_number"):
+                try:
+                    self.tiff1.file_number.put(self._tiff_file_number_before_trigger, wait=False)
+                except Exception:
+                    pass
+
+        return super().stop(success=success)
+
+
+class MyZWODetector(SingleTriggerPause, ZWODetector):
     cam = Cpt(ZWODetectorCam, "cam1:")
     image = Cpt(ImagePlugin, suffix='image1:')
     stats1 = Cpt(StatsPlugin, 'Stats1:')
@@ -85,7 +134,7 @@ class MyZWODetector(SingleTrigger, ZWODetector):
     #     read_path_template="/home/mitr_4dh4/Data/TestData/HDF/%Y/%m/%d/",        
     # )
 
-class MyQHYDetector(SingleTrigger, QHYDetector):
+class MyQHYDetector(SingleTriggerPause, QHYDetector):
     cam = Cpt(ZWODetectorCam, "cam1:")
     image = Cpt(ImagePlugin, suffix='image1:')
     stats1 = Cpt(StatsPlugin, 'Stats1:')
@@ -105,7 +154,7 @@ class MyQHYDetector(SingleTrigger, QHYDetector):
     #     read_path_template="/home/mitr_4dh4/Data/TestData/HDF/%Y/%m/%d/",        
     # )
 
-class SimAreaDetector(SingleTrigger, SimDetector):
+class SimAreaDetector(SingleTriggerPause, SimDetector):
     cam = Cpt(cam.SimDetectorCam, "cam1:")
     image = Cpt(ImagePlugin, suffix='image1:')
     stats1 = Cpt(StatsPlugin, 'Stats1:')
