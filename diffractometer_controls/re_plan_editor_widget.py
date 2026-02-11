@@ -1,6 +1,7 @@
 import ast
 import inspect
-from qtpy.QtWidgets import QAbstractItemView, QComboBox, QTableWidgetItem
+from qtpy import QtGui
+from qtpy.QtWidgets import QComboBox, QTableWidgetItem
 
 import bluesky_widgets.qt.run_engine_client as rec
 
@@ -9,6 +10,11 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
     """Table subclass that renders dropdowns for parameters when the
     plan metadata exposes choices via 'values' or 'devices'.
     """
+
+    def __init__(self, model, parent=None, *, editable=False, detailed=True):
+        super().__init__(model, parent, editable=editable, detailed=detailed)
+        # Keep internal 3-column model for compatibility, but hide checkbox column.
+        self.setColumnHidden(1, True)
 
     def _get_param_meta(self, p_name):
         # Try to obtain parameter metadata from the model's allowed plans
@@ -62,7 +68,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         is_var_positional = p["parameters"].kind == inspect.Parameter.VAR_POSITIONAL
         is_var_keyword = p["parameters"].kind == inspect.Parameter.VAR_KEYWORD
         is_value_set = p["is_value_set"]
-        is_editable = self._editable and (is_value_set or not ((default_value != inspect.Parameter.empty) or is_var_positional or is_var_keyword))
+        is_editable = self._editable
 
         description = self._params_descriptions.get("parameters", {}).get(p_name, None)
         if not description:
@@ -70,8 +76,6 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
 
         v = value if is_value_set else default_value
         s_value = "" if v == inspect.Parameter.empty else print_value(v)
-        if not is_value_set and s_value:
-            s_value += " (default)"
 
         # Set checkable item in column 1
         check_item = QTableWidgetItem()
@@ -255,6 +259,8 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                 combo.setCurrentIndex(1 if cur_bool else 0)
             combo.setEnabled(True)
             combo.setToolTip(description)
+            if not is_value_set:
+                combo.setStyleSheet("color: #777;")
 
             def _on_bool_change(*_args, _row=row, _combo=combo):
                 try:
@@ -263,6 +269,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                     self._params[_row]["value"] = val
                     self._params[_row]["is_value_set"] = True
                     self._params[_row]["is_user_modified"] = True
+                    _combo.setStyleSheet("")
                     self.signal_cell_modified.emit()
                 except Exception:
                     pass
@@ -299,6 +306,8 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             # users can pick without typing the name manually.
             combo.setEnabled(True)
             combo.setToolTip(description)
+            if not is_value_set:
+                combo.setStyleSheet("color: #777;")
 
             def _on_combo_change(*_args, _row=row, _combo=combo):
                 try:
@@ -308,6 +317,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                         self._params[_row]["value"] = inspect.Parameter.empty
                         self._params[_row]["is_value_set"] = False
                         self._params[_row]["is_user_modified"] = True
+                        _combo.setStyleSheet("color: #777;")
                         self.signal_cell_modified.emit()
                         return
                     try:
@@ -317,6 +327,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                     self._params[_row]["value"] = val
                     self._params[_row]["is_value_set"] = True
                     self._params[_row]["is_user_modified"] = True
+                    _combo.setStyleSheet("")
                     self.signal_cell_modified.emit()
                 except Exception:
                     pass
@@ -338,10 +349,13 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             else:
                 value_item.setFlags(value_item.flags() & ~rec.Qt.ItemIsEditable)
 
-            if is_value_set:
-                value_item.setFlags(value_item.flags() | rec.Qt.ItemIsEnabled)
+            # Value column remains enabled even for implicit defaults.
+            value_item.setFlags(value_item.flags() | rec.Qt.ItemIsEnabled)
+
+            if not is_value_set:
+                value_item.setForeground(QtGui.QBrush(QtGui.QColor(120, 120, 120)))
             else:
-                value_item.setFlags(value_item.flags() & ~rec.Qt.ItemIsEnabled)
+                value_item.setForeground(self._text_color_valid)
 
             value_item.setToolTip(description)
             self.setItem(row, 2, value_item)
@@ -457,6 +471,8 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
 
     def table_item_changed(self, table_item):
         try:
+            if self._validation_disabled:
+                return
             row = self.row(table_item)
             column = self.column(table_item)
             if column == 1:
@@ -472,7 +488,19 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                     self._enable_signal_cell_modified = True
 
             if column == 2:
-                self._params[row]["is_user_modified"] = True
+                table_item_col2 = self.item(row, 2)
+                if table_item_col2 is not None:
+                    txt = table_item_col2.text()
+                    default_val = self._params[row]["parameters"].default
+                    if (default_val != inspect.Parameter.empty) and (not str(txt).strip()):
+                        # Clearing optional field reverts to implicit default.
+                        self._params[row]["is_value_set"] = False
+                        self._params[row]["value"] = inspect.Parameter.empty
+                        table_item_col2.setForeground(QtGui.QBrush(QtGui.QColor(120, 120, 120)))
+                    else:
+                        self._params[row]["is_value_set"] = True
+                        self._params[row]["is_user_modified"] = True
+                        table_item_col2.setForeground(self._text_color_valid)
 
             if column in (1, 2):
                 self._validate_cell_values()
