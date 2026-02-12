@@ -92,8 +92,14 @@
           </property>
           <property name="minimumSize">
            <size>
-            <width>45</width>
-            <height>45</height>
+            <width>50</width>
+            <height>50</height>
+           </size>
+          </property>
+          <property name="maximumSize">
+           <size>
+            <width>50</width>
+            <height>50</height>
            </size>
           </property>
           <property name="baseSize">
@@ -116,9 +122,9 @@
           <property name="showLabels" stdset="0">
            <bool>false</bool>
           </property>
-          <property name="circles" stdset="0">
-           <bool>true</bool>
-          </property>
+     <property name="circles" stdset="0">
+      <bool>false</bool>
+     </property>
          </widget>
         </item>
         <item>

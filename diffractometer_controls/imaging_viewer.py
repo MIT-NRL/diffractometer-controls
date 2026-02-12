@@ -26,6 +26,7 @@ from bluesky_widgets.models.plot_builders import Lines, Images
 from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher
 # from bluesky.callbacks.zmq import RemoteDispatcher
 from bluesky.utils import install_remote_qt_kicker
+from pydm.widgets.channel import PyDMChannel
 
 from bluesky_widgets.models.run_engine_client import RunEngineClient
 import display
@@ -48,22 +49,33 @@ class MainScreen(display.MITRDisplay):
     def customize_ui(self):
         # Robust normalization: clip dark and bright outliers so hot pixels/gamma spots
         # do not dominate the displayed intensity range.
-        self._norm_low_percentile = 1.0
-        self._norm_high_percentile = 99.7
+        self._default_norm_low_percentile = 1.0
+        self._default_norm_high_percentile = 99.7
+        self._norm_low_percentile = self._default_norm_low_percentile
+        self._norm_high_percentile = self._default_norm_high_percentile
         self._low_slider_min_pct = 0.0
         self._low_slider_max_pct = 5.0
         self._high_slider_min_pct = 95.0
         self._high_slider_max_pct = 100.0
-        self._gamma_value = 1.0
+        self._default_gamma_value = 1.0
+        self._gamma_value = self._default_gamma_value
         self._last_image = None
         self._manual_levels_initialized = False
         self._startup_autoscale_attempts = 0
         self._startup_autoscale_max_attempts = 30
         self._level_slider_low_bound = 0.0
-        self._level_slider_high_bound = 1.0
+        self._level_slider_high_bound = 65535.0
+        self._base_lut = None
+        self._acquire_channel = None
+        self._time_remaining_channel = None
+        self._acquire_time_channel = None
+        self._acquire_time_total = 0.0
+        self._time_remaining_value = 0.0
 
         image_view = self.ui.cameraImage
         self._install_display_controls(image_view)
+        self._setup_time_remaining_progress()
+        self._configure_acquire_indicators()
 
         # Disable built-in full-range normalization; we set levels manually.
         if hasattr(image_view, "setNormalizeData"):
@@ -89,6 +101,169 @@ class MainScreen(display.MITRDisplay):
         self._startup_autoscale_timer.timeout.connect(self._startup_autoscale_tick)
         self._startup_autoscale_timer.start()
 
+    def _setup_time_remaining_progress(self):
+        old_widget = self.ui.PyDMLabel_5
+        row_layout = self.ui.horizontalLayout
+        idx = row_layout.indexOf(old_widget)
+        if idx < 0:
+            return
+
+        self.time_remaining_progress = QtWidgets.QProgressBar(self.ui)
+        self.time_remaining_progress.setMinimumHeight(30)
+        self.time_remaining_progress.setTextVisible(True)
+        self.time_remaining_progress.setAlignment(QtCore.Qt.AlignCenter)
+        self.time_remaining_progress.setRange(0, 1000)
+        self.time_remaining_progress.setValue(0)
+        self.time_remaining_progress.setFormat("0.0 s remaining")
+
+        row_layout.removeWidget(old_widget)
+        old_widget.hide()
+        row_layout.insertWidget(idx, self.time_remaining_progress)
+
+        remaining_address = getattr(old_widget, "channel", None) or old_widget.property("channel")
+        acquire_time_address = (
+            getattr(self.ui.PyDMLineEdit, "channel", None)
+            or self.ui.PyDMLineEdit.property("channel")
+        )
+
+        if remaining_address:
+            self._time_remaining_channel = PyDMChannel(
+                address=remaining_address,
+                value_slot=self._on_time_remaining_changed,
+            )
+            self._time_remaining_channel.connect()
+
+        if acquire_time_address:
+            self._acquire_time_channel = PyDMChannel(
+                address=acquire_time_address,
+                value_slot=self._on_acquire_time_changed,
+            )
+            self._acquire_time_channel.connect()
+
+    def _on_time_remaining_changed(self, value):
+        self._time_remaining_value = self._to_float(value, default=0.0)
+        self._update_time_remaining_progress()
+
+    def _on_acquire_time_changed(self, value):
+        self._acquire_time_total = self._to_float(value, default=0.0)
+        self._update_time_remaining_progress()
+
+    def _to_float(self, value, default=0.0):
+        try:
+            if isinstance(value, (list, tuple)) and value:
+                value = value[0]
+            return float(value)
+        except Exception:
+            return float(default)
+
+    def _update_time_remaining_progress(self):
+        if not hasattr(self, "time_remaining_progress"):
+            return
+
+        remaining = max(0.0, self._time_remaining_value)
+        total = max(0.0, self._acquire_time_total)
+
+        if total > 0:
+            frac_done = 1.0 - min(1.0, remaining / total)
+            self.time_remaining_progress.setRange(0, 1000)
+            self.time_remaining_progress.setValue(int(round(frac_done * 1000.0)))
+        else:
+            self.time_remaining_progress.setRange(0, 1000)
+            self.time_remaining_progress.setValue(0)
+
+        self.time_remaining_progress.setFormat(f"{remaining:.1f} s remaining")
+
+    def _configure_acquire_indicators(self):
+        indicator = self.ui.PyDMByteIndicator
+
+        if hasattr(indicator, "setCircles"):
+            indicator.setCircles(False)
+        else:
+            indicator.setProperty("circles", False)
+
+        indicator.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
+        indicator.setMinimumSize(50, 50)
+        indicator.setMaximumSize(50, 50)
+        self._set_indicator_on_off_colors()
+        self._set_acquire_indicator_style(False)
+        self._set_detector_state_acquire_style(False)
+
+        try:
+            self.ui.horizontalLayout_3.setStretch(0, 0)
+            self.ui.horizontalLayout_3.setStretch(1, 1)
+        except Exception:
+            pass
+
+        channel_address = getattr(indicator, "channel", None) or indicator.property("channel")
+        if channel_address:
+            self._acquire_channel = PyDMChannel(
+                address=channel_address,
+                value_slot=self._on_acquire_value_changed,
+            )
+            self._acquire_channel.connect()
+
+    def _set_indicator_on_off_colors(self):
+        indicator = self.ui.PyDMByteIndicator
+        on_color = QtGui.QColor(220, 0, 0)
+        off_color = QtGui.QColor(90, 90, 90)
+
+        candidates = [
+            ("setOnColor", on_color),
+            ("setOffColor", off_color),
+            ("setTrueColor", on_color),
+            ("setFalseColor", off_color),
+        ]
+        for method_name, color in candidates:
+            method = getattr(indicator, method_name, None)
+            if callable(method):
+                try:
+                    method(color)
+                except Exception:
+                    pass
+
+        prop_candidates = [
+            ("onColor", on_color),
+            ("offColor", off_color),
+            ("trueColor", on_color),
+            ("falseColor", off_color),
+        ]
+        for prop_name, color in prop_candidates:
+            try:
+                if indicator.metaObject().indexOfProperty(prop_name) >= 0:
+                    indicator.setProperty(prop_name, color)
+            except Exception:
+                pass
+
+    def _set_acquire_indicator_style(self, acquiring):
+        if acquiring:
+            style = (
+                "background-color: rgb(220, 0, 0);"
+                "border: 1px solid black;"
+            )
+        else:
+            style = (
+                "background-color: rgb(90, 90, 90);"
+                "border: 1px solid black;"
+            )
+        self.ui.PyDMByteIndicator.setStyleSheet(style)
+
+    def _set_detector_state_acquire_style(self, acquiring):
+        if acquiring:
+            style = "color: rgb(220, 0, 0); background-color: rgb(213, 213, 213);"
+        else:
+            style = "color: rgb(0, 216, 0); background-color: rgb(213, 213, 213);"
+        self.ui.PyDMLabel.setStyleSheet(style)
+
+    def _on_acquire_value_changed(self, value):
+        if isinstance(value, str):
+            acquiring = value.strip().lower() in {"1", "true", "on", "acquire", "acquiring"}
+        else:
+            acquiring = bool(value)
+        self._set_acquire_indicator_style(acquiring)
+        self._set_indicator_on_off_colors()
+        self.ui.PyDMByteIndicator.update()
+        self._set_detector_state_acquire_style(acquiring)
+
     def _install_display_controls(self, image_view):
         main_layout = self.ui.verticalLayout
         controls = QtWidgets.QGroupBox("Image Settings", self.ui)
@@ -99,7 +274,15 @@ class MainScreen(display.MITRDisplay):
         self.auto_levels_checkbox = QtWidgets.QCheckBox("Auto levels")
         self.auto_levels_checkbox.setChecked(True)
         self.auto_levels_checkbox.toggled.connect(self._on_auto_levels_toggled)
-        controls_layout.addWidget(self.auto_levels_checkbox)
+        self.reset_levels_button = QtWidgets.QPushButton("Reset Levels")
+        self.reset_levels_button.clicked.connect(self._reset_levels_to_default)
+        auto_block = QtWidgets.QWidget()
+        auto_layout = QtWidgets.QVBoxLayout(auto_block)
+        auto_layout.setContentsMargins(0, 0, 0, 0)
+        auto_layout.setSpacing(2)
+        auto_layout.addWidget(self.auto_levels_checkbox)
+        auto_layout.addWidget(self.reset_levels_button)
+        controls_layout.addWidget(auto_block)
 
         self.min_spinbox = QtWidgets.QDoubleSpinBox()
         self.min_spinbox.setDecimals(3)
@@ -108,7 +291,7 @@ class MainScreen(display.MITRDisplay):
         self.min_spinbox.setMaximumWidth(140)
         self.min_spinbox.valueChanged.connect(self._on_manual_levels_changed)
         self.min_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.min_slider.setRange(0, 1000)
+        self.min_slider.setRange(0, int(self._level_slider_high_bound))
         self.min_slider.valueChanged.connect(self._on_min_slider_changed)
         self.min_spinbox.valueChanged.connect(self._on_min_spinbox_changed)
         self.min_label = QtWidgets.QLabel("Min")
@@ -132,7 +315,7 @@ class MainScreen(display.MITRDisplay):
         self.max_spinbox.setMaximumWidth(140)
         self.max_spinbox.valueChanged.connect(self._on_manual_levels_changed)
         self.max_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.max_slider.setRange(0, 1000)
+        self.max_slider.setRange(0, int(self._level_slider_high_bound))
         self.max_slider.valueChanged.connect(self._on_max_slider_changed)
         self.max_spinbox.valueChanged.connect(self._on_max_spinbox_changed)
         self.max_label = QtWidgets.QLabel("Max")
@@ -248,9 +431,10 @@ class MainScreen(display.MITRDisplay):
         controls.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
         main_layout.insertWidget(1, controls)
 
-        self._update_level_slider_bounds(0.0, 1.0)
+        self._set_level_slider_scale(int(self._level_slider_high_bound))
         self._sync_level_sliders_from_spinboxes()
         self._on_auto_levels_toggled(True)
+        self._capture_base_lut()
         self._apply_gamma_setting()
 
     def _discover_colormap_options(self, image_view):
@@ -277,7 +461,8 @@ class MainScreen(display.MITRDisplay):
         if high <= low:
             high = low + 1.0
 
-        self._update_level_slider_bounds(low, high)
+        low = max(self._level_slider_low_bound, min(self._level_slider_high_bound, low))
+        high = max(self._level_slider_low_bound, min(self._level_slider_high_bound, high))
         self._sync_level_sliders_from_spinboxes()
 
         try:
@@ -296,6 +481,9 @@ class MainScreen(display.MITRDisplay):
             image_view.setColorMapMax(float(high))
         else:
             image_view.setProperty("colorMapMax", float(high))
+
+        # Re-apply gamma LUT in case the widget refreshed its image internals.
+        self._apply_gamma_setting()
 
     def _on_auto_levels_toggled(self, enabled):
         self.min_spinbox.setEnabled(not enabled)
@@ -322,29 +510,69 @@ class MainScreen(display.MITRDisplay):
         high = self.max_spinbox.value()
         self._set_image_levels(low, high)
 
+    def _reset_levels_to_default(self):
+        self._norm_low_percentile = self._default_norm_low_percentile
+        self._norm_high_percentile = self._default_norm_high_percentile
+        self._gamma_value = self._default_gamma_value
+
+        self.low_pct_spinbox.blockSignals(True)
+        self.high_pct_spinbox.blockSignals(True)
+        self.gamma_spinbox.blockSignals(True)
+        self.low_pct_spinbox.setValue(self._norm_low_percentile)
+        self.high_pct_spinbox.setValue(self._norm_high_percentile)
+        self.gamma_spinbox.setValue(self._gamma_value)
+        self.low_pct_spinbox.blockSignals(False)
+        self.high_pct_spinbox.blockSignals(False)
+        self.gamma_spinbox.blockSignals(False)
+
+        self._on_low_pct_spinbox_changed(self._norm_low_percentile)
+        self._on_high_pct_spinbox_changed(self._norm_high_percentile)
+        self._on_gamma_spinbox_changed(self._gamma_value)
+        self._apply_gamma_setting()
+
+        self.auto_levels_checkbox.setChecked(True)
+        self._auto_levels_from_current_image()
+
     def _value_to_level_slider(self, value):
-        span = self._level_slider_high_bound - self._level_slider_low_bound
-        if span <= 0:
-            return 0
-        raw = (value - self._level_slider_low_bound) / span
-        return int(round(max(0.0, min(1.0, raw)) * 1000.0))
+        return int(round(max(self._level_slider_low_bound, min(self._level_slider_high_bound, value))))
 
     def _slider_to_level_value(self, slider_value):
-        span = self._level_slider_high_bound - self._level_slider_low_bound
-        if span <= 0:
-            return self._level_slider_low_bound
-        frac = slider_value / 1000.0
-        return self._level_slider_low_bound + frac * span
+        return float(max(self._level_slider_low_bound, min(self._level_slider_high_bound, slider_value)))
 
-    def _update_level_slider_bounds(self, low, high):
-        if high <= low:
-            high = low + 1.0
-        span = high - low
-        pad = max(span, abs(low) * 0.1, abs(high) * 0.1, 1.0)
-        self._level_slider_low_bound = low - pad
-        self._level_slider_high_bound = high + pad
-        if self._level_slider_high_bound <= self._level_slider_low_bound:
-            self._level_slider_high_bound = self._level_slider_low_bound + 1.0
+    def _set_level_slider_scale(self, bit_max):
+        bit_max = int(max(1, bit_max))
+        self._level_slider_low_bound = 0.0
+        self._level_slider_high_bound = float(bit_max)
+        self.min_slider.blockSignals(True)
+        self.max_slider.blockSignals(True)
+        self.min_slider.setRange(0, bit_max)
+        self.max_slider.setRange(0, bit_max)
+        self.min_slider.blockSignals(False)
+        self.max_slider.blockSignals(False)
+        self.min_spinbox.setRange(0.0, float(bit_max))
+        self.max_spinbox.setRange(0.0, float(bit_max))
+
+    def _update_level_slider_scale_from_image(self, data):
+        dtype = data.dtype
+        bit_max = None
+
+        if np.issubdtype(dtype, np.integer):
+            if dtype.itemsize <= 1:
+                bit_max = 255
+            elif dtype.itemsize <= 2:
+                bit_max = 65535
+        else:
+            finite = data[np.isfinite(data)]
+            if finite.size > 0 and np.nanmax(finite) <= 255:
+                bit_max = 255
+            else:
+                bit_max = 65535
+
+        if bit_max is None:
+            bit_max = 65535
+
+        if int(self._level_slider_high_bound) != bit_max:
+            self._set_level_slider_scale(bit_max)
 
     def _sync_level_sliders_from_spinboxes(self):
         min_sv = self._value_to_level_slider(self.min_spinbox.value())
@@ -439,20 +667,61 @@ class MainScreen(display.MITRDisplay):
     def _apply_gamma_setting(self):
         image_view = self.ui.cameraImage
         gamma = float(self._gamma_value)
-        if hasattr(image_view, "setGamma"):
-            try:
-                image_view.setGamma(gamma)
-                return
-            except Exception:
-                pass
-        image_view.setProperty("gamma", gamma)
-
         try:
             image_item = image_view.getImageItem()
-            if image_item is not None and hasattr(image_item, "setOpts"):
-                image_item.setOpts(gamma=gamma)
+            if image_item is None:
+                return
+
+            if self._base_lut is None:
+                self._capture_base_lut()
+            base_lut = self._base_lut
+            if base_lut is None:
+                return
+
+            if abs(gamma - 1.0) < 1e-6:
+                image_item.setLookupTable(base_lut)
+                return
+
+            n = int(base_lut.shape[0])
+            x = np.linspace(0.0, 1.0, n)
+            idx = np.clip((x ** gamma) * (n - 1), 0, n - 1).astype(int)
+            gamma_lut = base_lut[idx]
+            image_item.setLookupTable(gamma_lut)
         except Exception:
             pass
+
+    def _capture_base_lut(self):
+        image_view = self.ui.cameraImage
+        try:
+            image_item = image_view.getImageItem()
+            if image_item is None:
+                return
+
+            lut = getattr(image_item, "lut", None)
+            if lut is None and hasattr(image_item, "getLookupTable"):
+                try:
+                    lut = image_item.getLookupTable(256, alpha=True)
+                except Exception:
+                    try:
+                        lut = image_item.getLookupTable()
+                    except Exception:
+                        lut = None
+            if lut is None:
+                gray = np.arange(256, dtype=np.uint8)
+                alpha = np.full(256, 255, dtype=np.uint8)
+                lut = np.column_stack((gray, gray, gray, alpha))
+            else:
+                lut = np.array(lut, copy=True)
+                if lut.ndim == 1:
+                    alpha = np.full(lut.shape[0], 255, dtype=lut.dtype)
+                    lut = np.column_stack((lut, lut, lut, alpha))
+                elif lut.shape[1] == 3:
+                    alpha = np.full((lut.shape[0], 1), 255, dtype=lut.dtype)
+                    lut = np.hstack((lut, alpha))
+
+            self._base_lut = lut
+        except Exception:
+            self._base_lut = None
 
     def _auto_levels_from_current_image(self):
         if self._last_image is None:
@@ -460,6 +729,7 @@ class MainScreen(display.MITRDisplay):
         data = np.asarray(self._last_image)
         if data.size == 0:
             return
+        self._update_level_slider_scale_from_image(data)
         finite = data[np.isfinite(data)]
         if finite.size == 0:
             return
@@ -493,6 +763,11 @@ class MainScreen(display.MITRDisplay):
         else:
             image_view.setProperty("colorMap", cmap_value)
         image_view.update()
+        QtCore.QTimer.singleShot(0, self._refresh_lut_and_gamma)
+
+    def _refresh_lut_and_gamma(self):
+        self._capture_base_lut()
+        self._apply_gamma_setting()
 
     def _startup_autoscale_tick(self):
         self._startup_autoscale_attempts += 1
@@ -532,6 +807,7 @@ class MainScreen(display.MITRDisplay):
         data = np.asarray(image)
         if data.size == 0:
             return
+        self._update_level_slider_scale_from_image(data)
 
         finite = data[np.isfinite(data)]
         if finite.size == 0:
