@@ -1,6 +1,8 @@
 import re
+import sys
 
 from qtpy import QtCore
+from qtpy.QtGui import QPalette
 from qtpy.QtWidgets import QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QSizePolicy, QTextEdit, QPushButton
 from bluesky_widgets.qt.run_engine_client import (
     QtReEnvironmentControls,
@@ -67,28 +69,34 @@ class REScreen(display.MITRDisplay):
                 break
 
         for text_edit in self._re_running_plan.findChildren(QTextEdit):
+            palette = text_edit.palette()
+            base_color = palette.color(QPalette.Base).name()
+            text_color = palette.color(QPalette.Text).name()
+            border_color = palette.color(QPalette.Mid).name()
+            muted_color = palette.color(QPalette.Mid).name()
             text_edit.setStyleSheet(
                 "QTextEdit {"
                 "font-size: 13px; "
                 "padding: 4px; "
-                "border: 1px solid #d1d5db; "
+                f"border: 1px solid {border_color}; "
                 "border-radius: 6px; "
-                "background-color: #f8fafc;"
+                f"background-color: {base_color}; "
+                f"color: {text_color};"
                 "}"
             )
             text_edit.document().setDefaultStyleSheet(
-                "body { line-height: 1.45; } "
-                "b { color: #1f2937; font-weight: 700; } "
+                f"body {{ line-height: 1.45; color: {text_color}; }} "
+                f"b {{ color: {text_color}; font-weight: 700; }} "
                 "b.dc-section-hdr { "
                 "display: inline-block; "
                 "margin-top: 8px; "
                 "margin-bottom: 3px; "
                 "font-size: 13px; "
-                "color: #111827; "
+                f"color: {text_color}; "
                 "} "
                 "b.dc-sub-hdr { "
                 "font-size: 12px; "
-                "color: #4b5563; "
+                f"color: {muted_color}; "
                 "font-weight: 600; "
                 "}"
             )
@@ -248,16 +256,19 @@ class REScreen(display.MITRDisplay):
 
     def _style_groupbox_titles(self):
         """Make panel titles larger and centered."""
+        is_linux = sys.platform.startswith("linux")
+        title_margin_top = 10 if is_linux else 8
         title_style = (
-            "QGroupBox { font-size: 14px; font-weight: 700; margin-top: 8px; } "
+            f"QGroupBox {{ font-size: 14px; font-weight: 700; margin-top: {title_margin_top}px; }} "
             "QGroupBox::title { subcontrol-origin: margin; "
-            "subcontrol-position: top center; padding: 0 4px; }"
+            "subcontrol-position: top center; padding: 0 4px 1px 4px; }"
         )
         for group_box in self.findChildren(QGroupBox):
             group_box.setStyleSheet(title_style)
 
     def _normalize_panel_heights(self):
         """Keep all RE top-row panels exactly the same height."""
+        is_linux = sys.platform.startswith("linux")
         panel_height = 200
         widget_height = 194
         panel_frames = (
@@ -285,7 +296,7 @@ class REScreen(display.MITRDisplay):
             widget.setFixedHeight(widget_height)
             widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
             if widget.layout():
-                widget.layout().setContentsMargins(2, 2, 2, 2)
+                widget.layout().setContentsMargins(2, 3 if is_linux else 2, 2, 2)
                 widget.layout().setSpacing(2)
 
         # Manager widget can report a larger implicit height due to inner groupbox margins.
@@ -294,10 +305,10 @@ class REScreen(display.MITRDisplay):
             group_box.setMaximumHeight(widget_height)
             # Keep controls clear of the groupbox title area.
             if group_box.layout():
-                group_box.layout().setContentsMargins(6, 14, 6, 4)
+                group_box.layout().setContentsMargins(6, 18 if is_linux else 14, 6, 4)
                 group_box.layout().setSpacing(4)
                 if isinstance(group_box.layout(), QVBoxLayout) and not group_box.property("_dc_top_spacer_added"):
-                    group_box.layout().insertSpacing(0, 4)
+                    group_box.layout().insertSpacing(0, 6 if is_linux else 4)
                     group_box.setProperty("_dc_top_spacer_added", True)
 
     def customize_ui(self):
