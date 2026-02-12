@@ -1,5 +1,4 @@
 import re
-import sys
 
 from qtpy import QtCore
 from qtpy.QtGui import QPalette
@@ -224,6 +223,12 @@ class REScreen(display.MITRDisplay):
             layout.setSpacing(4)
             layout.setContentsMargins(2, 2, 2, 2)
 
+        # Test inset for RE Manager Status content position verification.
+        for group_box in self._re_status.findChildren(QGroupBox):
+            if group_box.layout():
+                left, _, right, bottom = group_box.layout().getContentsMargins()
+                group_box.layout().setContentsMargins(left, 10, right, bottom)
+
     def _compact_panel_layouts(self):
         """Reduce spacing between top-level RE widgets and inside their containers."""
         pad = 2
@@ -256,21 +261,18 @@ class REScreen(display.MITRDisplay):
 
     def _style_groupbox_titles(self):
         """Make panel titles larger and centered."""
-        is_linux = sys.platform.startswith("linux")
-        title_margin_top = 10 if is_linux else 8
         title_style = (
-            f"QGroupBox {{ font-size: 14px; font-weight: 700; margin-top: {title_margin_top}px; }} "
+            "QGroupBox { font-size: 14px; font-weight: 700; margin-top: 8px; } "
             "QGroupBox::title { subcontrol-origin: margin; "
-            "subcontrol-position: top center; padding: 0 4px 1px 4px; }"
+            "subcontrol-position: top center; padding: 0 4px; }"
         )
         for group_box in self.findChildren(QGroupBox):
             group_box.setStyleSheet(title_style)
 
     def _normalize_panel_heights(self):
         """Keep all RE top-row panels exactly the same height."""
-        is_linux = sys.platform.startswith("linux")
         panel_height = 200
-        widget_height = 194
+        widget_height = 196
         panel_frames = (
             self.ui.RE_Connection,
             self.ui.RE_Worker,
@@ -296,7 +298,7 @@ class REScreen(display.MITRDisplay):
             widget.setFixedHeight(widget_height)
             widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
             if widget.layout():
-                widget.layout().setContentsMargins(2, 3 if is_linux else 2, 2, 2)
+                widget.layout().setContentsMargins(1, 1, 1, 1)
                 widget.layout().setSpacing(2)
 
         # Manager widget can report a larger implicit height due to inner groupbox margins.
@@ -305,11 +307,16 @@ class REScreen(display.MITRDisplay):
             group_box.setMaximumHeight(widget_height)
             # Keep controls clear of the groupbox title area.
             if group_box.layout():
-                group_box.layout().setContentsMargins(6, 18 if is_linux else 14, 6, 4)
+                group_box.layout().setContentsMargins(6, 10, 6, 4)
                 group_box.layout().setSpacing(4)
-                if isinstance(group_box.layout(), QVBoxLayout) and not group_box.property("_dc_top_spacer_added"):
-                    group_box.layout().insertSpacing(0, 6 if is_linux else 4)
-                    group_box.setProperty("_dc_top_spacer_added", True)
+
+        # Lower status indicator rows within "RE Manager Status" groupbox.
+        for group_box in self._re_status.findChildren(QGroupBox):
+            group_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+            group_box.setMaximumHeight(widget_height)
+            if group_box.layout():
+                left, _, right, bottom = group_box.layout().getContentsMargins()
+                group_box.layout().setContentsMargins(left, 20, right, bottom)
 
     def customize_ui(self):
         # button = self.ui.pushButton

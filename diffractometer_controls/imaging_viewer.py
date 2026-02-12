@@ -109,7 +109,28 @@ class MainScreen(display.MITRDisplay):
             return
 
         self.time_remaining_progress = QtWidgets.QProgressBar(self.ui)
-        self.time_remaining_progress.setMinimumHeight(30)
+        self.time_remaining_progress.setMinimumHeight(34)
+        self.time_remaining_progress.setMaximumHeight(34)
+        self.time_remaining_progress.setMinimumWidth(220)
+        self.time_remaining_progress.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Fixed,
+        )
+        progress_font = self.time_remaining_progress.font()
+        progress_font.setPointSize(12)
+        self.time_remaining_progress.setFont(progress_font)
+        self.time_remaining_progress.setStyleSheet(
+            "QProgressBar {"
+            " border: 1px solid rgb(120,120,120);"
+            " border-radius: 4px;"
+            " background: rgb(235,235,235);"
+            " color: rgb(10,10,10);"
+            " text-align: center;"
+            "}"
+            "QProgressBar::chunk {"
+            " background-color: rgb(120, 170, 255);"
+            "}"
+        )
         self.time_remaining_progress.setTextVisible(True)
         self.time_remaining_progress.setAlignment(QtCore.Qt.AlignCenter)
         self.time_remaining_progress.setRange(0, 1000)
@@ -119,6 +140,7 @@ class MainScreen(display.MITRDisplay):
         row_layout.removeWidget(old_widget)
         old_widget.hide()
         row_layout.insertWidget(idx, self.time_remaining_progress)
+        row_layout.setStretch(idx, 2)
 
         remaining_address = getattr(old_widget, "channel", None) or old_widget.property("channel")
         acquire_time_address = (
