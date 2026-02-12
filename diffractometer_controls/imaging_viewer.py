@@ -76,6 +76,7 @@ class MainScreen(display.MITRDisplay):
         self._install_display_controls(image_view)
         self._setup_time_remaining_progress()
         self._configure_acquire_indicators()
+        self._enforce_pan_interaction()
 
         # Disable built-in full-range normalization; we set levels manually.
         if hasattr(image_view, "setNormalizeData"):
@@ -100,6 +101,34 @@ class MainScreen(display.MITRDisplay):
         self._startup_autoscale_timer.setInterval(200)
         self._startup_autoscale_timer.timeout.connect(self._startup_autoscale_tick)
         self._startup_autoscale_timer.start()
+
+    def _get_image_viewbox(self):
+        image_view = self.ui.cameraImage
+        try:
+            if hasattr(image_view, "getView"):
+                view = image_view.getView()
+                if view is not None and hasattr(view, "setMouseMode"):
+                    return view
+            if hasattr(image_view, "getViewBox"):
+                view_box = image_view.getViewBox()
+                if view_box is not None and hasattr(view_box, "setMouseMode"):
+                    return view_box
+        except Exception:
+            return None
+        return None
+
+    def _enforce_pan_interaction(self):
+        view_box = self._get_image_viewbox()
+        if view_box is None:
+            return
+        try:
+            pan_mode = getattr(view_box, "PanMode", None)
+            if pan_mode is not None:
+                view_box.setMouseMode(pan_mode)
+            if hasattr(view_box, "setMouseEnabled"):
+                view_box.setMouseEnabled(x=True, y=True)
+        except Exception:
+            pass
 
     def _setup_time_remaining_progress(self):
         old_widget = self.ui.PyDMLabel_5
@@ -288,7 +317,7 @@ class MainScreen(display.MITRDisplay):
 
     def _install_display_controls(self, image_view):
         main_layout = self.ui.verticalLayout
-        controls = QtWidgets.QGroupBox("Image Settings", self.ui)
+        controls = QtWidgets.QWidget(self.ui)
         controls_layout = QtWidgets.QHBoxLayout(controls)
         controls_layout.setContentsMargins(10, 6, 10, 6)
         controls_layout.setSpacing(12)
@@ -818,6 +847,9 @@ class MainScreen(display.MITRDisplay):
 
         if image is None:
             return
+
+        # Some backends reset interaction mode when first frame is rendered.
+        self._enforce_pan_interaction()
 
         self._last_image = image
         if not self.auto_levels_checkbox.isChecked():
