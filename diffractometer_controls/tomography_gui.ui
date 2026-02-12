@@ -39,14 +39,17 @@
          <height>200</height>
         </size>
        </property>
-       <property name="toolTip">
-        <string/>
-       </property>
-       <property name="frameShape">
-        <enum>QFrame::Panel</enum>
-       </property>
+      <property name="toolTip">
+       <string/>
+      </property>
+      <property name="styleSheet">
+       <string notr="true"></string>
+      </property>
+      <property name="frameShape">
+       <enum>QFrame::NoFrame</enum>
+      </property>
        <property name="filename" stdset="0">
-        <string>reactor_power.ui</string>
+        <string>reactor_power.py</string>
        </property>
       </widget>
      </item>
