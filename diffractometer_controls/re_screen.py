@@ -1,24 +1,16 @@
-import sys
+import re
 
-from pydm.display import Display
-from qtpy import QtCore, QtGui
-from qtpy.QtWidgets import (QVBoxLayout, QHBoxLayout, QGroupBox,
-    QLabel, QLineEdit, QPushButton, QScrollArea, QFrame,
-    QApplication, QWidget, QLabel)
+from qtpy import QtCore
+from qtpy.QtWidgets import QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QSizePolicy, QTextEdit, QPushButton
 from bluesky_widgets.qt.run_engine_client import (
-    QtReConsoleMonitor,
     QtReEnvironmentControls,
     QtReExecutionControls,
     QtReManagerConnection,
-    QtRePlanEditor,
-    QtRePlanHistory,
-    QtRePlanQueue,
     QtReQueueControls,
     QtReRunningPlan,
     QtReStatusMonitor,
 )
 
-from bluesky_widgets.models.run_engine_client import RunEngineClient
 import display
 
 class REScreen(display.MITRDisplay):
@@ -33,17 +25,285 @@ class REScreen(display.MITRDisplay):
     def ui_filepath(self):
         return super().ui_filepath()
 
+    def _style_re_connection_status_label(self):
+        """Emphasize the RE manager connection state label."""
+        status_styles = {
+            "ONLINE": "font-size: 20px; font-weight: 700; color: #1f9d55; padding: 0px 2px;",
+            "-----": "font-size: 17px; font-weight: 600; color: #7a7a7a; padding: 0px 2px;",
+            "OFFLINE": "font-size: 20px; font-weight: 600; color: #b23b3b; padding: 0px 2px;",
+            "OFF": "font-size: 20px; font-weight: 600; color: #7a7a7a; padding: 0px 2px;",
+        }
+        for label in self._re_manager.findChildren(QLabel):
+            text = label.text().strip().upper()
+            if text in status_styles:
+                label.setStyleSheet(status_styles[text])
+
+    def _style_re_queue_state_label(self):
+        """Emphasize queue run state in Queue Controls."""
+        queue_state_styles = {
+            "RUNNING": "font-size: 24px; font-weight: 800; color: #b00020;",
+            "STOPPED": "font-size: 24px; font-weight: 800; color: #6b7280;",
+        }
+        for label in self._re_queue_controls.findChildren(QLabel):
+            text = label.text().strip().upper()
+            if text in queue_state_styles:
+                label.setStyleSheet(queue_state_styles[text])
+
+    def _style_re_running_plan_widget(self):
+        """Improve readability of the Running Plan panel."""
+        for layout in self._re_running_plan.findChildren(QHBoxLayout):
+            layout.setSpacing(4)
+            layout.setContentsMargins(2, 2, 2, 2)
+        for layout in self._re_running_plan.findChildren(QVBoxLayout):
+            layout.setSpacing(3)
+            layout.setContentsMargins(2, 2, 2, 2)
+
+        has_running_item = False
+        manager_paused = False
+        for status_label in self._re_status.findChildren(QLabel):
+            status_text = status_label.text().strip().upper()
+            if status_text.startswith("MANAGER:") and "PAUSED" in status_text:
+                manager_paused = True
+                break
+
+        for text_edit in self._re_running_plan.findChildren(QTextEdit):
+            text_edit.setStyleSheet(
+                "QTextEdit {"
+                "font-size: 13px; "
+                "padding: 4px; "
+                "border: 1px solid #d1d5db; "
+                "border-radius: 6px; "
+                "background-color: #f8fafc;"
+                "}"
+            )
+            text_edit.document().setDefaultStyleSheet(
+                "body { line-height: 1.45; } "
+                "b { color: #1f2937; font-weight: 700; } "
+                "b.dc-section-hdr { "
+                "display: inline-block; "
+                "margin-top: 8px; "
+                "margin-bottom: 3px; "
+                "font-size: 13px; "
+                "color: #111827; "
+                "} "
+                "b.dc-sub-hdr { "
+                "font-size: 12px; "
+                "color: #4b5563; "
+                "font-weight: 600; "
+                "}"
+            )
+            html = text_edit.toHtml()
+            formatted_html = self._format_running_plan_html(html)
+            if formatted_html != html:
+                text_edit.setHtml(formatted_html)
+            has_running_item = "Plan Name:" in text_edit.toPlainText()
+
+        for button in self._re_running_plan.findChildren(QPushButton):
+            # Match global/default button styling used in the other RE widgets.
+            button.setStyleSheet("")
+
+        for label in self._re_running_plan.findChildren(QLabel):
+            if label.text().strip().upper() == "RUNNING PLAN":
+                if manager_paused and has_running_item:
+                    label.setStyleSheet(
+                        "font-size: 15px; font-weight: 800; color: #92400e; "
+                        "background-color: #fef3c7; border: 1px solid #fcd34d; "
+                        "border-radius: 6px; padding: 2px 8px;"
+                    )
+                elif has_running_item:
+                    label.setStyleSheet(
+                        "font-size: 15px; font-weight: 800; color: #7f1d1d; "
+                        "background-color: #fee2e2; border: 1px solid #fecaca; "
+                        "border-radius: 6px; padding: 2px 8px;"
+                    )
+                else:
+                    label.setStyleSheet(
+                        "font-size: 15px; font-weight: 700; color: #334155; "
+                        "background-color: #e2e8f0; border: 1px solid #cbd5e1; "
+                        "border-radius: 6px; padding: 2px 8px;"
+                    )
+
+    @staticmethod
+    def _format_running_plan_html(html):
+        """Mark top-level running-plan section headers for better spacing."""
+        if "dc-section-hdr" in html:
+            return html
+        section_headers = ("Plan Name:", "Arguments:", "Parameters:", "Metadata:", "Runs:")
+        updated = html
+        for header in section_headers:
+            updated = updated.replace(
+                f"<b>{header}</b>",
+                f"<b class=\"dc-section-hdr\">{header}</b>",
+            )
+        # Remaining bold labels (parameter keys, metadata labels, etc.) are treated as sub-headings.
+        updated = re.sub(
+            r"<b>([^<:]+:)</b>",
+            r"<b class=\"dc-sub-hdr\">\1</b>",
+            updated,
+        )
+        return updated
+
+    def _style_re_status_labels(self):
+        """Style RE status rows with state-dependent backgrounds."""
+        is_connected = bool(getattr(self._re_manager.model, "re_manager_connected", False))
+        short_names = {
+            "RE Environment": "Environment",
+            "Manager state": "Manager",
+            "RE state": "Engine",
+            "Items in history": "History",
+            "Queue AUTOSTART": "Autostart",
+            "Queue STOP pending": "Stop Pending",
+            "Items in queue": "Queue Items",
+            "Queue LOOP mode": "Loop Mode",
+        }
+        base_style = (
+            "font-size: 13px; font-weight: 600; padding: 0px 4px; "
+            "border: 1px solid #d1d5db; border-radius: 6px;"
+        )
+        emphasis_style = (
+            "font-size: 14px; font-weight: 700; padding: 0px 4px; "
+            "border: 1px solid #d1d5db; border-radius: 6px;"
+        )
+        state_styles = {
+            "RUNNING": "color: #7f1d1d; background-color: #fee2e2;",
+            "EXECUTING_QUEUE": "color: #7f1d1d; background-color: #fee2e2;",
+            "PAUSED": "color: #92400e; background-color: #fef3c7;",
+            "IDLE": "color: #065f46; background-color: #d1fae5;",
+            "OPEN": "color: #065f46; background-color: #d1fae5;",
+            "CLOSED": "color: #6b7280; background-color: #f3f4f6;",
+            "ON": "color: #065f46; background-color: #d1fae5;",
+            "OFF": "color: #6b7280; background-color: #f3f4f6;",
+            "YES": "color: #7f1d1d; background-color: #fee2e2;",
+            "NO": "color: #065f46; background-color: #d1fae5;",
+            "-": "color: #6b7280; background-color: #f9fafb;",
+        }
+        for label in self._re_status.findChildren(QLabel):
+            text = label.text().strip()
+            if ":" not in text:
+                continue
+            prefix, raw_value = text.split(":", 1)
+            prefix = prefix.strip()
+            if is_connected:
+                value = raw_value.strip().upper()
+                value_key = value.replace(" ", "_")
+                display_value = value_key.replace("_", " ")
+            else:
+                # Prevent stale "green" states from persisting after disconnect.
+                value_key = "-"
+                display_value = "-"
+            label_name = short_names.get(prefix, prefix)
+            if label_name in ("Manager", "Engine"):
+                text_style = emphasis_style
+            else:
+                text_style = base_style
+            state_style = state_styles.get(value_key, "color: #111827; background-color: #eef2ff;")
+            if label_name == "Stop Pending" and value_key == "YES":
+                state_style = "color: #92400e; background-color: #fef3c7;"
+            label.setText(f"{label_name}: {display_value}")
+            label.setStyleSheet(f"{text_style} {state_style}")
+
+    def _compact_re_status_layout(self):
+        """Tighten spacing inside status panel to free horizontal space."""
+        for layout in self._re_status.findChildren(QHBoxLayout):
+            layout.setSpacing(4)
+            layout.setContentsMargins(2, 2, 2, 2)
+            for i in reversed(range(layout.count())):
+                item = layout.itemAt(i)
+                spacer = item.spacerItem()
+                if spacer is not None and spacer.sizeHint().width() <= 20:
+                    layout.takeAt(i)
+        for layout in self._re_status.findChildren(QVBoxLayout):
+            layout.setSpacing(4)
+            layout.setContentsMargins(2, 2, 2, 2)
+
+    def _compact_panel_layouts(self):
+        """Reduce spacing between top-level RE widgets and inside their containers."""
+        pad = 2
+        panel_frames = (
+            self.ui.RE_Connection,
+            self.ui.RE_Worker,
+            self.ui.RE_Status,
+            self.ui.RE_Running,
+            self.ui.RE_Queue_Controls,
+            self.ui.RE_Plan_Execution,
+        )
+        for frame in panel_frames:
+            if frame.layout():
+                frame.layout().setSpacing(pad)
+                frame.layout().setContentsMargins(pad, pad, pad, pad)
+
+        if self.ui.layout():
+            self.ui.layout().setSpacing(pad)
+            self.ui.layout().setContentsMargins(pad, pad, pad, pad)
+
+        top_hbox = getattr(self.ui, "horizontalLayout", None)
+        if top_hbox is not None:
+            top_hbox.setSpacing(pad)
+            top_hbox.setContentsMargins(pad, pad, pad, pad)
+
+        top_grid = getattr(self.ui, "gridLayout", None)
+        if top_grid is not None:
+            top_grid.setSpacing(pad)
+            top_grid.setContentsMargins(pad, pad, pad, pad)
+
+    def _style_groupbox_titles(self):
+        """Make panel titles larger and centered."""
+        title_style = (
+            "QGroupBox { font-size: 14px; font-weight: 700; margin-top: 8px; } "
+            "QGroupBox::title { subcontrol-origin: margin; "
+            "subcontrol-position: top center; padding: 0 4px; }"
+        )
+        for group_box in self.findChildren(QGroupBox):
+            group_box.setStyleSheet(title_style)
+
+    def _normalize_panel_heights(self):
+        """Keep all RE top-row panels exactly the same height."""
+        panel_height = 200
+        widget_height = 194
+        panel_frames = (
+            self.ui.RE_Connection,
+            self.ui.RE_Worker,
+            self.ui.RE_Status,
+            self.ui.RE_Running,
+            self.ui.RE_Queue_Controls,
+            self.ui.RE_Plan_Execution,
+        )
+        for frame in panel_frames:
+            frame.setFixedHeight(panel_height)
+            if frame.layout():
+                frame.layout().setAlignment(QtCore.Qt.AlignTop)
+
+        panel_widgets = (
+            self._re_manager,
+            self._re_environment,
+            self._re_status,
+            self._re_running_plan,
+            self._re_queue_controls,
+            self._re_plan_execution,
+        )
+        for widget in panel_widgets:
+            widget.setFixedHeight(widget_height)
+            widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+            if widget.layout():
+                widget.layout().setContentsMargins(2, 2, 2, 2)
+                widget.layout().setSpacing(2)
+
+        # Manager widget can report a larger implicit height due to inner groupbox margins.
+        for group_box in self._re_manager.findChildren(QGroupBox):
+            group_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+            group_box.setMaximumHeight(widget_height)
+            # Keep controls clear of the groupbox title area.
+            if group_box.layout():
+                group_box.layout().setContentsMargins(6, 14, 6, 4)
+                group_box.layout().setSpacing(4)
+                if isinstance(group_box.layout(), QVBoxLayout) and not group_box.property("_dc_top_spacer_added"):
+                    group_box.layout().insertSpacing(0, 4)
+                    group_box.setProperty("_dc_top_spacer_added", True)
+
     def customize_ui(self):
         # button = self.ui.pushButton
         # print('Here')
         # button.clicked.connect(self.printstuff)
-
-        
-
-        layout = QVBoxLayout()
-        
-
-        button2 = QPushButton('here')
 
         from application import MITRApplication
 
@@ -63,6 +323,35 @@ class REScreen(display.MITRDisplay):
         self.ui.RE_Running.layout().addWidget(re_running_plan)
         self.ui.RE_Queue_Controls.layout().addWidget(re_queue_controls)
         self.ui.RE_Plan_Execution.layout().addWidget(re_plan_execution)
+
+        self._re_manager = re_manager
+        self._re_environment = re_environment
+        self._re_status = re_status
+        self._re_running_plan = re_running_plan
+        self._re_queue_controls = re_queue_controls
+        self._re_plan_execution = re_plan_execution
+        self._re_connection_status_timer = QtCore.QTimer(self)
+        self._re_connection_status_timer.timeout.connect(
+            self._style_re_connection_status_label
+        )
+        self._re_connection_status_timer.timeout.connect(
+            self._style_re_queue_state_label
+        )
+        self._re_connection_status_timer.timeout.connect(
+            self._style_re_status_labels
+        )
+        self._re_connection_status_timer.timeout.connect(
+            self._style_re_running_plan_widget
+        )
+        self._re_connection_status_timer.start(500)
+        self._compact_panel_layouts()
+        self._normalize_panel_heights()
+        self._style_groupbox_titles()
+        self._style_re_connection_status_label()
+        self._style_re_queue_state_label()
+        self._compact_re_status_layout()
+        self._style_re_status_labels()
+        self._style_re_running_plan_widget()
 
 
     # def printstuff():

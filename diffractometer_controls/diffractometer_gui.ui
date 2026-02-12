@@ -15,7 +15,22 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout_7">
    <item>
-    <layout class="QHBoxLayout" name="horizontalLayout_2">
+   <layout class="QHBoxLayout" name="horizontalLayout_2">
+    <property name="spacing">
+     <number>0</number>
+    </property>
+    <property name="leftMargin">
+     <number>0</number>
+    </property>
+    <property name="topMargin">
+     <number>0</number>
+    </property>
+    <property name="rightMargin">
+     <number>0</number>
+    </property>
+    <property name="bottomMargin">
+     <number>0</number>
+    </property>
      <item>
       <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay">
        <property name="sizePolicy">
@@ -39,11 +54,14 @@
        <property name="toolTip">
         <string/>
        </property>
+       <property name="styleSheet">
+        <string notr="true"></string>
+       </property>
        <property name="frameShape">
-        <enum>QFrame::Box</enum>
+        <enum>QFrame::NoFrame</enum>
        </property>
        <property name="filename" stdset="0">
-        <string>extra_ui/reactor_power.ui</string>
+        <string>reactor_power.py</string>
        </property>
       </widget>
      </item>
