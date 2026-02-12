@@ -16,7 +16,10 @@ from bluesky_widgets.qt.run_engine_client import (
     QtReRunningPlan,
     QtReStatusMonitor,
 )
-from diffractometer_controls.re_plan_editor_widget import RePlanEditorWidget
+try:
+    from diffractometer_controls.re_plan_editor_widget import RePlanEditorWidget
+except Exception:
+    from re_plan_editor_widget import RePlanEditorWidget
 
 # from bluesky_widgets.qt.figures import QtFigure, QtFigures
 # from bluesky_widgets.models.auto_plot_builders import AutoLines, AutoPlotter, AutoImages
