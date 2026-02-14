@@ -57,15 +57,32 @@ if 1:
         _publish_reactor_power_suspender_state()
 
     def _queue_set_reactor_power_suspender(enable):
+        enable = bool(enable)
+        loop = getattr(RE, "loop", None)
         try:
-            RE.loop.call_soon_threadsafe(_set_reactor_power_suspender_enabled, bool(enable))
+            if loop is not None and loop.is_running():
+                loop.call_soon_threadsafe(_set_reactor_power_suspender_enabled, enable)
+            else:
+                _set_reactor_power_suspender_enabled(enable)
         except Exception:
-            _set_reactor_power_suspender_enabled(bool(enable))
+            _set_reactor_power_suspender_enabled(enable)
+
+    def _coerce_enable_value(value):
+        if isinstance(value, str):
+            text = value.strip().lower()
+            if text in ("1", "true", "yes", "on", "enable", "enabled"):
+                return True
+            if text in ("0", "false", "no", "off", "disable", "disabled"):
+                return False
+            return None
+        try:
+            return bool(int(float(value)))
+        except Exception:
+            return None
 
     def _on_reactor_power_suspender_enable_changed(value=None, **kwargs):
-        try:
-            enable = bool(int(float(value)))
-        except Exception:
+        enable = _coerce_enable_value(value)
+        if enable is None:
             return
         _queue_set_reactor_power_suspender(enable)
 
