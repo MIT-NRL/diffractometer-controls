@@ -294,25 +294,33 @@ if 1:
             pass
 
     # In Queue Server, immediate pause can occur while RE waits on trigger
-    # status. Hook RE state changes so pausing always aborts detector exposure.
+    # status. Hook RE state changes so pausing or suspending always aborts
+    # detector exposure.
     try:
-        _previous_state_hook = RE.state_hook
+        _existing_state_hook = RE.state_hook
+        if getattr(_existing_state_hook, "_detector_abort_wrapper", False):
+            _previous_state_hook = getattr(_existing_state_hook, "_detector_abort_previous", None)
+        else:
+            _previous_state_hook = _existing_state_hook
 
-        def _state_hook_with_detector_abort(*args, **kwargs):
-            state = None
+        def _state_hook_with_detector_abort(*args, _previous_hook=_previous_state_hook, **kwargs):
+            state = kwargs.get("new_state", kwargs.get("state", None))
             str_args = [a for a in args if isinstance(a, str)]
-            if str_args:
-                state = str_args[-1]
-            elif "state" in kwargs and isinstance(kwargs["state"], str):
-                state = kwargs["state"]
+            if state is None and str_args:
+                # RunEngine state_hook signature is (new_state, old_state).
+                state = str_args[0]
+            if isinstance(state, str):
+                state = state.strip().lower()
 
-            if state in ("pausing", "paused"):
+            if state in ("pausing", "paused", "suspending", "suspended"):
                 _abort_detector_acquire(cam1)
 
-            if callable(_previous_state_hook):
-                return _previous_state_hook(*args, **kwargs)
+            if callable(_previous_hook):
+                return _previous_hook(*args, **kwargs)
             return None
 
+        _state_hook_with_detector_abort._detector_abort_wrapper = True
+        _state_hook_with_detector_abort._detector_abort_previous = _previous_state_hook
         RE.state_hook = _state_hook_with_detector_abort
     except Exception:
         pass
