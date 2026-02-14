@@ -39,15 +39,15 @@
          <height>200</height>
         </size>
        </property>
-      <property name="toolTip">
-       <string/>
-      </property>
-      <property name="styleSheet">
-       <string notr="true"></string>
-      </property>
-      <property name="frameShape">
-       <enum>QFrame::NoFrame</enum>
-      </property>
+       <property name="toolTip">
+        <string/>
+       </property>
+       <property name="styleSheet">
+        <string notr="true"/>
+       </property>
+       <property name="frameShape">
+        <enum>QFrame::NoFrame</enum>
+       </property>
        <property name="filename" stdset="0">
         <string>reactor_power.py</string>
        </property>
@@ -139,107 +139,463 @@
       <property name="toolTip">
        <string/>
       </property>
-      <layout class="QHBoxLayout" name="horizontalLayout">
-       <property name="spacing">
-        <number>6</number>
-       </property>
-       <property name="leftMargin">
-        <number>0</number>
-       </property>
-       <property name="topMargin">
-        <number>0</number>
-       </property>
-       <property name="rightMargin">
-        <number>0</number>
-       </property>
-       <property name="bottomMargin">
-        <number>0</number>
-       </property>
+      <layout class="QHBoxLayout" name="horizontalLayout_9">
        <item>
-        <widget class="PyDMTabWidget" name="PyDMTabWidget">
-         <property name="sizePolicy">
-          <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-           <horstretch>0</horstretch>
-           <verstretch>0</verstretch>
-          </sizepolicy>
-         </property>
-         <property name="toolTip">
-          <string/>
-         </property>
-         <property name="whatsThis">
-          <string/>
-         </property>
-         <property name="currentIndex">
-          <number>0</number>
-         </property>
-         <property name="alarmChannels">
-          <stringlist>
-           <string></string>
-           <string></string>
-          </stringlist>
-         </property>
-         <widget class="QWidget" name="ImagingViewerTab">
-          <property name="sizePolicy">
-           <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
-            <horstretch>0</horstretch>
-            <verstretch>0</verstretch>
-           </sizepolicy>
-          </property>
-          <attribute name="title">
-           <string>Imaging Viewer</string>
-          </attribute>
-          <layout class="QVBoxLayout" name="verticalLayout">
+        <layout class="QVBoxLayout" name="verticalLayout">
+         <item>
+          <widget class="PyDMTabWidget" name="PyDMTabWidget">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="toolTip">
+            <string/>
+           </property>
+           <property name="whatsThis">
+            <string/>
+           </property>
+           <property name="currentIndex">
+            <number>0</number>
+           </property>
+           <property name="alarmChannels">
+            <stringlist>
+             <string></string>
+             <string></string>
+            </stringlist>
+           </property>
+           <widget class="QWidget" name="ImagingViewerTab">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <attribute name="title">
+             <string>Imaging Viewer</string>
+            </attribute>
+            <layout class="QHBoxLayout" name="horizontalLayout_6">
+             <item>
+              <widget class="PyDMImageView" name="cameraImage">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="MinimumExpanding" vsizetype="Preferred">
+                 <horstretch>0</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
+               <property name="font">
+                <font>
+                 <pointsize>12</pointsize>
+                </font>
+               </property>
+               <property name="contextMenuPolicy">
+                <enum>Qt::DefaultContextMenu</enum>
+               </property>
+               <property name="toolTip">
+                <string/>
+               </property>
+               <property name="autoFillBackground">
+                <bool>false</bool>
+               </property>
+               <property name="styleSheet">
+                <string notr="true"/>
+               </property>
+               <property name="colorMapMax" stdset="0">
+                <double>1024.000000000000000</double>
+               </property>
+               <property name="colorMap" stdset="0">
+                <enum>PyDMImageView::Monochrome</enum>
+               </property>
+               <property name="autoDownsample" stdset="0">
+                <bool>false</bool>
+               </property>
+               <property name="imageWidth" stdset="0">
+                <number>0</number>
+               </property>
+               <property name="normalizeData" stdset="0">
+                <bool>true</bool>
+               </property>
+               <property name="readingOrder" stdset="0">
+                <enum>PyDMImageView::Clike</enum>
+               </property>
+               <property name="imageChannel" stdset="0">
+                <string>ca://${P}image1:ArrayData</string>
+               </property>
+               <property name="widthChannel" stdset="0">
+                <string>ca://${P}image1:ArraySize0_RBV</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+           <widget class="QWidget" name="RunEngineTab">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <attribute name="title">
+             <string>Run Engine Extras</string>
+            </attribute>
+            <layout class="QVBoxLayout" name="verticalLayout_6">
+             <item>
+              <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_7">
+               <property name="toolTip">
+                <string/>
+               </property>
+               <property name="filename" stdset="0">
+                <string>re_extras.py</string>
+               </property>
+               <property name="loadWhenShown" stdset="0">
+                <bool>false</bool>
+               </property>
+               <property name="disconnectWhenHidden" stdset="0">
+                <bool>false</bool>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+          </widget>
+         </item>
+         <item>
+          <layout class="QHBoxLayout" name="horizontalLayout_7">
            <item>
-            <widget class="PyDMEmbeddedDisplay" name="Viewer_display">
+            <widget class="PyDMByteIndicator" name="PyDMByteIndicator_2">
+             <property name="enabled">
+              <bool>true</bool>
+             </property>
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Expanding" vsizetype="MinimumExpanding">
+              <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
                <horstretch>0</horstretch>
                <verstretch>0</verstretch>
               </sizepolicy>
              </property>
+             <property name="minimumSize">
+              <size>
+               <width>50</width>
+               <height>50</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>50</width>
+               <height>50</height>
+              </size>
+             </property>
+             <property name="baseSize">
+              <size>
+               <width>0</width>
+               <height>0</height>
+              </size>
+             </property>
+             <property name="font">
+              <font>
+               <pointsize>12</pointsize>
+              </font>
+             </property>
              <property name="toolTip">
               <string/>
              </property>
-             <property name="macros" stdset="0">
-              <string>R=cam1:</string>
+             <property name="channel" stdset="0">
+              <string>ca://${P}${R}Acquire</string>
              </property>
-             <property name="filename" stdset="0">
-              <string>imaging_viewer.py</string>
+             <property name="showLabels" stdset="0">
+              <bool>false</bool>
+             </property>
+             <property name="circles" stdset="0">
+              <bool>false</bool>
              </property>
             </widget>
            </item>
-          </layout>
-         </widget>
-         <widget class="QWidget" name="RunEngineTab">
-          <property name="sizePolicy">
-           <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
-            <horstretch>0</horstretch>
-            <verstretch>0</verstretch>
-           </sizepolicy>
-          </property>
-          <attribute name="title">
-           <string>Run Engine Extras</string>
-          </attribute>
-          <layout class="QVBoxLayout" name="verticalLayout_6">
            <item>
-            <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay_7">
-             <property name="toolTip">
-              <string/>
-             </property>
-             <property name="filename" stdset="0">
-              <string>re_extras.py</string>
-             </property>
-             <property name="loadWhenShown" stdset="0">
-              <bool>false</bool>
-             </property>
-             <property name="disconnectWhenHidden" stdset="0">
-              <bool>false</bool>
-             </property>
-            </widget>
+            <layout class="QVBoxLayout" name="verticalLayout_9">
+             <item>
+              <layout class="QHBoxLayout" name="horizontalLayout">
+               <item>
+                <widget class="QLabel" name="label_2">
+                 <property name="minimumSize">
+                  <size>
+                   <width>0</width>
+                   <height>30</height>
+                  </size>
+                 </property>
+                 <property name="maximumSize">
+                  <size>
+                   <width>16777215</width>
+                   <height>30</height>
+                  </size>
+                 </property>
+                 <property name="font">
+                  <font>
+                   <pointsize>12</pointsize>
+                  </font>
+                 </property>
+                 <property name="text">
+                  <string>Exposure (s)</string>
+                 </property>
+                 <property name="alignment">
+                  <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="PyDMLineEdit" name="PyDMLineEdit_2">
+                 <property name="sizePolicy">
+                  <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+                   <horstretch>0</horstretch>
+                   <verstretch>0</verstretch>
+                  </sizepolicy>
+                 </property>
+                 <property name="minimumSize">
+                  <size>
+                   <width>0</width>
+                   <height>30</height>
+                  </size>
+                 </property>
+                 <property name="maximumSize">
+                  <size>
+                   <width>16777215</width>
+                   <height>30</height>
+                  </size>
+                 </property>
+                 <property name="font">
+                  <font>
+                   <pointsize>12</pointsize>
+                  </font>
+                 </property>
+                 <property name="toolTip">
+                  <string/>
+                 </property>
+                 <property name="styleSheet">
+                  <string notr="true">PyDMLineEdit {
+  color: rgb(0, 0, 0);
+  background-color: rgb(115, 223, 255);
+  border: 1px solid black;
+  margin: 0px;
+  padding: 0px;
+  spacing: 0px;
+  }</string>
+                 </property>
+                 <property name="showUnits" stdset="0">
+                  <bool>true</bool>
+                 </property>
+                 <property name="channel" stdset="0">
+                  <string>ca://${P}${R}AcquireTime</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="PyDMLabel" name="PyDMLabel_6">
+                 <property name="minimumSize">
+                  <size>
+                   <width>0</width>
+                   <height>30</height>
+                  </size>
+                 </property>
+                 <property name="maximumSize">
+                  <size>
+                   <width>16777215</width>
+                   <height>30</height>
+                  </size>
+                 </property>
+                 <property name="font">
+                  <font>
+                   <pointsize>12</pointsize>
+                  </font>
+                 </property>
+                 <property name="toolTip">
+                  <string>${P}${R}TimeRemaining_RBV</string>
+                 </property>
+                 <property name="styleSheet">
+                  <string notr="true">color: rgb(0, 0, 255);
+background-color: rgb(213, 213, 213)</string>
+                 </property>
+                 <property name="showUnits" stdset="0">
+                  <bool>true</bool>
+                 </property>
+                 <property name="channel" stdset="0">
+                  <string>ca://${P}${R}TimeRemaining_RBV</string>
+                 </property>
+                 <property name="displayFormat" stdset="0">
+                  <enum>PyDMLabel::Decimal</enum>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+             <item>
+              <widget class="PyDMLabel" name="PyDMLabel_7">
+               <property name="minimumSize">
+                <size>
+                 <width>0</width>
+                 <height>30</height>
+                </size>
+               </property>
+               <property name="maximumSize">
+                <size>
+                 <width>16777215</width>
+                 <height>30</height>
+                </size>
+               </property>
+               <property name="font">
+                <font>
+                 <pointsize>12</pointsize>
+                </font>
+               </property>
+               <property name="toolTip">
+                <string/>
+               </property>
+               <property name="styleSheet">
+                <string notr="true">color: rgb(0, 216, 0);
+background-color: rgb(213, 213, 213);</string>
+               </property>
+               <property name="text">
+                <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p align=&quot;center&quot;&gt;######&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+               </property>
+               <property name="alignment">
+                <set>Qt::AlignCenter</set>
+               </property>
+               <property name="channel" stdset="0">
+                <string>ca://${P}${R}DetectorState_RBV</string>
+               </property>
+               <property name="enableRichText" stdset="0">
+                <bool>true</bool>
+               </property>
+               <property name="displayFormat" stdset="0">
+                <enum>PyDMLabel::String</enum>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QVBoxLayout" name="verticalLayout_10">
+             <item>
+              <layout class="QHBoxLayout" name="horizontalLayout_8">
+               <item>
+                <widget class="PyDMLabel" name="PyDMLabel_8">
+                 <property name="minimumSize">
+                  <size>
+                   <width>0</width>
+                   <height>30</height>
+                  </size>
+                 </property>
+                 <property name="maximumSize">
+                  <size>
+                   <width>16777215</width>
+                   <height>30</height>
+                  </size>
+                 </property>
+                 <property name="font">
+                  <font>
+                   <pointsize>12</pointsize>
+                  </font>
+                 </property>
+                 <property name="toolTip">
+                  <string/>
+                 </property>
+                 <property name="styleSheet">
+                  <string notr="true">color: rgb(0, 0, 255);
+background-color: rgb(213, 213, 213)</string>
+                 </property>
+                 <property name="showUnits" stdset="0">
+                  <bool>true</bool>
+                 </property>
+                 <property name="channel" stdset="0">
+                  <string>ca://${P}${R}ArrayRate_RBV</string>
+                 </property>
+                 <property name="displayFormat" stdset="0">
+                  <enum>PyDMLabel::Decimal</enum>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="PyDMLabel" name="PyDMLabel_9">
+                 <property name="minimumSize">
+                  <size>
+                   <width>0</width>
+                   <height>30</height>
+                  </size>
+                 </property>
+                 <property name="maximumSize">
+                  <size>
+                   <width>16777215</width>
+                   <height>30</height>
+                  </size>
+                 </property>
+                 <property name="font">
+                  <font>
+                   <pointsize>12</pointsize>
+                  </font>
+                 </property>
+                 <property name="toolTip">
+                  <string/>
+                 </property>
+                 <property name="styleSheet">
+                  <string notr="true">color: rgb(0, 0, 255);
+background-color: rgb(213, 213, 213)</string>
+                 </property>
+                 <property name="channel" stdset="0">
+                  <string>ca://${P}${R}ArrayCounter_RBV</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+             <item>
+              <widget class="PyDMLabel" name="PyDMLabel_10">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
+                 <horstretch>0</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
+               <property name="minimumSize">
+                <size>
+                 <width>200</width>
+                 <height>30</height>
+                </size>
+               </property>
+               <property name="maximumSize">
+                <size>
+                 <width>16777215</width>
+                 <height>30</height>
+                </size>
+               </property>
+               <property name="font">
+                <font>
+                 <pointsize>12</pointsize>
+                </font>
+               </property>
+               <property name="toolTip">
+                <string/>
+               </property>
+               <property name="styleSheet">
+                <string notr="true">color: rgb(0, 0, 255);
+background-color: rgb(213, 213, 213)</string>
+               </property>
+               <property name="alignment">
+                <set>Qt::AlignCenter</set>
+               </property>
+               <property name="channel" stdset="0">
+                <string>ca://${P}${R}StatusMessage_RBV</string>
+               </property>
+               <property name="enableRichText" stdset="0">
+                <bool>true</bool>
+               </property>
+               <property name="displayFormat" stdset="0">
+                <enum>PyDMLabel::String</enum>
+               </property>
+              </widget>
+             </item>
+            </layout>
            </item>
           </layout>
-         </widget>
-        </widget>
+         </item>
+        </layout>
        </item>
        <item>
         <widget class="QSplitter" name="splitter">
@@ -274,7 +630,7 @@
           <property name="minimumSize">
            <size>
             <width>300</width>
-            <height>326</height>
+            <height>0</height>
            </size>
           </property>
           <property name="maximumSize">
@@ -293,7 +649,11 @@
            <number>0</number>
           </property>
           <property name="alarmChannels">
-           <stringlist/>
+           <stringlist>
+            <string></string>
+            <string></string>
+            <string></string>
+           </stringlist>
           </property>
           <widget class="QWidget" name="Stage_1_tab">
            <attribute name="title">
@@ -330,7 +690,7 @@
               <property name="sizeHint" stdset="0">
                <size>
                 <width>20</width>
-                <height>168</height>
+                <height>20</height>
                </size>
               </property>
              </spacer>
@@ -487,6 +847,16 @@
    <header>pydm.widgets.tab_bar</header>
   </customwidget>
   <customwidget>
+   <class>PyDMLabel</class>
+   <extends>QLabel</extends>
+   <header>pydm.widgets.label</header>
+  </customwidget>
+  <customwidget>
+   <class>PyDMByteIndicator</class>
+   <extends>QWidget</extends>
+   <header>pydm.widgets.byte</header>
+  </customwidget>
+  <customwidget>
    <class>PyDMEmbeddedDisplay</class>
    <extends>QFrame</extends>
    <header>pydm.widgets.embedded_display</header>
@@ -496,6 +866,16 @@
    <extends>QFrame</extends>
    <header>pydm.widgets.frame</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>PyDMImageView</class>
+   <extends>QWidget</extends>
+   <header>pydm.widgets.image</header>
+  </customwidget>
+  <customwidget>
+   <class>PyDMLineEdit</class>
+   <extends>QLineEdit</extends>
+   <header>pydm.widgets.line_edit</header>
   </customwidget>
  </customwidgets>
  <resources/>

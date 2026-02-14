@@ -58,6 +58,9 @@
        <string>tomography_gui.py</string>
       </stringlist>
      </property>
+     <property name="macros" stdset="0">
+      <string>P=${P},R=cam1:</string>
+     </property>
     </widget>
    </item>
    <item>
