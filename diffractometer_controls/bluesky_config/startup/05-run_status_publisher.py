@@ -202,7 +202,10 @@ def _state_hook_with_status(*args, _previous_hook=_previous_state_hook, **kwargs
                 _run_status_publisher._set_paused(False, now=time.time())
             elif state_lower == "idle" and _run_status_publisher._run_paused:
                 # RE may transiently report idle while paused at a checkpoint.
-                _safe_caput("State", "SUSPENDED" if _run_status_publisher._run_suspended else "PAUSED")
+                _safe_caput(
+                    "State",
+                    "SUSPENDED" if _run_status_publisher._run_suspended else "PAUSED",
+                )
                 _safe_caput("LastUpdateEpoch", time.time())
 
     if callable(_previous_hook):
