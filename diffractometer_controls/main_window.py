@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 
 import qtawesome as qta
+from epics import caput
 from pydm import data_plugins
 from pydm.display import load_file, ScreenTarget
 from pydm.main_window import PyDMMainWindow
@@ -36,21 +37,36 @@ from pydm.widgets.channel import PyDMChannel
 
 class MITRMainWindow(PyDMMainWindow):
     re_manager_api: REManagerAPI
+    _RUN_STATE_INDEX_MAP = {
+        0: "IDLE",
+        1: "RUNNING",
+        2: "PAUSED",
+        3: "DONE",
+        4: "ABORTED",
+        5: "FAILED",
+        6: "CLOSED",
+        7: "STALE",
+        8: "SUSPENDED",
+    }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.macros = kwargs.get('macros', {})
         self.macros_str = ','.join(['='.join(items) for items in self.macros.items()])
         self._run_state = "IDLE"
+        self._run_start_epoch = 0.0
         self._run_finish_epoch = 0.0
         self._run_last_update_epoch = 0.0
         self._run_done_units = 0
         self._run_total_units = 0
         self._run_plan_name = ""
         self._run_initial_remaining_s = 0.0
+        self._run_suspended = False
+        self._run_progress_frozen_value = 0
+        self._run_is_suspended_display = False
         self._run_channels = []
         self._run_display_state = "IDLE"
-        self._run_pulse_period_s = 1.4
+        self._run_pulse_period_s = 2.8
         self._run_state_font_px = 16
         self._run_finish_font_px = 16
         self._run_progress_font_px = 15
@@ -162,7 +178,7 @@ class MITRMainWindow(PyDMMainWindow):
         remove_suspender_action.setIcon(qta.icon('fa5s.trash'))
         remove_suspender_action.setToolTip("Remove the reactor power suspender from the Run Engine")
         remove_suspender_action.triggered.connect(
-            lambda: re_manager_api.script_upload("RE.remove_suspender(reactor_power_suspender)")
+            lambda: self._set_reactor_power_suspender_enabled(False)
         )
 
         # Install Reactor Power Suspender action
@@ -170,7 +186,7 @@ class MITRMainWindow(PyDMMainWindow):
         install_suspender_action.setIcon(qta.icon('fa5s.plus'))
         install_suspender_action.setToolTip("Install the reactor power suspender to the Run Engine")
         install_suspender_action.triggered.connect(
-            lambda: re_manager_api.script_upload("RE.install_suspender(reactor_power_suspender)")
+            lambda: self._set_reactor_power_suspender_enabled(True)
         )
         
 
@@ -264,6 +280,8 @@ class MITRMainWindow(PyDMMainWindow):
 
         self._run_channels = [
             PyDMChannel(address=f"ca://{prefix}State", value_slot=self._on_run_state_changed),
+            PyDMChannel(address=f"ca://{prefix}Suspended", value_slot=self._on_run_suspended_changed),
+            PyDMChannel(address=f"ca://{prefix}StartEpoch", value_slot=self._on_run_start_epoch_changed),
             PyDMChannel(address=f"ca://{prefix}FinishEpoch", value_slot=self._on_run_finish_epoch_changed),
             PyDMChannel(address=f"ca://{prefix}LastUpdateEpoch", value_slot=self._on_run_last_update_epoch_changed),
             PyDMChannel(address=f"ca://{prefix}DoneUnits", value_slot=self._on_run_done_units_changed),
@@ -279,7 +297,7 @@ class MITRMainWindow(PyDMMainWindow):
 
         self._run_anim_timer = QTimer(self)
         self._run_anim_timer.timeout.connect(self._tick_run_state_animation)
-        self._run_anim_timer.start(120)
+        self._run_anim_timer.start(50)
         QtCore.QTimer.singleShot(0, self._apply_run_widget_scale)
 
     def _apply_run_widget_scale(self):
@@ -325,6 +343,7 @@ class MITRMainWindow(PyDMMainWindow):
 
         palette = {
             "PAUSED": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #92400e; background-color: #fef3c7; border: 1px solid #fcd34d; border-radius: 6px; padding: 3px 8px;",
+            "SUSPENDED": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #7c2d12; background-color: #ffedd5; border: 1px solid #fdba74; border-radius: 6px; padding: 3px 8px;",
             "DONE": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #065f46; background-color: #d1fae5; border: 1px solid #86efac; border-radius: 6px; padding: 3px 8px;",
             "ABORTED": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #991b1b; background-color: #fee2e2; border: 1px solid #fca5a5; border-radius: 6px; padding: 3px 8px;",
             "FAILED": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #991b1b; background-color: #fee2e2; border: 1px solid #fca5a5; border-radius: 6px; padding: 3px 8px;",
@@ -357,10 +376,38 @@ class MITRMainWindow(PyDMMainWindow):
             return int(default)
 
     def _on_run_state_changed(self, value):
-        state = str(value).strip().upper() if value is not None else "IDLE"
+        state = "IDLE"
+        if isinstance(value, (int, float)):
+            state = self._RUN_STATE_INDEX_MAP.get(int(value), str(value).strip().upper())
+        elif value is not None:
+            raw = str(value).strip()
+            if raw.isdigit():
+                state = self._RUN_STATE_INDEX_MAP.get(int(raw), raw.upper())
+            else:
+                state = raw.upper()
+        if state in ("DONE", "ABORTED", "FAILED"):
+            # Present a simplified lifecycle in the toolbar: active vs idle.
+            state = "IDLE"
+            self._run_suspended = False
+            self._run_start_epoch = 0.0
+            self._run_finish_epoch = 0.0
+            self._run_done_units = 0
+            self._run_total_units = 0
+            self._run_initial_remaining_s = 0.0
         if state == "RUNNING" and self._run_state != "RUNNING":
             self._run_initial_remaining_s = 0.0
         self._run_state = state or "IDLE"
+        self._update_run_status_widget()
+
+    def _on_run_suspended_changed(self, value):
+        if isinstance(value, str):
+            raw = value.strip().lower()
+            self._run_suspended = raw in ("1", "true", "yes", "on")
+        else:
+            try:
+                self._run_suspended = bool(int(float(value)))
+            except Exception:
+                self._run_suspended = bool(value)
         self._update_run_status_widget()
 
     def _on_run_finish_epoch_changed(self, value):
@@ -369,6 +416,10 @@ class MITRMainWindow(PyDMMainWindow):
             remaining = max(0.0, self._run_finish_epoch - time.time())
             if self._run_initial_remaining_s <= 0.0 or remaining > self._run_initial_remaining_s:
                 self._run_initial_remaining_s = remaining
+        self._update_run_status_widget()
+
+    def _on_run_start_epoch_changed(self, value):
+        self._run_start_epoch = self._as_float(value, default=0.0)
         self._update_run_status_widget()
 
     def _on_run_last_update_epoch_changed(self, value):
@@ -398,16 +449,30 @@ class MITRMainWindow(PyDMMainWindow):
     def _update_run_status_widget(self):
         now = time.time()
         state = self._run_state
+        if self._run_suspended and state in ("RUNNING", "PAUSED", "STALE", "SUSPENDED"):
+            state = "SUSPENDED"
+
         stale_timeout_s = 20.0
         if state == "RUNNING" and self._run_last_update_epoch > 0:
-            if (now - self._run_last_update_epoch) > stale_timeout_s:
+            # If finish_epoch is known, avoid marking long exposures as stale just
+            # because there are no mid-exposure updates. Only mark stale after ETA
+            # has passed and updates are still missing.
+            if self._run_finish_epoch > 0:
+                finish_grace_s = 30.0
+                if (now > (self._run_finish_epoch + finish_grace_s)) and (
+                    (now - self._run_last_update_epoch) > stale_timeout_s
+                ):
+                    state = "STALE"
+            elif (now - self._run_last_update_epoch) > stale_timeout_s:
                 state = "STALE"
 
         self._run_display_state = state
         self._run_state_label.setText(f"Run: {state}")
         self._run_state_label.setStyleSheet(self._run_state_style(state))
 
-        if self._run_finish_epoch > 0:
+        if state in ("SUSPENDED", "PAUSED"):
+            self._run_finish_label.setText("Finish: pending")
+        elif self._run_finish_epoch > 0:
             finish_local = QtCore.QDateTime.fromSecsSinceEpoch(
                 int(self._run_finish_epoch), QtCore.Qt.LocalTime
             ).toString("yyyy-MM-dd HH:mm:ss")
@@ -415,29 +480,62 @@ class MITRMainWindow(PyDMMainWindow):
         else:
             self._run_finish_label.setText("Finish: --")
 
-        if state in ("RUNNING", "PAUSED", "STALE"):
+        if state in ("RUNNING", "STALE"):
+            self._run_is_suspended_display = False
             remaining = max(0.0, self._run_finish_epoch - now) if self._run_finish_epoch > 0 else 0.0
-            if self._run_total_units > 0:
-                frac = min(1.0, max(0.0, float(self._run_done_units) / float(self._run_total_units)))
-                value = int(round(frac * 1000))
+
+            if self._run_initial_remaining_s <= 0.0 and self._run_finish_epoch > 0:
+                self._run_initial_remaining_s = max(remaining, 1.0)
+
+            frac_time = 0.0
+            if self._run_start_epoch > 0 and self._run_finish_epoch > self._run_start_epoch:
+                total = self._run_finish_epoch - self._run_start_epoch
+                elapsed = now - self._run_start_epoch
+                frac_time = min(1.0, max(0.0, elapsed / total))
             elif self._run_initial_remaining_s > 0:
-                frac = 1.0 - min(1.0, remaining / self._run_initial_remaining_s)
-                value = int(round(max(0.0, frac) * 1000))
-            else:
-                value = 0
+                frac_time = 1.0 - min(1.0, remaining / self._run_initial_remaining_s)
+                frac_time = max(0.0, frac_time)
+
+            frac_units = 0.0
+            if self._run_total_units > 0:
+                frac_units = min(1.0, max(0.0, float(self._run_done_units) / float(self._run_total_units)))
+
+            # Use whichever signal indicates more progress to keep the bar active
+            # during long steps even when done_units are only updated at boundaries.
+            frac = max(frac_units, frac_time)
+            value = int(round(frac * 1000))
+
             self._run_progress.setRange(0, 1000)
             self._run_progress.setValue(value)
             plan_txt = f" [{self._run_plan_name}]" if self._run_plan_name else ""
             self._run_progress.setFormat(f"{self._format_hms(remaining)} remaining{plan_txt}")
+        elif state in ("SUSPENDED", "PAUSED"):
+            if not self._run_is_suspended_display:
+                frozen = self._run_progress.value()
+                if self._run_total_units > 0:
+                    frac_units = min(1.0, max(0.0, float(self._run_done_units) / float(self._run_total_units)))
+                    frozen = int(round(frac_units * 1000))
+                self._run_progress_frozen_value = max(0, min(1000, int(frozen)))
+                self._run_is_suspended_display = True
+            self._run_progress.setRange(0, 1000)
+            self._run_progress.setValue(self._run_progress_frozen_value)
+            plan_txt = f" [{self._run_plan_name}]" if self._run_plan_name else ""
+            if state == "PAUSED":
+                self._run_progress.setFormat(f"Paused{plan_txt}")
+            else:
+                self._run_progress.setFormat(f"Suspended{plan_txt}")
         elif state == "DONE":
+            self._run_is_suspended_display = False
             self._run_progress.setRange(0, 1000)
             self._run_progress.setValue(1000)
             self._run_progress.setFormat("Completed")
         elif state in ("ABORTED", "FAILED"):
+            self._run_is_suspended_display = False
             self._run_progress.setRange(0, 1000)
             self._run_progress.setValue(0)
             self._run_progress.setFormat(state.title())
         else:
+            self._run_is_suspended_display = False
             self._run_progress.setRange(0, 1000)
             self._run_progress.setValue(0)
             self._run_progress.setFormat("No active run")
@@ -484,6 +582,22 @@ class MITRMainWindow(PyDMMainWindow):
                 "Error",
                 f"An unexpected error occurred while restarting {process_name}:\n\n{str(e)}",
             )
+
+    def _set_reactor_power_suspender_enabled(self, enabled):
+        prefix = f"{self.macros.get('P', '')}Bluesky:SuspenderEnable"
+        try:
+            caput(prefix, 1 if enabled else 0, wait=False)
+            return
+        except Exception:
+            pass
+
+        # Fallback: direct RE script command if CA path is unavailable.
+        cmd = (
+            "RE.install_suspender(reactor_power_suspender)"
+            if enabled
+            else "RE.remove_suspender(reactor_power_suspender)"
+        )
+        self.re_manager_api.script_upload(cmd)
 
     def control_servers(self, server_name, command):
         """

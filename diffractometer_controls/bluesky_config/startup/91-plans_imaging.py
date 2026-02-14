@@ -12,6 +12,8 @@ import bluesky.plan_stubs as bps
 from bluesky import plan_patterns, utils
 from typing import Annotated
 from collections import defaultdict
+import time
+from datetime import datetime, timedelta
 
 import bluesky.preprocessors
 import bluesky.preprocessors as bpp
@@ -113,6 +115,10 @@ def _one_nd_step_repeat(
     pos_cache,
     take_reading=None,
     num_exposures=1,
+    on_exposure_start=None,
+    on_exposure_success=None,
+    on_step_start=None,
+    on_step_success=None,
 ):
     """
     Inner loop of an N-dimensional step scan
@@ -148,24 +154,139 @@ def _one_nd_step_repeat(
 
     # take_reading = trigger_and_read if take_reading is None else take_reading
     motors = step.keys()
+    step_t0 = time.monotonic()
+    if callable(on_step_start):
+        cb = on_step_start()
+        if cb is not None:
+            yield from cb
     yield from bps.move_per_step(step, pos_cache)
-    yield from _repeater_with_checkpoints(num_exposures, exposure)  # type: ignore  # Movable issue
+    yield from _repeater_with_checkpoints(
+        num_exposures,
+        exposure,
+        on_iteration_start=on_exposure_start,
+        on_iteration_success=on_exposure_success,
+    )  # type: ignore  # Movable issue
+    if callable(on_step_success):
+        cb = on_step_success(num_exposures, max(0.0, time.monotonic() - step_t0))
+        if cb is not None:
+            yield from cb
 
 
-def _repeater_with_checkpoints(n, gen_func, *args, **kwargs):
+def _repeater_with_checkpoints(
+    n,
+    gen_func,
+    *args,
+    on_iteration_start=None,
+    on_iteration_success=None,
+    **kwargs,
+):
     """Repeat a plan with a checkpoint before each repetition.
 
     A deferred pause is processed at checkpoints, so this creates one pause
     boundary per exposure.
     """
     if n is None:
+        i = 0
         while True:
             yield from bps.checkpoint()
+            if callable(on_iteration_start):
+                cb = on_iteration_start(i)
+                if cb is not None:
+                    yield from cb
             yield from gen_func(*args, **kwargs)
+            if callable(on_iteration_success):
+                cb = on_iteration_success(i)
+                if cb is not None:
+                    yield from cb
+            i += 1
     else:
-        for _ in range(n):
+        for i in range(n):
             yield from bps.checkpoint()
+            if callable(on_iteration_start):
+                cb = on_iteration_start(i)
+                if cb is not None:
+                    yield from cb
             yield from gen_func(*args, **kwargs)
+            if callable(on_iteration_success):
+                cb = on_iteration_success(i)
+                if cb is not None:
+                    yield from cb
+
+
+class _ProgressEstimator:
+    """Refine ETA from observed successful exposure durations."""
+
+    def __init__(self, total_units, initial_total_time_s, alpha=0.2, outlier_factor=4.0):
+        self.total_units = max(0, int(total_units))
+        self.done_units = 0
+        self.alpha = float(alpha)
+        self.outlier_factor = float(outlier_factor)
+        self.avg_unit_s = (
+            float(initial_total_time_s) / float(self.total_units)
+            if self.total_units > 0 and float(initial_total_time_s) > 0
+            else 0.0
+        )
+        self._unit_t0 = None
+
+        self._sig_done = Signal(name="done_units", value=0)
+        self._sig_total = Signal(name="total_units", value=self.total_units)
+        self._sig_finish = Signal(name="finish_epoch", value=0.0)
+        self._sig_avg = Signal(name="avg_unit_s", value=self.avg_unit_s)
+        self._started = False
+
+    def _compute_finish_epoch(self):
+        if self.total_units <= 0 or self.avg_unit_s <= 0:
+            return 0.0
+        remaining = max(0, self.total_units - self.done_units)
+        return float(time.time() + remaining * self.avg_unit_s)
+
+    def _publish_progress(self):
+        self._sig_done.put(int(self.done_units))
+        self._sig_total.put(int(self.total_units))
+        self._sig_avg.put(float(self.avg_unit_s))
+        self._sig_finish.put(float(self._compute_finish_epoch()))
+        yield from bps.create(name="progress")
+        yield from bps.read(self._sig_done)
+        yield from bps.read(self._sig_total)
+        yield from bps.read(self._sig_finish)
+        yield from bps.read(self._sig_avg)
+        yield from bps.save()
+
+    def mark_started(self):
+        if not self._started:
+            self._started = True
+            yield from self._publish_progress()
+
+    def _update_avg_from_sample(self, sample_s):
+        if sample_s is None or sample_s <= 0:
+            return
+        if self.avg_unit_s <= 0:
+            self.avg_unit_s = float(sample_s)
+            return
+        if sample_s <= self.avg_unit_s * self.outlier_factor:
+            self.avg_unit_s = self.alpha * float(sample_s) + (1.0 - self.alpha) * self.avg_unit_s
+        # Else keep prior average: likely pause/suspension/outlier.
+
+    def on_units_success(self, unit_count=1, elapsed_s=None):
+        units = max(1, int(unit_count))
+        self.done_units = min(self.total_units, self.done_units + units)
+
+        sample_per_unit_s = None
+        if elapsed_s is not None and units > 0:
+            sample_per_unit_s = max(0.0, float(elapsed_s)) / float(units)
+        self._update_avg_from_sample(sample_per_unit_s)
+        yield from self._publish_progress()
+
+    def on_unit_start(self, _i=None):
+        self._unit_t0 = time.monotonic()
+        yield from self.mark_started()
+
+    def on_unit_success(self, _i=None):
+        dt = None
+        if self._unit_t0 is not None:
+            dt = max(0.0, time.monotonic() - self._unit_t0)
+        self._unit_t0 = None
+        yield from self.on_units_success(unit_count=1, elapsed_s=dt)
 
 def _inner_product_custom(args, num:int = None, step:float = None, offset:float = 0, endpoint=True):
     """Scan over one multi-motor trajectory.
@@ -402,6 +523,16 @@ def tomo_scan(file_name:str,
 
     @bpp.run_decorator(md=_md)
     def main_plan():
+        progress = _ProgressEstimator(
+            total_units=num_exposures * num_projections_calc,
+            initial_total_time_s=total_time,
+        )
+        def _on_step_start():
+            yield from progress.mark_started()
+
+        def _on_step_success(step_units, step_elapsed_s):
+            yield from progress.on_units_success(unit_count=step_units, elapsed_s=step_elapsed_s)
+
         yield from _reset_detector_array_counter(detector)
 
         for det in detector:
@@ -434,7 +565,14 @@ def tomo_scan(file_name:str,
         def inner_scan_nd():
             # yield from bps.declare_stream(motor, *detector, name="primary")
             for step in list(cycler):
-                yield from _one_nd_step_repeat(detector, step, pos_cache,num_exposures=num_exposures)
+                yield from _one_nd_step_repeat(
+                    detector,
+                    step,
+                    pos_cache,
+                    num_exposures=num_exposures,
+                    on_step_start=_on_step_start,
+                    on_step_success=_on_step_success,
+                )
 
         # print("Replace the sample, open the shutter, and press Resume to start the scan")
         # yield from bps.checkpoint()
@@ -545,6 +683,10 @@ def imaging(
 
     @bpp.run_decorator(md=_md)
     def main_plan():
+        progress = _ProgressEstimator(
+            total_units=num_exposures,
+            initial_total_time_s=total_time,
+        )
         yield from _reset_detector_array_counter(detector)
 
         for det in detector:
@@ -552,7 +694,12 @@ def imaging(
             det.tiff1.folder_name.put(file_dir)
             yield from bps.stage(det)                 
 
-        yield from _repeater_with_checkpoints(num_exposures, exposure)
+        yield from _repeater_with_checkpoints(
+            num_exposures,
+            exposure,
+            on_iteration_start=progress.on_unit_start,
+            on_iteration_success=progress.on_unit_success,
+        )
 
         yield from bps.mov(detector[0].cam.acquire_time, old_exposure_time)
         yield from bps.mov(detector[0].cam.gain, old_gain)
@@ -696,6 +843,16 @@ def imaging_scan(
 
     @bpp.run_decorator(md=_md)
     def main_plan():
+        progress = _ProgressEstimator(
+            total_units=num_exposures * num_steps_calc,
+            initial_total_time_s=total_time,
+        )
+        def _on_step_start():
+            yield from progress.mark_started()
+
+        def _on_step_success(step_units, step_elapsed_s):
+            yield from progress.on_units_success(unit_count=step_units, elapsed_s=step_elapsed_s)
+
         yield from _reset_detector_array_counter(detector)
 
         for det in detector:
@@ -712,7 +869,14 @@ def imaging_scan(
         def inner_scan_nd():
             # yield from bps.declare_stream(motor, *detector, name="primary")
             for step in list(cycler):
-                yield from _one_nd_step_repeat(detector, step, pos_cache,num_exposures=num_exposures)
+                yield from _one_nd_step_repeat(
+                    detector,
+                    step,
+                    pos_cache,
+                    num_exposures=num_exposures,
+                    on_step_start=_on_step_start,
+                    on_step_success=_on_step_success,
+                )
 
         # print("Replace the sample, open the shutter, and press Resume to start the scan")
         # yield from bps.checkpoint()
