@@ -39,6 +39,7 @@ class _RunStatusPublisher:
             _safe_caput("PlanName", plan_name)
             _safe_caput("DoneUnits", 0)
             _safe_caput("TotalUnits", est_total_units)
+            _safe_caput("StartEpoch", now)
             _safe_caput("FinishEpoch", finish_epoch)
             _safe_caput("LastUpdateEpoch", now)
 
