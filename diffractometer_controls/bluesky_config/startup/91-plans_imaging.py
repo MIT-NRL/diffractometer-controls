@@ -59,9 +59,7 @@ def _collect_movable_names():
                         except Exception:
                             continue
                 except Exception:
-                    for attr in dir(obj):
-                        if attr.startswith("_"):
-                            continue
+                    for attr in getattr(obj, "component_names", ()):
                         try:
                             sub = getattr(obj, attr)
                             if isinstance(sub, PositionerBase):
@@ -327,8 +325,8 @@ def _ensure_detector_temperature(detectors, target_temperature=-15, threshold=-1
     """
     Ensure all detectors are at or below the target temperature.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     detectors : list
         List of detector objects to check and adjust.
     target_temperature : float
@@ -338,8 +336,8 @@ def _ensure_detector_temperature(detectors, target_temperature=-15, threshold=-1
     poll_interval : float
         Time (in seconds) to wait between temperature checks.
 
-    Yields:
-    -------
+    Yields
+    ------
     Bluesky plan messages to set and wait for detector temperatures.
     """
     # First loop: Set the target temperature for all detectors
