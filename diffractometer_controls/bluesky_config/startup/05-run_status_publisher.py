@@ -126,14 +126,10 @@ class _RunStatusPublisher:
             self._run_paused = False
             self._set_suspended(False, now=now)
             exit_status = str(doc.get("exit_status", "")).lower()
-            if exit_status == "success":
-                state = "DONE"
-            elif exit_status == "abort":
-                state = "ABORTED"
-            else:
-                state = "FAILED"
-
-            _safe_caput("State", state)
+            run_success = 1 if exit_status == "success" else 0
+            _safe_caput("LastRunSuccess", run_success)
+            _safe_caput("LastRunExitStatus", exit_status or "unknown")
+            _safe_caput("State", "IDLE")
             self._set_finish_epoch(now)
             _safe_caput("LastUpdateEpoch", now)
 
