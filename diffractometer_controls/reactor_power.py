@@ -1,13 +1,15 @@
 import os
 import re
 
+from epics import caput
 from pydm.display import ScreenTarget, load_file
 from pydm.utilities import find_file, is_pydm_app
+from pydm.widgets.channel import PyDMChannel
 from pydm.widgets.label import PyDMLabel
 from pydm.widgets.related_display_button import PyDMRelatedDisplayButton
 from qtpy import QtCore
 from qtpy.QtGui import QFont, QFontMetrics
-from qtpy.QtWidgets import QGroupBox, QPushButton
+from qtpy.QtWidgets import QCheckBox, QGroupBox, QPushButton
 
 import display
 
@@ -17,6 +19,10 @@ class ReactorPowerDisplay(display.MITRDisplay):
         self._group_box = None
         self._power_value_label = None
         self._operations_button = None
+        self._suspender_checkbox = None
+        self._suspender_installed_channel = None
+        self._suspender_enable_pv = ""
+        self._suspender_checkbox_updating = False
         super().__init__(parent, args, macros, ui_filename)
 
     def ui_filename(self):
@@ -116,6 +122,73 @@ class ReactorPowerDisplay(display.MITRDisplay):
         QtCore.QTimer.singleShot(0, _sync_height)
         QtCore.QTimer.singleShot(100, _sync_height)
 
+    def _pv_prefix(self):
+        try:
+            macros = self.macros() or {}
+            if isinstance(macros, dict):
+                return str(macros.get("P", "") or "")
+        except Exception:
+            pass
+        return ""
+
+    def _on_suspender_checkbox_toggled(self, checked):
+        if self._suspender_checkbox_updating:
+            return
+        if not self._suspender_enable_pv:
+            return
+        try:
+            caput(self._suspender_enable_pv, 1 if checked else 0, wait=False)
+        except Exception:
+            pass
+
+    def _on_suspender_installed_changed(self, value):
+        checked = False
+        if isinstance(value, str):
+            checked = value.strip().lower() in ("1", "true", "yes", "on")
+        else:
+            try:
+                checked = bool(int(float(value)))
+            except Exception:
+                checked = bool(value)
+
+        if self._suspender_checkbox is None:
+            return
+        self._suspender_checkbox_updating = True
+        try:
+            self._suspender_checkbox.setChecked(checked)
+        finally:
+            self._suspender_checkbox_updating = False
+
+    def _setup_suspender_checkbox(self):
+        if not getattr(self, "_group_box", None):
+            return
+        layout = self._group_box.layout()
+        if layout is None:
+            return
+
+        checkbox = QCheckBox("Suspender Enabled", self)
+        checkbox.setChecked(True)
+        checkbox.toggled.connect(self._on_suspender_checkbox_toggled)
+
+        # Place just above the Operations button.
+        if self._operations_button is not None:
+            idx = layout.indexOf(self._operations_button)
+            if idx < 0:
+                idx = layout.count()
+            layout.insertWidget(idx, checkbox)
+        else:
+            layout.addWidget(checkbox)
+        self._suspender_checkbox = checkbox
+
+        prefix = self._pv_prefix()
+        self._suspender_enable_pv = f"{prefix}Bluesky:SuspenderEnable"
+        installed_address = f"ca://{prefix}Bluesky:SuspenderInstalled"
+        self._suspender_installed_channel = PyDMChannel(
+            address=installed_address,
+            value_slot=self._on_suspender_installed_changed,
+        )
+        self._suspender_installed_channel.connect()
+
     def _fit_groupbox_title_font(self):
         if not getattr(self, "_group_box", None):
             return
@@ -173,6 +246,7 @@ class ReactorPowerDisplay(display.MITRDisplay):
     def customize_ui(self):
         self._group_box = self.findChild(QGroupBox, "groupBox")
         self._replace_related_button_with_native_button()
+        self._setup_suspender_checkbox()
 
         self._power_value_label = self.findChild(PyDMLabel, "powerValueLabel")
         if self._power_value_label is None:
