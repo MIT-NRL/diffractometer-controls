@@ -246,6 +246,19 @@ def _ensure_detector_temperature(detectors, target_temperature=-15, threshold=-1
 
     print("All detectors have reached the desired temperature.")
 
+
+def _reset_detector_array_counter(detectors):
+    """Reset AreaDetector ArrayCounter to zero for all listed detectors."""
+    for det in detectors:
+        try:
+            sig = getattr(det.cam, "array_counter", None)
+            if sig is None:
+                continue
+            yield from bps.mov(sig, 0)
+        except Exception:
+            # Keep plan execution robust if a detector does not expose this PV.
+            continue
+
 @parameter_annotation_decorator({
     "parameters": {
         "detector": {
@@ -342,6 +355,8 @@ def tomo_scan(file_name:str,
     _md = {
         "file_name": file_name,
         "file_dir": file_dir,
+        "estimated_total_time_s": float(total_time),
+        "estimated_total_units": int(num_exposures * num_projections_calc),
         "plan_args": {
             "detectors": list(map(repr, detector)),
             # "num": num,
@@ -387,6 +402,7 @@ def tomo_scan(file_name:str,
 
     @bpp.run_decorator(md=_md)
     def main_plan():
+        yield from _reset_detector_array_counter(detector)
 
         for det in detector:
             det.tiff1.file_name.put(file_name)
@@ -504,6 +520,8 @@ def imaging(
     _md = {
         "file_name": file_name,
         "file_dir": file_dir,
+        "estimated_total_time_s": float(total_time),
+        "estimated_total_units": int(num_exposures),
         "plan_args": {
             "detectors": list(map(repr, detector)),
             # "num": num,
@@ -527,6 +545,7 @@ def imaging(
 
     @bpp.run_decorator(md=_md)
     def main_plan():
+        yield from _reset_detector_array_counter(detector)
 
         for det in detector:
             det.tiff1.file_name.put(file_name)
@@ -639,6 +658,8 @@ def imaging_scan(
     _md = {
         "file_name": file_name,
         "file_dir": file_dir,
+        "estimated_total_time_s": float(total_time),
+        "estimated_total_units": int(num_exposures * num_steps_calc),
         "plan_args": {
             # "detectors": list(map(repr, detector)),
             # "num": num,
@@ -675,6 +696,7 @@ def imaging_scan(
 
     @bpp.run_decorator(md=_md)
     def main_plan():
+        yield from _reset_detector_array_counter(detector)
 
         for det in detector:
             det.tiff1.file_name.put(file_name)

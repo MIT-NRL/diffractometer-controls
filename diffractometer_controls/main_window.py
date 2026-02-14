@@ -1,6 +1,8 @@
 import logging
 import warnings
 import subprocess
+import time
+import math
 from pathlib import Path
 
 import qtawesome as qta
@@ -11,7 +13,7 @@ from qtpy import QtCore, QtGui
 from qtpy.QtCore import Qt, QTimer, Slot, QSize, QLibraryInfo
 from qtpy.QtWidgets import (QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QScrollArea, QFrame,
-    QApplication, QWidget, QLabel, QAction, QToolButton, QMessageBox)
+    QApplication, QWidget, QLabel, QAction, QToolButton, QMessageBox, QProgressBar, QSizePolicy)
 from bluesky_widgets.qt.run_engine_client import (
     QtReConsoleMonitor,
     QtReEnvironmentControls,
@@ -30,6 +32,7 @@ except Exception:
 from bluesky_widgets.models.run_engine_client import RunEngineClient
 from pydm.widgets import PyDMByteIndicator, PyDMRelatedDisplayButton
 from bluesky_queueserver_api.zmq import REManagerAPI
+from pydm.widgets.channel import PyDMChannel
 
 class MITRMainWindow(PyDMMainWindow):
     re_manager_api: REManagerAPI
@@ -38,6 +41,19 @@ class MITRMainWindow(PyDMMainWindow):
         super().__init__(*args, **kwargs)
         self.macros = kwargs.get('macros', {})
         self.macros_str = ','.join(['='.join(items) for items in self.macros.items()])
+        self._run_state = "IDLE"
+        self._run_finish_epoch = 0.0
+        self._run_last_update_epoch = 0.0
+        self._run_done_units = 0
+        self._run_total_units = 0
+        self._run_plan_name = ""
+        self._run_initial_remaining_s = 0.0
+        self._run_channels = []
+        self._run_display_state = "IDLE"
+        self._run_pulse_period_s = 1.4
+        self._run_state_font_px = 16
+        self._run_finish_font_px = 16
+        self._run_progress_font_px = 15
         from application import MITRApplication
         app = MITRApplication.instance()
         self.re_manager_api = app.re_manager_api
@@ -85,6 +101,7 @@ class MITRMainWindow(PyDMMainWindow):
 
         # Add the button to the navbar
         self.ui.navbar.addWidget(controlsAll)
+        self._setup_run_status_widget(self.ui.navbar)
 
         # controlsAll = CustomRelatedDisplayButtonWrapper(
         #     parent=self,
@@ -205,6 +222,225 @@ class MITRMainWindow(PyDMMainWindow):
             # open_in_new_window=True
         ))
         control_system_menu.addAction(controls_action)
+
+    def _setup_run_status_widget(self, toolbar):
+        prefix = f"{self.macros.get('P', '')}Bluesky:Run:"
+        panel = QWidget(self)
+        self._run_status_panel = panel
+        layout = QHBoxLayout(panel)
+        layout.setContentsMargins(8, 2, 8, 2)
+        layout.setSpacing(8)
+
+        self._run_state_label = QLabel("Run: IDLE", panel)
+        self._run_state_label.setMinimumWidth(0)
+        self._run_state_label.setAlignment(Qt.AlignCenter)
+        self._run_state_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self._run_state_label.setStyleSheet(self._run_state_style("IDLE"))
+
+        self._run_finish_label = QLabel("Finish: --", panel)
+        self._run_finish_label.setMinimumWidth(250)
+        self._run_finish_label.setMaximumWidth(250)
+        self._run_finish_label.setAlignment(Qt.AlignCenter)
+        self._run_finish_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+
+        self._run_progress = QProgressBar(panel)
+        self._run_progress.setMinimumWidth(0)
+        self._run_progress.setMaximumWidth(16777215)
+        self._run_progress.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self._run_progress.setRange(0, 1000)
+        self._run_progress.setValue(0)
+        self._run_progress.setTextVisible(True)
+        self._run_progress.setFormat("No active run")
+        self._run_progress.setStyleSheet(
+            "QProgressBar { border: 1px solid #9ca3af; border-radius: 5px; "
+            "background-color: #f3f4f6; color: #111827; text-align: center; } "
+            "QProgressBar::chunk { background-color: #60a5fa; }"
+        )
+
+        layout.addWidget(self._run_state_label, 1)
+        layout.addWidget(self._run_progress, 1)
+        layout.addWidget(self._run_finish_label, 0)
+        toolbar.addWidget(panel)
+
+        self._run_channels = [
+            PyDMChannel(address=f"ca://{prefix}State", value_slot=self._on_run_state_changed),
+            PyDMChannel(address=f"ca://{prefix}FinishEpoch", value_slot=self._on_run_finish_epoch_changed),
+            PyDMChannel(address=f"ca://{prefix}LastUpdateEpoch", value_slot=self._on_run_last_update_epoch_changed),
+            PyDMChannel(address=f"ca://{prefix}DoneUnits", value_slot=self._on_run_done_units_changed),
+            PyDMChannel(address=f"ca://{prefix}TotalUnits", value_slot=self._on_run_total_units_changed),
+            PyDMChannel(address=f"ca://{prefix}PlanName", value_slot=self._on_run_plan_name_changed),
+        ]
+        for ch in self._run_channels:
+            ch.connect()
+
+        self._run_eta_timer = QTimer(self)
+        self._run_eta_timer.timeout.connect(self._update_run_status_widget)
+        self._run_eta_timer.start(1000)
+
+        self._run_anim_timer = QTimer(self)
+        self._run_anim_timer.timeout.connect(self._tick_run_state_animation)
+        self._run_anim_timer.start(120)
+        QtCore.QTimer.singleShot(0, self._apply_run_widget_scale)
+
+    def _apply_run_widget_scale(self):
+        toolbar = getattr(getattr(self, "ui", None), "navbar", None)
+        if toolbar is None or not hasattr(self, "_run_state_label"):
+            return
+        h = max(18, int(toolbar.height()))
+        self._run_state_font_px = max(10, min(int(h * 0.33), 20))
+        self._run_finish_font_px = max(10, min(int(h * 0.33), 20))
+        self._run_progress_font_px = max(10, min(int(h * 0.30), 18))
+
+        self._run_finish_label.setStyleSheet(
+            f"font-size: {self._run_finish_font_px}px; font-weight: 700; color: #1f2937;"
+        )
+        self._run_progress.setStyleSheet(
+            "QProgressBar { border: 1px solid #9ca3af; border-radius: 5px; "
+            "background-color: #f3f4f6; color: #111827; text-align: center; "
+            f"font-size: {self._run_progress_font_px}px; font-weight: 700; }} "
+            "QProgressBar::chunk { background-color: #60a5fa; }"
+        )
+        self._run_state_label.setStyleSheet(self._run_state_style(self._run_display_state))
+
+    @staticmethod
+    def _blend_hex_rgb(color_a, color_b, t):
+        t = max(0.0, min(1.0, float(t)))
+        ra, ga, ba = color_a
+        rb, gb, bb = color_b
+        r = int(round(ra + (rb - ra) * t))
+        g = int(round(ga + (gb - ga) * t))
+        b = int(round(ba + (bb - ba) * t))
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    def _run_state_style(self, state, pulse_t=0.5):
+        if state == "RUNNING":
+            # Pulse the red badge brightness with a sine profile.
+            bg = self._blend_hex_rgb((252, 165, 165), (254, 226, 226), pulse_t)
+            border = self._blend_hex_rgb((248, 113, 113), (254, 202, 202), pulse_t)
+            return (
+                f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #7f1d1d; "
+                f"background-color: {bg}; border: 1px solid {border}; "
+                "border-radius: 6px; padding: 3px 8px;"
+            )
+
+        palette = {
+            "PAUSED": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #92400e; background-color: #fef3c7; border: 1px solid #fcd34d; border-radius: 6px; padding: 3px 8px;",
+            "DONE": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #065f46; background-color: #d1fae5; border: 1px solid #86efac; border-radius: 6px; padding: 3px 8px;",
+            "ABORTED": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #991b1b; background-color: #fee2e2; border: 1px solid #fca5a5; border-radius: 6px; padding: 3px 8px;",
+            "FAILED": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #991b1b; background-color: #fee2e2; border: 1px solid #fca5a5; border-radius: 6px; padding: 3px 8px;",
+            "CLOSED": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #6b7280; background-color: #f3f4f6; border: 1px solid #d1d5db; border-radius: 6px; padding: 3px 8px;",
+            "STALE": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #92400e; background-color: #fef3c7; border: 1px solid #fcd34d; border-radius: 6px; padding: 3px 8px;",
+            "IDLE": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #334155; background-color: #e2e8f0; border: 1px solid #cbd5e1; border-radius: 6px; padding: 3px 8px;",
+        }
+        return palette.get(state, palette["IDLE"])
+
+    def _tick_run_state_animation(self):
+        if self._run_display_state != "RUNNING":
+            return
+        now = time.monotonic()
+        phase = (2.0 * math.pi * now) / max(self._run_pulse_period_s, 0.2)
+        pulse_t = 0.5 + 0.5 * math.sin(phase)
+        self._run_state_label.setStyleSheet(self._run_state_style("RUNNING", pulse_t=pulse_t))
+
+    @staticmethod
+    def _as_float(value, default=0.0):
+        try:
+            return float(value)
+        except Exception:
+            return float(default)
+
+    @staticmethod
+    def _as_int(value, default=0):
+        try:
+            return int(float(value))
+        except Exception:
+            return int(default)
+
+    def _on_run_state_changed(self, value):
+        state = str(value).strip().upper() if value is not None else "IDLE"
+        if state == "RUNNING" and self._run_state != "RUNNING":
+            self._run_initial_remaining_s = 0.0
+        self._run_state = state or "IDLE"
+        self._update_run_status_widget()
+
+    def _on_run_finish_epoch_changed(self, value):
+        self._run_finish_epoch = self._as_float(value, default=0.0)
+        if self._run_state == "RUNNING" and self._run_finish_epoch > 0:
+            remaining = max(0.0, self._run_finish_epoch - time.time())
+            if self._run_initial_remaining_s <= 0.0 or remaining > self._run_initial_remaining_s:
+                self._run_initial_remaining_s = remaining
+        self._update_run_status_widget()
+
+    def _on_run_last_update_epoch_changed(self, value):
+        self._run_last_update_epoch = self._as_float(value, default=0.0)
+        self._update_run_status_widget()
+
+    def _on_run_done_units_changed(self, value):
+        self._run_done_units = max(0, self._as_int(value, default=0))
+        self._update_run_status_widget()
+
+    def _on_run_total_units_changed(self, value):
+        self._run_total_units = max(0, self._as_int(value, default=0))
+        self._update_run_status_widget()
+
+    def _on_run_plan_name_changed(self, value):
+        self._run_plan_name = str(value).strip() if value is not None else ""
+        self._update_run_status_widget()
+
+    @staticmethod
+    def _format_hms(seconds):
+        sec = max(0, int(round(seconds)))
+        h = sec // 3600
+        m = (sec % 3600) // 60
+        s = sec % 60
+        return f"{h:02d}:{m:02d}:{s:02d}"
+
+    def _update_run_status_widget(self):
+        now = time.time()
+        state = self._run_state
+        stale_timeout_s = 20.0
+        if state == "RUNNING" and self._run_last_update_epoch > 0:
+            if (now - self._run_last_update_epoch) > stale_timeout_s:
+                state = "STALE"
+
+        self._run_display_state = state
+        self._run_state_label.setText(f"Run: {state}")
+        self._run_state_label.setStyleSheet(self._run_state_style(state))
+
+        if self._run_finish_epoch > 0:
+            finish_local = QtCore.QDateTime.fromSecsSinceEpoch(
+                int(self._run_finish_epoch), QtCore.Qt.LocalTime
+            ).toString("yyyy-MM-dd HH:mm:ss")
+            self._run_finish_label.setText(f"Finish: {finish_local}")
+        else:
+            self._run_finish_label.setText("Finish: --")
+
+        if state in ("RUNNING", "PAUSED", "STALE"):
+            remaining = max(0.0, self._run_finish_epoch - now) if self._run_finish_epoch > 0 else 0.0
+            if self._run_total_units > 0:
+                frac = min(1.0, max(0.0, float(self._run_done_units) / float(self._run_total_units)))
+                value = int(round(frac * 1000))
+            elif self._run_initial_remaining_s > 0:
+                frac = 1.0 - min(1.0, remaining / self._run_initial_remaining_s)
+                value = int(round(max(0.0, frac) * 1000))
+            else:
+                value = 0
+            self._run_progress.setRange(0, 1000)
+            self._run_progress.setValue(value)
+            plan_txt = f" [{self._run_plan_name}]" if self._run_plan_name else ""
+            self._run_progress.setFormat(f"{self._format_hms(remaining)} remaining{plan_txt}")
+        elif state == "DONE":
+            self._run_progress.setRange(0, 1000)
+            self._run_progress.setValue(1000)
+            self._run_progress.setFormat("Completed")
+        elif state in ("ABORTED", "FAILED"):
+            self._run_progress.setRange(0, 1000)
+            self._run_progress.setValue(0)
+            self._run_progress.setFormat(state.title())
+        else:
+            self._run_progress.setRange(0, 1000)
+            self._run_progress.setValue(0)
+            self._run_progress.setFormat("No active run")
 
 
     def update_window_title(self):
