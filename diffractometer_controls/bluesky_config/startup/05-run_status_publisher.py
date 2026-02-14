@@ -21,14 +21,43 @@ class _RunStatusPublisher:
         self._run_uid = ""
         self._run_active = False
         self._run_paused = False
+        self._pause_since_epoch = 0.0
         self._run_suspended = False
         self._suspend_since_epoch = 0.0
         self._finish_epoch = 0.0
-        self._finish_epoch_before_suspend = 0.0
+        self._finish_epoch_before_pause = 0.0
 
     def _set_finish_epoch(self, value):
         self._finish_epoch = float(value)
         _safe_caput("FinishEpoch", self._finish_epoch)
+
+    def _set_paused(self, paused, now):
+        paused = bool(paused)
+        if paused == self._run_paused:
+            return
+
+        if paused:
+            self._run_paused = True
+            self._pause_since_epoch = float(now)
+            self._finish_epoch_before_pause = self._finish_epoch
+            # Pause is an estimate hold: finish becomes pending until resume.
+            self._set_finish_epoch(0.0)
+            if self._run_active:
+                _safe_caput("State", "SUSPENDED" if self._run_suspended else "PAUSED")
+            _safe_caput("LastUpdateEpoch", now)
+        else:
+            if self._pause_since_epoch > 0 and self._finish_epoch_before_pause > 0:
+                self._finish_epoch = self._finish_epoch_before_pause + max(
+                    0.0, float(now) - self._pause_since_epoch
+                )
+            self._run_paused = False
+            self._pause_since_epoch = 0.0
+            self._finish_epoch_before_pause = 0.0
+            if self._run_active:
+                _safe_caput("State", "SUSPENDED" if self._run_suspended else "RUNNING")
+            if (not self._run_suspended) and self._finish_epoch > 0:
+                _safe_caput("FinishEpoch", self._finish_epoch)
+            _safe_caput("LastUpdateEpoch", now)
 
     def _set_suspended(self, suspended, now, reason=""):
         suspended = bool(suspended)
@@ -38,23 +67,15 @@ class _RunStatusPublisher:
         if suspended:
             self._run_suspended = True
             self._suspend_since_epoch = float(now)
-            self._finish_epoch_before_suspend = self._finish_epoch
             _safe_caput("Suspended", 1)
             _safe_caput("SuspendSinceEpoch", self._suspend_since_epoch)
             _safe_caput("SuspendReason", str(reason)[:200])
             if self._run_active:
                 _safe_caput("State", "SUSPENDED")
-            self._set_finish_epoch(0.0)
             _safe_caput("LastUpdateEpoch", now)
         else:
-            # Shift ETA by suspension duration so countdown resumes smoothly.
-            if self._suspend_since_epoch > 0 and self._finish_epoch_before_suspend > 0:
-                self._finish_epoch = self._finish_epoch_before_suspend + max(
-                    0.0, float(now) - self._suspend_since_epoch
-                )
             self._run_suspended = False
             self._suspend_since_epoch = 0.0
-            self._finish_epoch_before_suspend = 0.0
             _safe_caput("Suspended", 0)
             _safe_caput("SuspendSinceEpoch", 0.0)
             _safe_caput("SuspendReason", "")
@@ -62,7 +83,7 @@ class _RunStatusPublisher:
                 _safe_caput("State", "PAUSED")
             elif self._run_active:
                 _safe_caput("State", "RUNNING")
-            if self._finish_epoch > 0:
+            if (not self._run_paused) and self._finish_epoch > 0:
                 _safe_caput("FinishEpoch", self._finish_epoch)
             _safe_caput("LastUpdateEpoch", now)
 
@@ -74,9 +95,10 @@ class _RunStatusPublisher:
             self._run_uid = str(doc.get("uid", ""))
             self._run_active = True
             self._run_paused = False
+            self._pause_since_epoch = 0.0
             self._run_suspended = False
             self._suspend_since_epoch = 0.0
-            self._finish_epoch_before_suspend = 0.0
+            self._finish_epoch_before_pause = 0.0
             plan_name = str(doc.get("plan_name", ""))
             est_total_s = float(doc.get("estimated_total_time_s", 0.0) or 0.0)
             est_total_units = int(doc.get("estimated_total_units", 0) or 0)
@@ -124,7 +146,13 @@ class _RunStatusPublisher:
         elif name == "stop":
             self._run_active = False
             self._run_paused = False
-            self._set_suspended(False, now=now)
+            self._pause_since_epoch = 0.0
+            self._finish_epoch_before_pause = 0.0
+            self._run_suspended = False
+            self._suspend_since_epoch = 0.0
+            _safe_caput("Suspended", 0)
+            _safe_caput("SuspendSinceEpoch", 0.0)
+            _safe_caput("SuspendReason", "")
             exit_status = str(doc.get("exit_status", "")).lower()
             run_success = 1 if exit_status == "success" else 0
             _safe_caput("LastRunSuccess", run_success)
@@ -169,13 +197,9 @@ def _state_hook_with_status(*args, _previous_hook=_previous_state_hook, **kwargs
         state_lower = state.lower()
         if _run_status_publisher._run_active:
             if state_lower in ("pausing", "paused", "suspending", "suspended"):
-                _run_status_publisher._run_paused = True
-                _safe_caput("State", "SUSPENDED" if _run_status_publisher._run_suspended else "PAUSED")
-                _safe_caput("LastUpdateEpoch", time.time())
+                _run_status_publisher._set_paused(True, now=time.time())
             elif state_lower in ("running", "executing"):
-                _run_status_publisher._run_paused = False
-                _safe_caput("State", "SUSPENDED" if _run_status_publisher._run_suspended else "RUNNING")
-                _safe_caput("LastUpdateEpoch", time.time())
+                _run_status_publisher._set_paused(False, now=time.time())
             elif state_lower == "idle" and _run_status_publisher._run_paused:
                 # RE may transiently report idle while paused at a checkpoint.
                 _safe_caput("State", "SUSPENDED" if _run_status_publisher._run_suspended else "PAUSED")
