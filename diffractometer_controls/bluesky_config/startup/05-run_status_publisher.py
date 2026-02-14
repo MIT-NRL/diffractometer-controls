@@ -86,10 +86,14 @@ _run_status_publisher = _RunStatusPublisher()
 RE.subscribe(_run_status_publisher)
 
 
-_previous_state_hook = RE.state_hook
+_existing_state_hook = RE.state_hook
+if getattr(_existing_state_hook, "_run_status_wrapper", False):
+    _previous_state_hook = getattr(_existing_state_hook, "_run_status_previous", None)
+else:
+    _previous_state_hook = _existing_state_hook
 
 
-def _state_hook_with_status(*args, **kwargs):
+def _state_hook_with_status(*args, _previous_hook=_previous_state_hook, **kwargs):
     state = kwargs.get("state", None)
     if state is None:
         str_args = [a for a in args if isinstance(a, str)]
@@ -111,11 +115,13 @@ def _state_hook_with_status(*args, **kwargs):
                 _safe_caput("State", "PAUSED")
                 _safe_caput("LastUpdateEpoch", time.time())
 
-    if callable(_previous_state_hook):
-        return _previous_state_hook(*args, **kwargs)
+    if callable(_previous_hook):
+        return _previous_hook(*args, **kwargs)
     return None
 
 
+_state_hook_with_status._run_status_wrapper = True
+_state_hook_with_status._run_status_previous = _previous_state_hook
 RE.state_hook = _state_hook_with_status
 
 atexit.register(_mark_worker_closed)
