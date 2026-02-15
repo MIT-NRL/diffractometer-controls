@@ -20,7 +20,7 @@ class ReactorPowerDisplay(display.MITRDisplay):
         self._power_value_label = None
         self._operations_button = None
         self._suspender_checkbox = None
-        self._suspender_installed_channel = None
+        self._suspender_enable_channel = None
         self._suspender_enable_pv = ""
         self._suspender_checkbox_updating = False
         super().__init__(parent, args, macros, ui_filename)
@@ -152,12 +152,30 @@ class ReactorPowerDisplay(display.MITRDisplay):
             return
         if not self._suspender_enable_pv:
             return
+        wrote = False
         try:
-            caput(self._suspender_enable_pv, 1 if checked else 0, wait=False)
+            wrote = bool(caput(self._suspender_enable_pv, 1 if checked else 0, wait=False))
+        except Exception:
+            wrote = False
+        if wrote:
+            return
+        # Fallback if CA write is unavailable from this host.
+        try:
+            from application import MITRApplication
+
+            app = MITRApplication.instance()
+            re_api = getattr(app, "re_manager_api", None)
+            if re_api is not None:
+                cmd = (
+                    "RE.install_suspender(reactor_power_suspender)"
+                    if checked
+                    else "RE.remove_suspender(reactor_power_suspender)"
+                )
+                re_api.script_upload(cmd)
         except Exception:
             pass
 
-    def _on_suspender_installed_changed(self, value):
+    def _on_suspender_enable_changed(self, value):
         checked = False
         if isinstance(value, str):
             checked = value.strip().lower() in ("1", "true", "yes", "on")
@@ -203,12 +221,12 @@ class ReactorPowerDisplay(display.MITRDisplay):
             return
 
         self._suspender_enable_pv = f"{prefix}Bluesky:SuspenderEnable"
-        installed_address = f"ca://{prefix}Bluesky:SuspenderInstalled"
-        self._suspender_installed_channel = PyDMChannel(
-            address=installed_address,
-            value_slot=self._on_suspender_installed_changed,
+        enable_address = f"ca://{prefix}Bluesky:SuspenderEnable"
+        self._suspender_enable_channel = PyDMChannel(
+            address=enable_address,
+            value_slot=self._on_suspender_enable_changed,
         )
-        self._suspender_installed_channel.connect()
+        self._suspender_enable_channel.connect()
 
     def _fit_groupbox_title_font(self):
         if not getattr(self, "_group_box", None):
