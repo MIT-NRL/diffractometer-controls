@@ -92,7 +92,9 @@ class SingleTriggerPause(SingleTrigger):
         self._acq_status = super().trigger()
         self._acq_in_progress = True
         try:
-            self._acq_status.add_callback(lambda **kwargs: setattr(self, "_acq_in_progress", False))
+            self._acq_status.add_callback(
+                lambda status: setattr(self, "_acq_in_progress", False)
+            )
         except Exception:
             pass
         return self._acq_status
