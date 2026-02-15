@@ -472,7 +472,7 @@ class MITRMainWindow(PyDMMainWindow):
 
         if state in ("SUSPENDED", "PAUSED"):
             self._run_finish_label.setText("Finish: pending")
-        elif self._run_finish_epoch > 0:
+        elif state in ("RUNNING", "STALE") and self._run_finish_epoch > 0:
             finish_local = QtCore.QDateTime.fromSecsSinceEpoch(
                 int(self._run_finish_epoch), QtCore.Qt.LocalTime
             ).toString("yyyy-MM-dd HH:mm:ss")
