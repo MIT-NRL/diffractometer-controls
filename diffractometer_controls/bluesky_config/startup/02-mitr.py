@@ -31,6 +31,7 @@ reactor_power_suspender_enable = EpicsSignal(
 reactor_power_suspender_installed = EpicsSignal(
     "4dh4:Bluesky:SuspenderInstalled", name="reactor_power_suspender_installed"
 )
+_suspender_enable_feedback_write = False
 
 
 def _is_reactor_power_suspender_installed():
@@ -57,12 +58,20 @@ def _get_reactor_power_suspenders():
 
 
 def _publish_reactor_power_suspender_state():
+    global _suspender_enable_feedback_write
+    installed = int(_is_reactor_power_suspender_installed())
     try:
-        reactor_power_suspender_installed.put(
-            int(_is_reactor_power_suspender_installed()), wait=False
-        )
+        reactor_power_suspender_installed.put(installed, wait=False)
     except Exception:
         pass
+    # Keep command PV synced to actual installed state so GUIs reflect truth.
+    try:
+        _suspender_enable_feedback_write = True
+        reactor_power_suspender_enable.put(installed, wait=False)
+    except Exception:
+        pass
+    finally:
+        _suspender_enable_feedback_write = False
 
 
 def _set_reactor_power_suspender_enabled(enable):
@@ -104,6 +113,8 @@ def _coerce_enable_value(value):
 
 
 def _on_reactor_power_suspender_enable_changed(value=None, **kwargs):
+    if _suspender_enable_feedback_write:
+        return
     enable = _coerce_enable_value(value)
     if enable is None:
         return
