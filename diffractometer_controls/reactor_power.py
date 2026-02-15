@@ -123,13 +123,29 @@ class ReactorPowerDisplay(display.MITRDisplay):
         QtCore.QTimer.singleShot(100, _sync_height)
 
     def _pv_prefix(self):
+        prefix = ""
         try:
             macros = self.macros() or {}
             if isinstance(macros, dict):
-                return str(macros.get("P", "") or "")
+                prefix = str(macros.get("P", "") or "").strip()
         except Exception:
             pass
-        return ""
+        if not prefix:
+            try:
+                from application import MITRApplication
+
+                app = MITRApplication.instance()
+                main_window = getattr(app, "main_window", None)
+                main_macros = getattr(main_window, "macros", None)
+                if isinstance(main_macros, dict):
+                    prefix = str(main_macros.get("P", "") or "").strip()
+            except Exception:
+                pass
+        if not prefix:
+            return ""
+        if not prefix.endswith(":"):
+            prefix = f"{prefix}:"
+        return prefix
 
     def _on_suspender_checkbox_toggled(self, checked):
         if self._suspender_checkbox_updating:
@@ -181,6 +197,11 @@ class ReactorPowerDisplay(display.MITRDisplay):
         self._suspender_checkbox = checkbox
 
         prefix = self._pv_prefix()
+        if not prefix:
+            checkbox.setEnabled(False)
+            checkbox.setToolTip("Missing macro P: cannot resolve suspender PV prefix.")
+            return
+
         self._suspender_enable_pv = f"{prefix}Bluesky:SuspenderEnable"
         installed_address = f"ca://{prefix}Bluesky:SuspenderInstalled"
         self._suspender_installed_channel = PyDMChannel(
