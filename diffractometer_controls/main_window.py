@@ -585,18 +585,16 @@ class MITRMainWindow(PyDMMainWindow):
 
     def _set_reactor_power_suspender_enabled(self, enabled):
         prefix = f"{self.macros.get('P', '')}Bluesky:SuspenderEnable"
+        wrote = False
         try:
-            caput(prefix, 1 if enabled else 0, wait=False)
-            return
+            wrote = bool(caput(prefix, 1 if enabled else 0, wait=False))
         except Exception:
-            pass
+            wrote = False
+        if wrote:
+            return
 
         # Fallback: direct RE script command if CA path is unavailable.
-        cmd = (
-            "RE.install_suspender(reactor_power_suspender)"
-            if enabled
-            else "RE.remove_suspender(reactor_power_suspender)"
-        )
+        cmd = f"_queue_set_reactor_power_suspender({bool(enabled)})"
         self.re_manager_api.script_upload(cmd)
 
     def control_servers(self, server_name, command):

@@ -166,11 +166,7 @@ class ReactorPowerDisplay(display.MITRDisplay):
             app = MITRApplication.instance()
             re_api = getattr(app, "re_manager_api", None)
             if re_api is not None:
-                cmd = (
-                    "RE.install_suspender(reactor_power_suspender)"
-                    if checked
-                    else "RE.remove_suspender(reactor_power_suspender)"
-                )
+                cmd = f"_queue_set_reactor_power_suspender({bool(checked)})"
                 re_api.script_upload(cmd)
         except Exception:
             pass
