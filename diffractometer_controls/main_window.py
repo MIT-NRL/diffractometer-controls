@@ -595,7 +595,12 @@ class MITRMainWindow(PyDMMainWindow):
 
         # Fallback: direct RE script command if CA path is unavailable.
         cmd = f"_queue_set_reactor_power_suspender({bool(enabled)})"
-        self.re_manager_api.script_upload(cmd)
+        try:
+            # Must run in background to be accepted while a plan is active.
+            self.re_manager_api.script_upload(cmd, run_in_background=True)
+        except TypeError:
+            # Compatibility with older API signatures.
+            self.re_manager_api.script_upload(cmd)
 
     def control_servers(self, server_name, command):
         """

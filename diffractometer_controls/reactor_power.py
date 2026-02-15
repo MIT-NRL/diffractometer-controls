@@ -167,7 +167,12 @@ class ReactorPowerDisplay(display.MITRDisplay):
             re_api = getattr(app, "re_manager_api", None)
             if re_api is not None:
                 cmd = f"_queue_set_reactor_power_suspender({bool(checked)})"
-                re_api.script_upload(cmd)
+                try:
+                    # Must run in background to be accepted while a plan is active.
+                    re_api.script_upload(cmd, run_in_background=True)
+                except TypeError:
+                    # Compatibility with older API signatures.
+                    re_api.script_upload(cmd)
         except Exception:
             pass
 
