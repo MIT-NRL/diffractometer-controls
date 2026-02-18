@@ -201,8 +201,9 @@ class ReactorPowerDisplay(display.MITRDisplay):
         if layout is None:
             return
 
-        checkbox = QCheckBox("Suspender Enabled", self)
+        checkbox = QCheckBox("Suspender", self)
         checkbox.setChecked(True)
+        checkbox.setStyleSheet("QCheckBox { margin-bottom: 4px; }")
         checkbox.toggled.connect(self._on_suspender_checkbox_toggled)
 
         # Place just above the Operations button.
@@ -213,6 +214,7 @@ class ReactorPowerDisplay(display.MITRDisplay):
             layout.insertWidget(idx, checkbox)
         else:
             layout.addWidget(checkbox)
+        layout.setAlignment(checkbox, QtCore.Qt.AlignHCenter)
         self._suspender_checkbox = checkbox
 
         prefix = self._pv_prefix()

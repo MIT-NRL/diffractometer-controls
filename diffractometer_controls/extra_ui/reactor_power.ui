@@ -23,6 +23,9 @@
    </size>
   </property>
   <layout class="QVBoxLayout" name="outerLayout">
+   <property name="spacing">
+    <number>2</number>
+   </property>
    <property name="leftMargin">
     <number>2</number>
    </property>
@@ -46,13 +49,13 @@
      <property name="minimumSize">
       <size>
        <width>0</width>
-       <height>194</height>
+       <height>196</height>
       </size>
      </property>
      <property name="maximumSize">
       <size>
        <width>16777215</width>
-       <height>194</height>
+       <height>196</height>
       </size>
      </property>
      <property name="styleSheet">
@@ -75,16 +78,16 @@ QGroupBox::title {
        <number>2</number>
       </property>
       <property name="leftMargin">
-       <number>4</number>
+       <number>1</number>
       </property>
       <property name="topMargin">
-       <number>3</number>
+       <number>1</number>
       </property>
       <property name="rightMargin">
-       <number>4</number>
+       <number>1</number>
       </property>
       <property name="bottomMargin">
-       <number>20</number>
+       <number>1</number>
       </property>
       <item>
        <widget class="PyDMLabel" name="powerValueLabel">

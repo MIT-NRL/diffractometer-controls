@@ -31,16 +31,16 @@
     <property name="bottomMargin">
      <number>0</number>
     </property>
-     <item>
-      <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay">
+     <item alignment="Qt::AlignBottom">
+     <widget class="PyDMEmbeddedDisplay" name="PyDMEmbeddedDisplay">
        <property name="sizePolicy">
-        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+        <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
          <horstretch>0</horstretch>
          <verstretch>0</verstretch>
         </sizepolicy>
        </property>
        <property name="minimumSize">
-        <size>
+       <size>
          <width>150</width>
          <height>200</height>
         </size>
@@ -65,10 +65,10 @@
        </property>
       </widget>
      </item>
-     <item>
-      <widget class="PyDMEmbeddedDisplay" name="RE_embedded_display">
+     <item alignment="Qt::AlignBottom">
+     <widget class="PyDMEmbeddedDisplay" name="RE_embedded_display">
        <property name="sizePolicy">
-        <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+        <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
          <horstretch>0</horstretch>
          <verstretch>0</verstretch>
         </sizepolicy>
@@ -88,8 +88,14 @@
        <property name="toolTip">
         <string/>
        </property>
+       <property name="styleSheet">
+        <string notr="true"></string>
+       </property>
+       <property name="frameShape">
+        <enum>QFrame::NoFrame</enum>
+       </property>
        <property name="filename" stdset="0">
-        <string>re_screen.py</string>
+        <string>re_control_panel.py</string>
        </property>
        <property name="loadWhenShown" stdset="0">
         <bool>false</bool>
