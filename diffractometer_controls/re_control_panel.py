@@ -14,14 +14,14 @@ from bluesky_widgets.qt.run_engine_client import (
 
 import display
 
-class REScreen(display.MITRDisplay):
-    def __init__(self, parent=None, args=None, macros=None, ui_filename='re_screen.ui'):
+class REControlPanel(display.MITRDisplay):
+    def __init__(self, parent=None, args=None, macros=None, ui_filename='re_control_panel.ui'):
         super().__init__(parent, args, macros, ui_filename)
-        # print("REScreen here")
+        # print("REControlPanel here")
         # self.customize_ui()
 
     def ui_filename(self):
-        return 're_screen.ui'
+        return 're_control_panel.ui'
 
     def ui_filepath(self):
         return super().ui_filepath()
@@ -245,19 +245,21 @@ class REScreen(display.MITRDisplay):
                 frame.layout().setSpacing(pad)
                 frame.layout().setContentsMargins(pad, pad, pad, pad)
 
+        # Keep outer containers flush. Additional outer margins combined with
+        # fixed panel heights (200) can clip the bottom of embedded widgets.
         if self.ui.layout():
-            self.ui.layout().setSpacing(pad)
-            self.ui.layout().setContentsMargins(pad, pad, pad, pad)
+            self.ui.layout().setSpacing(0)
+            self.ui.layout().setContentsMargins(0, 0, 0, 0)
 
         top_hbox = getattr(self.ui, "horizontalLayout", None)
         if top_hbox is not None:
-            top_hbox.setSpacing(pad)
-            top_hbox.setContentsMargins(pad, pad, pad, pad)
+            top_hbox.setSpacing(0)
+            top_hbox.setContentsMargins(0, 0, 0, 0)
 
         top_grid = getattr(self.ui, "gridLayout", None)
         if top_grid is not None:
-            top_grid.setSpacing(pad)
-            top_grid.setContentsMargins(pad, pad, pad, pad)
+            top_grid.setSpacing(0)
+            top_grid.setContentsMargins(0, 0, 0, 0)
 
     def _style_groupbox_titles(self):
         """Make panel titles larger and centered."""

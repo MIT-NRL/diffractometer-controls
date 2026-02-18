@@ -18,17 +18,32 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout_2">
    <item>
-    <layout class="QHBoxLayout" name="horizontalLayout_2">
-     <item>
-      <widget class="PyDMEmbeddedDisplay" name="ReactorPower_embedded_display">
+   <layout class="QHBoxLayout" name="horizontalLayout_2">
+    <property name="spacing">
+     <number>0</number>
+    </property>
+    <property name="leftMargin">
+     <number>0</number>
+    </property>
+    <property name="topMargin">
+     <number>0</number>
+    </property>
+    <property name="rightMargin">
+     <number>0</number>
+    </property>
+    <property name="bottomMargin">
+     <number>0</number>
+    </property>
+     <item alignment="Qt::AlignBottom">
+     <widget class="PyDMEmbeddedDisplay" name="ReactorPower_embedded_display">
        <property name="sizePolicy">
-        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+        <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
          <horstretch>0</horstretch>
          <verstretch>0</verstretch>
         </sizepolicy>
        </property>
        <property name="minimumSize">
-        <size>
+       <size>
          <width>150</width>
          <height>200</height>
         </size>
@@ -53,10 +68,10 @@
        </property>
       </widget>
      </item>
-     <item>
-      <widget class="PyDMEmbeddedDisplay" name="Scan_display">
+     <item alignment="Qt::AlignBottom">
+     <widget class="PyDMEmbeddedDisplay" name="Scan_display">
        <property name="sizePolicy">
-        <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+        <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
          <horstretch>0</horstretch>
          <verstretch>0</verstretch>
         </sizepolicy>
@@ -76,11 +91,17 @@
        <property name="toolTip">
         <string/>
        </property>
+       <property name="styleSheet">
+        <string notr="true"/>
+       </property>
+       <property name="frameShape">
+        <enum>QFrame::NoFrame</enum>
+       </property>
        <property name="macros" stdset="0">
         <string>S=scan1</string>
        </property>
        <property name="filename" stdset="0">
-        <string>re_screen.py</string>
+        <string>re_control_panel.py</string>
        </property>
        <property name="loadWhenShown" stdset="0">
         <bool>false</bool>
