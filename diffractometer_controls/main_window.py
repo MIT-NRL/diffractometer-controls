@@ -551,6 +551,27 @@ class MITRMainWindow(PyDMMainWindow):
             title += " [Read Only Mode]"
         self.setWindowTitle(title)
 
+    def cleanup_before_close(self):
+        """Stop local timers/channels so app shutdown is not delayed."""
+        for timer_name in ("_run_eta_timer", "_run_anim_timer"):
+            timer = getattr(self, timer_name, None)
+            if timer is not None:
+                try:
+                    timer.stop()
+                except Exception:
+                    pass
+
+        for channel in getattr(self, "_run_channels", []):
+            try:
+                channel.disconnect()
+            except Exception:
+                pass
+        self._run_channels = []
+
+    def closeEvent(self, event):
+        self.cleanup_before_close()
+        super().closeEvent(event)
+
     def reset_process(self, process_name):
         """
         Resets a given process using systemctl.

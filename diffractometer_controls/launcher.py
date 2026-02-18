@@ -1,10 +1,13 @@
 import argparse
 import cProfile
+import inspect
 import logging
 import os
 import platform
 import pstats
 import sys
+import threading
+import time
 import faulthandler
 from pathlib import Path
 from qtpy import QtCore, QtGui
@@ -60,6 +63,43 @@ def main():
     import pydm
     from application import MITRApplication
     from pydm.utilities.macro import parse_macro_string
+
+    from bluesky_widgets.qt import threading as bw_threading
+
+    def _patch_bluesky_worker_safe_shutdown():
+        """
+        Avoid RuntimeError on app shutdown if worker signals are deleted
+        before a worker thread finishes and emits.
+        """
+        worker_cls = bw_threading.WorkerBase
+        if getattr(worker_cls, "_dc_safe_shutdown_patch_applied", False):
+            return
+
+        def _safe_emit(worker, signal_name, *args):
+            try:
+                signal = getattr(worker._signals, signal_name, None)
+                if signal is None:
+                    return
+                signal.emit(*args)
+            except RuntimeError as exc:
+                msg = str(exc)
+                if "has been deleted" not in msg:
+                    raise
+
+        def _patched_run(self):
+            _safe_emit(self, "started")
+            self._running = True
+            try:
+                result = self.work()
+                _safe_emit(self, "returned", result)
+            except Exception as exc:
+                _safe_emit(self, "errored", exc)
+            _safe_emit(self, "finished")
+
+        worker_cls.run = _patched_run
+        worker_cls._dc_safe_shutdown_patch_applied = True
+
+    _patch_bluesky_worker_safe_shutdown()
 
     parser = argparse.ArgumentParser(description="Python Display Manager")
     parser.add_argument(
@@ -188,14 +228,89 @@ def main():
 
     pydm.utilities.shortcuts.install_connection_inspector(parent=app.main_window)
 
-    def quit_print():
+    from bluesky_widgets.qt.threading import wait_for_workers_to_quit
+
+    _shutdown_started = False
+
+    def _wait_for_workers_bounded(timeout_ms=750):
+        """Call wait_for_workers_to_quit without risking long UI-blocking hangs."""
+        try:
+            sig = inspect.signature(wait_for_workers_to_quit)
+            params = list(sig.parameters.values())
+        except Exception:
+            params = []
+
+        try:
+            if params:
+                p0 = params[0]
+                name = p0.name.lower()
+                default = p0.default
+                timeout_arg = timeout_ms / 1000.0
+
+                # Best-effort unit inference. Favor short, safe waits.
+                if "msec" in name or "millisecond" in name:
+                    timeout_arg = int(timeout_ms)
+                elif "sec" in name:
+                    timeout_arg = timeout_ms / 1000.0
+                elif isinstance(default, (int, float)):
+                    if default >= 100:
+                        timeout_arg = int(timeout_ms)
+                    else:
+                        timeout_arg = timeout_ms / 1000.0
+
+                wait_for_workers_to_quit(timeout_arg)
+                return True
+        except RuntimeError:
+            # Timed out waiting for workers to exit.
+            return False
+        except Exception:
+            pass
+
+        # Unknown signature: run in daemon thread and wait briefly.
+        done = False
+
+        def _waiter():
+            nonlocal done
+            try:
+                wait_for_workers_to_quit()
+            except Exception:
+                pass
+            done = True
+
+        waiter = threading.Thread(target=_waiter, daemon=True)
+        waiter.start()
+        waiter.join(timeout=timeout_ms / 1000.0)
+        return done
+
+    def _on_about_to_quit():
+        nonlocal _shutdown_started
+        if _shutdown_started:
+            return
+        _shutdown_started = True
         print("About to quit")
 
-    app.aboutToQuit.connect(quit_print)
+        main_window = getattr(app, "main_window", None)
+        cleanup = getattr(main_window, "cleanup_before_close", None)
+        if callable(cleanup):
+            try:
+                cleanup()
+            except Exception:
+                pass
 
-    from bluesky_widgets.qt.threading import wait_for_workers_to_quit, active_thread_count
+        dispatcher = getattr(app, "re_dispatcher", None)
+        if dispatcher is not None:
+            try:
+                dispatcher.stop()
+            except Exception:
+                pass
 
-    app.aboutToQuit.connect(wait_for_workers_to_quit)
+        t0 = time.monotonic()
+        workers_done = _wait_for_workers_bounded(timeout_ms=750)
+        elapsed_ms = (time.monotonic() - t0) * 1000.0
+        if (not workers_done) or elapsed_ms > 900:
+            print(f"Worker shutdown exceeded target timeout ({elapsed_ms:.0f} ms).")
+
+    app.aboutToQuit.connect(_on_about_to_quit)
 
     exit_code = app.exec_()
 
