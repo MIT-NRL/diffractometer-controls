@@ -70,6 +70,7 @@ class MITRMainWindow(PyDMMainWindow):
         self._run_state_font_px = 16
         self._run_finish_font_px = 16
         self._run_progress_font_px = 15
+        self._run_is_dark_mode = False
         from application import MITRApplication
         app = MITRApplication.instance()
         self.re_manager_api = app.re_manager_api
@@ -254,8 +255,8 @@ class MITRMainWindow(PyDMMainWindow):
         self._run_state_label.setStyleSheet(self._run_state_style("IDLE"))
 
         self._run_finish_label = QLabel("Finish: --", panel)
-        self._run_finish_label.setMinimumWidth(250)
-        self._run_finish_label.setMaximumWidth(250)
+        self._run_finish_label.setMinimumWidth(300)
+        self._run_finish_label.setMaximumWidth(300)
         self._run_finish_label.setAlignment(Qt.AlignCenter)
         self._run_finish_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
 
@@ -267,11 +268,7 @@ class MITRMainWindow(PyDMMainWindow):
         self._run_progress.setValue(0)
         self._run_progress.setTextVisible(True)
         self._run_progress.setFormat("No active run")
-        self._run_progress.setStyleSheet(
-            "QProgressBar { border: 1px solid #9ca3af; border-radius: 5px; "
-            "background-color: #f3f4f6; color: #111827; text-align: center; } "
-            "QProgressBar::chunk { background-color: #60a5fa; }"
-        )
+        self._run_progress.setStyleSheet(self._run_progress_style())
 
         layout.addWidget(self._run_state_label, 1)
         layout.addWidget(self._run_progress, 1)
@@ -300,24 +297,42 @@ class MITRMainWindow(PyDMMainWindow):
         self._run_anim_timer.start(50)
         QtCore.QTimer.singleShot(0, self._apply_run_widget_scale)
 
-    def _apply_run_widget_scale(self):
-        toolbar = getattr(getattr(self, "ui", None), "navbar", None)
-        if toolbar is None or not hasattr(self, "_run_state_label"):
-            return
-        h = max(18, int(toolbar.height()))
-        self._run_state_font_px = max(10, min(int(h * 0.33), 20))
-        self._run_finish_font_px = max(10, min(int(h * 0.33), 20))
-        self._run_progress_font_px = max(10, min(int(h * 0.30), 18))
+    def _is_dark_mode(self):
+        app = QApplication.instance()
+        palette = app.palette() if app is not None else self.palette()
+        window_color = palette.color(QtGui.QPalette.Window)
+        return window_color.lightness() < 128
 
-        self._run_finish_label.setStyleSheet(
-            f"font-size: {self._run_finish_font_px}px; font-weight: 700; color: #1f2937;"
-        )
-        self._run_progress.setStyleSheet(
+    def _run_progress_style(self):
+        if self._run_is_dark_mode:
+            return (
+                "QProgressBar { border: 1px solid #4b5563; border-radius: 5px; "
+                "background-color: #111827; color: #f9fafb; text-align: center; "
+                f"font-size: {self._run_progress_font_px}px; font-weight: 700; }} "
+                "QProgressBar::chunk { background-color: #3b82f6; }"
+            )
+        return (
             "QProgressBar { border: 1px solid #9ca3af; border-radius: 5px; "
             "background-color: #f3f4f6; color: #111827; text-align: center; "
             f"font-size: {self._run_progress_font_px}px; font-weight: 700; }} "
             "QProgressBar::chunk { background-color: #60a5fa; }"
         )
+
+    def _apply_run_widget_scale(self):
+        toolbar = getattr(getattr(self, "ui", None), "navbar", None)
+        if toolbar is None or not hasattr(self, "_run_state_label"):
+            return
+        self._run_is_dark_mode = self._is_dark_mode()
+        h = max(18, int(toolbar.height()))
+        self._run_state_font_px = max(10, min(int(h * 0.33), 20))
+        self._run_finish_font_px = max(10, min(int(h * 0.33), 20))
+        self._run_progress_font_px = max(10, min(int(h * 0.30), 18))
+
+        finish_color = "#e5e7eb" if self._run_is_dark_mode else "#1f2937"
+        self._run_finish_label.setStyleSheet(
+            f"font-size: {self._run_finish_font_px}px; font-weight: 700; color: {finish_color};"
+        )
+        self._run_progress.setStyleSheet(self._run_progress_style())
         self._run_state_label.setStyleSheet(self._run_state_style(self._run_display_state))
 
     @staticmethod
@@ -448,6 +463,11 @@ class MITRMainWindow(PyDMMainWindow):
 
     def _update_run_status_widget(self):
         now = time.time()
+        dark_mode = self._is_dark_mode()
+        if dark_mode != self._run_is_dark_mode:
+            self._run_is_dark_mode = dark_mode
+            self._apply_run_widget_scale()
+
         state = self._run_state
         if self._run_suspended and state in ("RUNNING", "PAUSED", "STALE", "SUSPENDED"):
             state = "SUSPENDED"
