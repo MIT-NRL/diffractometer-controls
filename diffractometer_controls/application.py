@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import QStyleFactory
 from qtpy import QtCore, QtWidgets
 from qtpy.QtCore import Signal
 from qtpy.QtWidgets import QAction
+from bluesky_widgets.qt import run_engine_client as bw_run_engine_client
 
 from main_window import MITRMainWindow
 from bluesky_widgets.models.run_engine_client import RunEngineClient
@@ -32,6 +33,46 @@ pg.setConfigOption("foreground", (0, 0, 0))
 
 
 class MITRApplication(PyDMApplication):
+    @staticmethod
+    def _patch_bluesky_button_widths():
+        """
+        Patch bluesky_widgets PushButtonMinimumWidth to compute width using
+        Qt style metrics (more reliable on macOS than deprecated fm.width()).
+        """
+        pb_cls = bw_run_engine_client.PushButtonMinimumWidth
+        if getattr(pb_cls, "_dc_width_patch_applied", False):
+            return
+
+        def _button_width(button):
+            option = QtWidgets.QStyleOptionButton()
+            option.initFrom(button)
+            option.text = button.text()
+            option.icon = button.icon()
+            option.iconSize = button.iconSize()
+            fm = button.fontMetrics()
+            contents = QtCore.QSize(max(fm.horizontalAdvance(button.text()), 0), fm.height())
+            width = button.style().sizeFromContents(
+                QtWidgets.QStyle.CT_PushButton, option, contents, button
+            ).width()
+            if button.menu() is not None:
+                width += button.style().pixelMetric(
+                    QtWidgets.QStyle.PM_MenuButtonIndicator, option, button
+                )
+            # Keep width text-driven to avoid oversized macOS minimum hints.
+            return max(width + 2, fm.horizontalAdvance(button.text()) + 12)
+
+        def _patched_init(self, *args, **kwargs):
+            QtWidgets.QPushButton.__init__(self, *args, **kwargs)
+
+            def _apply():
+                self.setFixedWidth(_button_width(self))
+
+            _apply()
+            # Apply again after style polish; this fixes macOS sizing drift.
+            QtCore.QTimer.singleShot(0, _apply)
+
+        pb_cls.__init__ = _patched_init
+        pb_cls._dc_width_patch_applied = True
 
     def __init__(self, ipaddress: str = 'localhost', use_main_window=False, *args, **kwargs):
         # Instantiate the parent class
@@ -42,6 +83,7 @@ class MITRApplication(PyDMApplication):
         self.re_client = RunEngineClient(zmq_control_addr=f'tcp://{ipaddress}:60615', zmq_info_addr=f'tcp://{ipaddress}:60625')
         self.re_dispatcher = RemoteDispatcher(f'{ipaddress}:5568')
         self.re_manager_api = REManagerAPI(zmq_control_addr=f'tcp://{ipaddress}:60615', zmq_info_addr=f'tcp://{ipaddress}:60625')
+        self._patch_bluesky_button_widths()
 
         super().__init__(ui_file='main_screen.ui', use_main_window=use_main_window, *args, **kwargs)
  
