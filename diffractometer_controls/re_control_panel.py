@@ -303,22 +303,10 @@ class REControlPanel(display.MITRDisplay):
                 widget.layout().setContentsMargins(1, 1, 1, 1)
                 widget.layout().setSpacing(2)
 
-        # Manager widget can report a larger implicit height due to inner groupbox margins.
-        for group_box in self._re_manager.findChildren(QGroupBox):
+        # Keep all groupboxes on the same normalized spacing model.
+        for group_box in self.findChildren(QGroupBox):
             group_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
             group_box.setMaximumHeight(widget_height)
-            # Keep controls clear of the groupbox title area.
-            if group_box.layout():
-                group_box.layout().setContentsMargins(6, 10, 6, 4)
-                group_box.layout().setSpacing(4)
-
-        # Lower status indicator rows within "RE Manager Status" groupbox.
-        for group_box in self._re_status.findChildren(QGroupBox):
-            group_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-            group_box.setMaximumHeight(widget_height)
-            if group_box.layout():
-                left, _, right, bottom = group_box.layout().getContentsMargins()
-                group_box.layout().setContentsMargins(left, 20, right, bottom)
 
     def customize_ui(self):
         # button = self.ui.pushButton
