@@ -231,28 +231,6 @@ class ReactorPowerDisplay(display.MITRDisplay):
         )
         self._suspender_enable_channel.connect()
 
-    def _fit_groupbox_title_font(self):
-        if not getattr(self, "_group_box", None):
-            return
-        title = self._group_box.title() or "Reactor Power"
-        available_width = max(self._group_box.width() - 16, 40)
-        chosen_size = 10
-        for point_size in range(14, 9, -1):
-            font = QFont(self.font())
-            font.setPointSize(point_size)
-            font.setBold(True)
-            if QFontMetrics(font).horizontalAdvance(title) <= available_width:
-                chosen_size = point_size
-                break
-        self._group_box.setStyleSheet(
-            "QGroupBox { "
-            f"font-size: {chosen_size}px; font-weight: 700; margin-top: 8px; "
-            "} "
-            "QGroupBox::title { "
-            "subcontrol-origin: margin; subcontrol-position: top center; padding: 0 4px; "
-            "}"
-        )
-
     def _fit_power_value_font(self):
         if not getattr(self, "_power_value_label", None):
             return
@@ -278,7 +256,6 @@ class ReactorPowerDisplay(display.MITRDisplay):
         self._power_value_label.setFont(fitted_font)
 
     def _apply_autofit(self):
-        self._fit_groupbox_title_font()
         self._fit_power_value_font()
 
     def resizeEvent(self, event):
