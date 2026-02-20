@@ -1754,7 +1754,7 @@ background-color: rgb(25, 102, 255);</string>
           <stringlist>
            <string>URLDriver.ui</string>
            <string>URLDriverSetup.ui</string>
-           <string>cam.ui</string>
+           <string>cam_url_display.py</string>
           </stringlist>
          </property>
          <property name="titles" stdset="0">
@@ -1771,7 +1771,7 @@ background-color: rgb(25, 102, 255);</string>
           <stringlist>
            <string>R=camURL:</string>
            <string>R=camURL:</string>
-           <string>R=camURL:,im=urlimage1:</string>
+           <string>P=${P},R=camURL:,im=urlimage1:</string>
           </stringlist>
          </property>
          <property name="openInNewWindow" stdset="0">
