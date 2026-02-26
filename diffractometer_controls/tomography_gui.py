@@ -31,6 +31,11 @@ from pydm.widgets.channel import PyDMChannel
 from bluesky_widgets.models.run_engine_client import RunEngineClient
 import display
 
+try:
+    import pyqtgraph as pg
+except Exception:
+    pg = None
+
 
 class MainScreen(display.MITRDisplay):
     re_dispatcher: RemoteDispatcher
@@ -71,6 +76,14 @@ class MainScreen(display.MITRDisplay):
         self._acquire_time_channel = None
         self._acquire_time_total = 0.0
         self._time_remaining_value = 0.0
+        self._histogram_curve = None
+        self._histogram_plot_item = None
+        self._histogram_low_line = None
+        self._histogram_high_line = None
+        self._histogram_stats_label = None
+        self._histogram_update_pending = False
+        self._histogram_max_samples = 200000
+        self._histogram_bins = 128
 
         image_view = self.ui.cameraImage
         self._install_display_controls(image_view)
@@ -469,7 +482,8 @@ class MainScreen(display.MITRDisplay):
             self.colormap_combo.addItem(label)
         self.colormap_combo.currentIndexChanged.connect(self._on_colormap_changed)
         self.colormap_combo.setMinimumWidth(140)
-        controls_layout.addWidget(QtWidgets.QLabel("Color map"))
+        color_map_label = QtWidgets.QLabel("Color map")
+        controls_layout.addWidget(color_map_label)
         controls_layout.addWidget(self.colormap_combo)
         current_cmap = image_view.property("colorMap")
         for i, (_, value) in enumerate(self._colormap_options):
@@ -477,15 +491,21 @@ class MainScreen(display.MITRDisplay):
                 self.colormap_combo.setCurrentIndex(i)
                 break
 
+        histogram_block = self._create_histogram_block()
+        if histogram_block is not None:
+            controls_layout.addWidget(histogram_block)
+
         spread_widgets = [auto_block, min_block, max_block, low_pct_block, high_pct_block, gamma_block]
         for idx, w in enumerate(spread_widgets):
             w.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
             controls_layout.setStretch(idx, 1)
         controls_layout.setStretch(len(spread_widgets), 0)      # "Color map" label
         controls_layout.setStretch(len(spread_widgets) + 1, 1)  # combo box
+        if histogram_block is not None:
+            controls_layout.setStretch(len(spread_widgets) + 2, 2)
         controls_layout.addStretch(1)
         controls.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-        controls.setMaximumHeight(90)
+        controls.setMaximumHeight(120)
 
         image_parent = image_view.parentWidget()
         image_parent_layout = image_parent.layout() if image_parent is not None else None
@@ -508,6 +528,51 @@ class MainScreen(display.MITRDisplay):
         self._on_auto_levels_toggled(True)
         self._capture_base_lut()
         self._apply_gamma_setting()
+
+    def _create_histogram_block(self):
+        if pg is None:
+            return None
+
+        block = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(block)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+
+        histogram_plot = pg.PlotWidget()
+        histogram_plot.setMinimumWidth(220)
+        histogram_plot.setMaximumWidth(320)
+        histogram_plot.setMinimumHeight(56)
+        histogram_plot.setMaximumHeight(56)
+        histogram_plot.setMenuEnabled(False)
+        histogram_plot.setMouseEnabled(x=False, y=False)
+        histogram_plot.hideButtons()
+
+        plot_item = histogram_plot.getPlotItem()
+        plot_item.hideAxis("left")
+        plot_item.showAxis("bottom")
+        plot_item.getAxis("bottom").setStyle(showValues=False)
+
+        self._histogram_curve = plot_item.plot(
+            pen=pg.mkPen(40, 100, 215, width=1.5),
+            fillLevel=0.0,
+            brush=pg.mkBrush(40, 100, 215, 70),
+        )
+        self._histogram_low_line = pg.InfiniteLine(pos=0.0, angle=90, movable=False, pen=pg.mkPen(200, 55, 55, width=1))
+        self._histogram_high_line = pg.InfiniteLine(pos=0.0, angle=90, movable=False, pen=pg.mkPen(20, 140, 60, width=1))
+        plot_item.addItem(self._histogram_low_line)
+        plot_item.addItem(self._histogram_high_line)
+        self._histogram_plot_item = plot_item
+
+        layout.addWidget(histogram_plot)
+
+        self._histogram_stats_label = QtWidgets.QLabel("Clip: low 0.0% high 0.0%")
+        stats_font = self._histogram_stats_label.font()
+        stats_font.setPointSize(max(8, stats_font.pointSize() - 1))
+        self._histogram_stats_label.setFont(stats_font)
+        layout.addWidget(self._histogram_stats_label)
+
+        self._update_histogram_markers()
+        return block
 
     def _discover_colormap_options(self, image_view):
         options = []
@@ -572,6 +637,7 @@ class MainScreen(display.MITRDisplay):
 
         # Re-apply gamma LUT in case the widget refreshed its image internals.
         self._apply_gamma_setting()
+        self._update_histogram_markers()
 
     def _on_auto_levels_toggled(self, enabled):
         self.min_spinbox.setEnabled(not enabled)
@@ -640,25 +706,22 @@ class MainScreen(display.MITRDisplay):
         self.min_spinbox.setRange(0.0, float(bit_max))
         self.max_spinbox.setRange(0.0, float(bit_max))
 
-    def _update_level_slider_scale_from_image(self, data):
+    def _infer_bit_max_from_image_data(self, data):
         dtype = data.dtype
-        bit_max = None
 
         if np.issubdtype(dtype, np.integer):
             if dtype.itemsize <= 1:
-                bit_max = 255
-            elif dtype.itemsize <= 2:
-                bit_max = 65535
-        else:
-            finite = data[np.isfinite(data)]
-            if finite.size > 0 and np.nanmax(finite) <= 255:
-                bit_max = 255
-            else:
-                bit_max = 65535
+                return 255
+            if dtype.itemsize <= 2:
+                return 65535
 
-        if bit_max is None:
-            bit_max = 65535
+        finite = data[np.isfinite(data)]
+        if finite.size > 0 and np.nanmax(finite) <= 255:
+            return 255
+        return 65535
 
+    def _update_level_slider_scale_from_image(self, data):
+        bit_max = self._infer_bit_max_from_image_data(data)
         if int(self._level_slider_high_bound) != bit_max:
             self._set_level_slider_scale(bit_max)
 
@@ -857,6 +920,65 @@ class MainScreen(display.MITRDisplay):
         self._capture_base_lut()
         self._apply_gamma_setting()
 
+    def _schedule_histogram_update(self):
+        if self._histogram_curve is None:
+            return
+        if self._histogram_update_pending:
+            return
+        self._histogram_update_pending = True
+        QtCore.QTimer.singleShot(120, self._update_histogram_plot)
+
+    def _update_histogram_markers(self):
+        if self._histogram_low_line is None or self._histogram_high_line is None:
+            return
+        if not hasattr(self, "min_spinbox") or not hasattr(self, "max_spinbox"):
+            return
+        self._histogram_low_line.setPos(float(self.min_spinbox.value()))
+        self._histogram_high_line.setPos(float(self.max_spinbox.value()))
+
+    def _update_histogram_plot(self):
+        self._histogram_update_pending = False
+        if self._histogram_curve is None:
+            return
+        if self._last_image is None:
+            return
+
+        data = np.asarray(self._last_image)
+        if data.size == 0:
+            return
+        finite = data[np.isfinite(data)]
+        if finite.size == 0:
+            return
+
+        sample = np.ravel(finite)
+        if sample.size > self._histogram_max_samples:
+            step = int(np.ceil(float(sample.size) / float(self._histogram_max_samples)))
+            sample = sample[::step]
+        if sample.size == 0:
+            return
+
+        bit_max = float(self._infer_bit_max_from_image_data(data))
+
+        hist, edges = np.histogram(sample, bins=self._histogram_bins, range=(0.0, bit_max))
+        centers = 0.5 * (edges[:-1] + edges[1:])
+        self._histogram_curve.setData(centers, hist.astype(float))
+
+        if self._histogram_plot_item is not None:
+            ymax = float(np.max(hist)) if hist.size else 1.0
+            if ymax <= 0:
+                ymax = 1.0
+            self._histogram_plot_item.setXRange(0.0, bit_max, padding=0.0)
+            self._histogram_plot_item.setYRange(0.0, ymax * 1.05, padding=0.0)
+
+        self._update_histogram_markers()
+
+        if self._histogram_stats_label is not None and hasattr(self, "min_spinbox") and hasattr(self, "max_spinbox"):
+            low_level = float(self.min_spinbox.value())
+            high_level = float(self.max_spinbox.value())
+            low_clip = 100.0 * float(np.mean(sample <= low_level))
+            high_clip = 100.0 * float(np.mean(sample >= high_level))
+            self._histogram_stats_label.setText(f"Clip: low {low_clip:.1f}% high {high_clip:.1f}%")
+
     def _startup_autoscale_tick(self):
         self._startup_autoscale_attempts += 1
         self._apply_robust_normalization()
@@ -889,6 +1011,7 @@ class MainScreen(display.MITRDisplay):
         self._enforce_pan_interaction()
 
         self._last_image = image
+        self._schedule_histogram_update()
         if not self.auto_levels_checkbox.isChecked():
             if not self._manual_levels_initialized:
                 self._auto_levels_from_current_image()
