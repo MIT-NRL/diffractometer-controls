@@ -83,12 +83,21 @@ class MainScreen(display.MITRDisplay):
         self._histogram_update_pending = False
         self._histogram_max_samples = 200000
         self._histogram_bins = 128
+        self.measure_line_checkbox = None
+        self.measure_readout_label = None
+        self._measure_view_box = None
+        self._measure_scene = None
+        self._measure_line_item = None
+        self._measure_enabled = False
+        self._measure_drag_active = False
+        self._measure_start_point = None
 
         image_view = self.ui.cameraImage
         self._install_display_controls(image_view)
         self._setup_time_remaining_progress()
         self._configure_acquire_indicators()
         self._enforce_pan_interaction()
+        self._ensure_measure_overlay_ready()
 
         # Disable built-in full-range normalization; we set levels manually.
         if hasattr(image_view, "setNormalizeData"):
@@ -119,8 +128,15 @@ class MainScreen(display.MITRDisplay):
         try:
             if hasattr(image_view, "getView"):
                 view = image_view.getView()
-                if view is not None and hasattr(view, "setMouseMode"):
-                    return view
+                if view is not None:
+                    # PyDMImageView wraps pyqtgraph.ImageView(view=PlotItem),
+                    # so getView() typically returns a PlotItem. Use its ViewBox.
+                    if hasattr(view, "getViewBox"):
+                        view_box = view.getViewBox()
+                        if view_box is not None and hasattr(view_box, "setMouseMode"):
+                            return view_box
+                    if hasattr(view, "setMouseMode") and hasattr(view, "mapSceneToView"):
+                        return view
             if hasattr(image_view, "getViewBox"):
                 view_box = image_view.getViewBox()
                 if view_box is not None and hasattr(view_box, "setMouseMode"):
@@ -141,6 +157,162 @@ class MainScreen(display.MITRDisplay):
                 view_box.setMouseEnabled(x=True, y=True)
         except Exception:
             pass
+
+    def _set_measure_readout(self, length_px):
+        if self.measure_readout_label is None:
+            return
+        if length_px is None:
+            self.measure_readout_label.setText("Length: -- px")
+            return
+        self.measure_readout_label.setText(f"Length: {float(length_px):.1f} px")
+
+    def _clear_measure_line(self):
+        self._measure_drag_active = False
+        self._measure_start_point = None
+        if self._measure_line_item is not None:
+            try:
+                self._measure_line_item.setData([], [])
+                self._measure_line_item.hide()
+            except Exception:
+                pass
+        self._set_measure_readout(None)
+
+    def _ensure_measure_overlay_ready(self):
+        if pg is None:
+            return
+
+        view_box = self._get_image_viewbox()
+        if view_box is None:
+            return
+        self._measure_view_box = view_box
+        scene = None
+        try:
+            scene = view_box.scene()
+        except Exception:
+            scene = None
+        self._measure_scene = scene
+
+        if self._measure_line_item is None:
+            try:
+                self._measure_line_item = pg.PlotCurveItem(pen=pg.mkPen(255, 165, 0, width=2))
+                self._measure_line_item.hide()
+                view_box.addItem(self._measure_line_item, ignoreBounds=True)
+            except Exception:
+                self._measure_line_item = None
+        else:
+            try:
+                if self._measure_line_item.scene() is None:
+                    view_box.addItem(self._measure_line_item, ignoreBounds=True)
+            except Exception:
+                pass
+
+    def _set_measure_interaction_enabled(self, enabled):
+        self._ensure_measure_overlay_ready()
+
+        view_box = self._measure_view_box
+        scene = self._measure_scene
+
+        if view_box is not None:
+            try:
+                if enabled and hasattr(view_box, "setMouseEnabled"):
+                    view_box.setMouseEnabled(x=False, y=False)
+                elif hasattr(view_box, "setMouseEnabled"):
+                    view_box.setMouseEnabled(x=True, y=True)
+            except Exception:
+                pass
+
+        if scene is not None:
+            try:
+                scene.removeEventFilter(self)
+            except Exception:
+                pass
+            if enabled:
+                try:
+                    scene.installEventFilter(self)
+                except Exception:
+                    pass
+
+    def _map_scene_to_image_point(self, scene_pos):
+        view_box = self._get_image_viewbox()
+        if view_box is None:
+            return None
+        try:
+            point = view_box.mapSceneToView(scene_pos)
+        except Exception:
+            return None
+        return point
+
+    def _update_measure_line(self, start_point, end_point):
+        if self._measure_line_item is None:
+            return
+        if start_point is None or end_point is None:
+            return
+
+        x0 = float(start_point.x())
+        y0 = float(start_point.y())
+        x1 = float(end_point.x())
+        y1 = float(end_point.y())
+        try:
+            self._measure_line_item.setData([x0, x1], [y0, y1])
+            self._measure_line_item.show()
+        except Exception:
+            return
+
+        length_px = np.hypot(x1 - x0, y1 - y0)
+        self._set_measure_readout(length_px)
+
+    def _on_measure_line_toggled(self, enabled):
+        self._measure_enabled = bool(enabled)
+        self._set_measure_interaction_enabled(self._measure_enabled)
+
+        if not self._measure_enabled:
+            self._clear_measure_line()
+            self._enforce_pan_interaction()
+
+    def eventFilter(self, watched, event):
+        if watched is self._measure_scene and self._measure_enabled:
+            event_type = event.type()
+            if event_type == QtCore.QEvent.GraphicsSceneMousePress:
+                try:
+                    if event.button() != QtCore.Qt.LeftButton:
+                        return False
+                    point = self._map_scene_to_image_point(event.scenePos())
+                    if point is None:
+                        return False
+                    self._measure_drag_active = True
+                    self._measure_start_point = QtCore.QPointF(point)
+                    self._update_measure_line(self._measure_start_point, point)
+                    event.accept()
+                    return True
+                except Exception:
+                    return False
+
+            if event_type == QtCore.QEvent.GraphicsSceneMouseMove and self._measure_drag_active:
+                try:
+                    point = self._map_scene_to_image_point(event.scenePos())
+                    if point is None or self._measure_start_point is None:
+                        return True
+                    self._update_measure_line(self._measure_start_point, point)
+                    event.accept()
+                    return True
+                except Exception:
+                    return True
+
+            if event_type == QtCore.QEvent.GraphicsSceneMouseRelease and self._measure_drag_active:
+                try:
+                    if event.button() != QtCore.Qt.LeftButton:
+                        return False
+                    point = self._map_scene_to_image_point(event.scenePos())
+                    if point is not None and self._measure_start_point is not None:
+                        self._update_measure_line(self._measure_start_point, point)
+                    self._measure_drag_active = False
+                    event.accept()
+                    return True
+                except Exception:
+                    self._measure_drag_active = False
+                    return True
+
+        return super().eventFilter(watched, event)
 
     def _setup_time_remaining_progress(self):
         old_widget = self.ui.PyDMLabel_6
@@ -346,6 +518,20 @@ class MainScreen(display.MITRDisplay):
         auto_layout.addWidget(self.reset_levels_button)
         controls_layout.addWidget(auto_block)
 
+        self.measure_line_checkbox = QtWidgets.QCheckBox("Measure line")
+        self.measure_line_checkbox.setChecked(False)
+        self.measure_line_checkbox.toggled.connect(self._on_measure_line_toggled)
+        self.measure_readout_label = QtWidgets.QLabel("Length: -- px")
+        measure_font = self.measure_readout_label.font()
+        measure_font.setPointSize(max(8, measure_font.pointSize() - 1))
+        self.measure_readout_label.setFont(measure_font)
+        measure_block = QtWidgets.QWidget()
+        measure_layout = QtWidgets.QVBoxLayout(measure_block)
+        measure_layout.setContentsMargins(0, 0, 0, 0)
+        measure_layout.setSpacing(2)
+        measure_layout.addWidget(self.measure_line_checkbox)
+        measure_layout.addWidget(self.measure_readout_label)
+
         self.min_spinbox = QtWidgets.QDoubleSpinBox()
         self.min_spinbox.setDecimals(3)
         self.min_spinbox.setRange(-1e12, 1e12)
@@ -503,15 +689,17 @@ class MainScreen(display.MITRDisplay):
                 self.colormap_combo.setCurrentIndex(i)
                 break
 
+        controls_layout.addWidget(measure_block)
+
         histogram_block = self._create_histogram_block()
         if histogram_block is not None:
             controls_layout.addWidget(histogram_block)
 
-        spread_widgets = [auto_block, min_block, max_block, low_pct_block, high_pct_block, gamma_block]
+        spread_widgets = [auto_block, min_block, max_block, low_pct_block, high_pct_block, gamma_block, color_map_block]
         for idx, w in enumerate(spread_widgets):
             w.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
             controls_layout.setStretch(idx, 1)
-        controls_layout.setStretch(len(spread_widgets), 1)  # color map block
+        controls_layout.setStretch(len(spread_widgets), 1)  # measure block
         if histogram_block is not None:
             controls_layout.setStretch(len(spread_widgets) + 1, 2)
         controls_layout.addStretch(1)
@@ -1006,7 +1194,10 @@ class MainScreen(display.MITRDisplay):
             return
 
         # Some backends reset interaction mode when first frame is rendered.
-        self._enforce_pan_interaction()
+        if self._measure_enabled:
+            self._set_measure_interaction_enabled(True)
+        else:
+            self._enforce_pan_interaction()
 
         self._last_image = image
         self._schedule_histogram_update()
