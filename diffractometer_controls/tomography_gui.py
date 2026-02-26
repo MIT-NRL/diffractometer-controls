@@ -35,6 +35,14 @@ try:
     import pyqtgraph as pg
 except Exception:
     pg = None
+try:
+    from scipy import stats as scipy_stats
+except Exception:
+    scipy_stats = None
+try:
+    from scipy import ndimage as scipy_ndimage
+except Exception:
+    scipy_ndimage = None
 
 
 class MainScreen(display.MITRDisplay):
@@ -85,12 +93,22 @@ class MainScreen(display.MITRDisplay):
         self._histogram_bins = 128
         self.measure_line_checkbox = None
         self.measure_readout_label = None
+        self.profile_checkbox = None
         self._measure_view_box = None
         self._measure_scene = None
         self._measure_line_item = None
         self._measure_enabled = False
         self._measure_drag_active = False
         self._measure_start_point = None
+        self._profile_enabled = False
+        self._profile_roi = None
+        self._profile_popup = None
+        self._profile_popup_filter_installed = False
+        self._profile_orientation_combo = None
+        self._profile_filter_checkbox = None
+        self._profile_filter_method_combo = None
+        self._profile_plot_widget = None
+        self._profile_curve = None
 
         image_view = self.ui.cameraImage
         self._install_display_controls(image_view)
@@ -269,7 +287,291 @@ class MainScreen(display.MITRDisplay):
             self._clear_measure_line()
             self._enforce_pan_interaction()
 
+    def _profile_source_2d(self):
+        if self._last_image is None:
+            return None
+        data = np.asarray(self._last_image)
+        if data.size == 0:
+            return None
+        if data.ndim == 2:
+            return data
+        if data.ndim == 3:
+            if data.shape[2] in (3, 4):
+                return np.nanmean(data, axis=2)
+            if data.shape[0] in (3, 4):
+                return np.nanmean(data, axis=0)
+            return np.nanmean(data, axis=2)
+        squeezed = np.squeeze(data)
+        if squeezed.ndim == 2:
+            return squeezed
+        return None
+
+    def _default_profile_roi_geometry(self):
+        data = self._profile_source_2d()
+        if data is None:
+            return 10.0, 10.0, 96.0, 96.0
+        height, width = data.shape[:2]
+        roi_w = max(8.0, float(width) * 0.25)
+        roi_h = max(8.0, float(height) * 0.25)
+        x = max(0.0, (float(width) - roi_w) * 0.5)
+        y = max(0.0, (float(height) - roi_h) * 0.5)
+        return x, y, roi_w, roi_h
+
+    def _ensure_profile_roi(self):
+        if pg is None:
+            return
+
+        view_box = self._get_image_viewbox()
+        if view_box is None:
+            return
+
+        if self._profile_roi is None:
+            x, y, roi_w, roi_h = self._default_profile_roi_geometry()
+            try:
+                roi = pg.RectROI(
+                    [x, y],
+                    [roi_w, roi_h],
+                    pen=pg.mkPen(0, 180, 255, width=2),
+                    movable=True,
+                    rotatable=False,
+                    removable=False,
+                    resizable=True,
+                )
+                roi.addScaleHandle([1, 1], [0, 0])
+                roi.addScaleHandle([0, 0], [1, 1])
+                roi.sigRegionChanged.connect(self._update_profile_plot)
+                self._profile_roi = roi
+            except Exception:
+                self._profile_roi = None
+                return
+
+        if self._profile_roi is not None:
+            try:
+                if self._profile_roi.scene() is None:
+                    view_box.addItem(self._profile_roi, ignoreBounds=True)
+            except Exception:
+                pass
+            self._profile_roi.setVisible(self._profile_enabled)
+
+    def _ensure_profile_popup(self):
+        if pg is None:
+            return
+        if self._profile_popup is not None:
+            return
+
+        popup = QtWidgets.QWidget(None)
+        popup.setWindowTitle("ROI Profile")
+        popup.setWindowFlag(QtCore.Qt.Window, True)
+        popup.setWindowFlag(QtCore.Qt.Tool, True)
+        popup.setWindowFlag(QtCore.Qt.WindowStaysOnTopHint, True)
+        popup.resize(500, 320)
+
+        layout = QtWidgets.QVBoxLayout(popup)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
+
+        controls = QtWidgets.QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(6)
+        controls.addWidget(QtWidgets.QLabel("Integration"))
+        orientation_combo = QtWidgets.QComboBox()
+        orientation_combo.addItems(["Vertical", "Horizontal"])
+        orientation_combo.setCurrentIndex(0)
+        orientation_combo.currentIndexChanged.connect(self._update_profile_plot)
+        controls.addWidget(orientation_combo)
+        filter_checkbox = QtWidgets.QCheckBox("Filter outliers")
+        filter_checkbox.setChecked(False)
+        filter_checkbox.toggled.connect(self._on_profile_filter_toggled)
+        controls.addWidget(filter_checkbox)
+        controls.addWidget(QtWidgets.QLabel("Method"))
+        filter_method_combo = QtWidgets.QComboBox()
+        filter_method_combo.addItem("Robust (MAD)", "mad")
+        if scipy_stats is not None:
+            filter_method_combo.addItem("Fast (Sigma clip)", "sigmaclip")
+        filter_method_combo.addItem("Fast (Percentile)", "percentile")
+        if scipy_ndimage is not None:
+            filter_method_combo.addItem("Median (6x6)", "median6")
+        fast_method = "sigmaclip" if scipy_stats is not None else "percentile"
+        fast_idx = filter_method_combo.findData(fast_method)
+        if fast_idx >= 0:
+            filter_method_combo.setCurrentIndex(fast_idx)
+        filter_method_combo.currentIndexChanged.connect(self._update_profile_plot)
+        filter_method_combo.setEnabled(False)
+        controls.addWidget(filter_method_combo)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+
+        plot_widget = pg.PlotWidget()
+        plot_widget.showGrid(x=True, y=True, alpha=0.2)
+        plot_item = plot_widget.getPlotItem()
+        plot_item.setLabel("left", "Integrated intensity")
+        plot_item.setLabel("bottom", "X pixel")
+        curve = plot_item.plot(pen=pg.mkPen(0, 120, 230, width=2))
+        layout.addWidget(plot_widget, 1)
+
+        self._profile_popup = popup
+        if not self._profile_popup_filter_installed:
+            try:
+                self._profile_popup.installEventFilter(self)
+                self._profile_popup_filter_installed = True
+            except Exception:
+                pass
+        self._profile_orientation_combo = orientation_combo
+        self._profile_filter_checkbox = filter_checkbox
+        self._profile_filter_method_combo = filter_method_combo
+        self._profile_plot_widget = plot_widget
+        self._profile_curve = curve
+
+    def _on_profile_toggled(self, enabled):
+        self._profile_enabled = bool(enabled)
+        self._ensure_profile_roi()
+        self._ensure_profile_popup()
+
+        if self._profile_roi is not None:
+            self._profile_roi.setVisible(self._profile_enabled)
+
+        if self._profile_enabled:
+            if self._profile_popup is not None:
+                self._profile_popup.show()
+                self._profile_popup.raise_()
+                self._profile_popup.activateWindow()
+            self._update_profile_plot()
+        else:
+            if self._profile_popup is not None:
+                self._profile_popup.hide()
+
+    def _on_profile_filter_toggled(self, enabled):
+        checked = bool(enabled)
+        if self._profile_filter_method_combo is not None:
+            self._profile_filter_method_combo.setEnabled(checked)
+        self._update_profile_plot()
+
+    def _profile_filter_method(self):
+        if self._profile_filter_method_combo is None:
+            return "mad"
+        method = self._profile_filter_method_combo.currentData()
+        if isinstance(method, str) and method:
+            return method
+        return "mad"
+
+    def _roi_bounds_for_image(self, data_2d):
+        if self._profile_roi is None or data_2d is None:
+            return None
+        height, width = data_2d.shape[:2]
+        try:
+            pos = self._profile_roi.pos()
+            size = self._profile_roi.size()
+            x0f = float(pos.x())
+            y0f = float(pos.y())
+            x1f = x0f + float(size.x())
+            y1f = y0f + float(size.y())
+        except Exception:
+            return None
+
+        x0 = int(np.floor(min(x0f, x1f)))
+        x1 = int(np.ceil(max(x0f, x1f)))
+        y0 = int(np.floor(min(y0f, y1f)))
+        y1 = int(np.ceil(max(y0f, y1f)))
+
+        x0 = max(0, min(width, x0))
+        x1 = max(0, min(width, x1))
+        y0 = max(0, min(height, y0))
+        y1 = max(0, min(height, y1))
+        if x1 <= x0 or y1 <= y0:
+            return None
+        return x0, x1, y0, y1
+
+    def _apply_profile_outlier_filter(self, roi_data):
+        filtered = np.asarray(roi_data, dtype=float)
+        finite = filtered[np.isfinite(filtered)]
+        if finite.size == 0:
+            return filtered
+
+        method = self._profile_filter_method()
+
+        if method == "median6" and scipy_ndimage is not None:
+            work = np.array(filtered, copy=True)
+            nan_mask = ~np.isfinite(work)
+            if np.any(nan_mask):
+                work[nan_mask] = float(np.median(finite))
+            try:
+                result = scipy_ndimage.median_filter(work, size=6, mode="nearest")
+            except Exception:
+                return filtered
+            if np.any(nan_mask):
+                result[nan_mask] = np.nan
+            return result
+
+        if method == "percentile":
+            low, high = np.nanpercentile(filtered, [1.0, 99.0])
+        elif method == "sigmaclip" and scipy_stats is not None:
+            try:
+                _, low, high = scipy_stats.sigmaclip(finite, low=5.0, high=5.0)
+            except Exception:
+                low, high = np.nan, np.nan
+        else:
+            if finite.size < 8:
+                return filtered
+            median = float(np.median(finite))
+            mad = float(np.median(np.abs(finite - median)))
+            if mad <= 0:
+                low, high = np.percentile(finite, [1.0, 99.0])
+            else:
+                robust_sigma = 1.4826 * mad
+                low = median - 5.0 * robust_sigma
+                high = median + 5.0 * robust_sigma
+
+        if not np.isfinite(low) or not np.isfinite(high) or high <= low:
+            return filtered
+        return np.clip(filtered, low, high)
+
+    def _update_profile_plot(self, *args):
+        if not self._profile_enabled:
+            return
+        if self._profile_curve is None or self._profile_plot_widget is None:
+            return
+
+        data_2d = self._profile_source_2d()
+        if data_2d is None:
+            self._profile_curve.setData([], [])
+            return
+
+        self._ensure_profile_roi()
+        bounds = self._roi_bounds_for_image(data_2d)
+        if bounds is None:
+            self._profile_curve.setData([], [])
+            return
+
+        x0, x1, y0, y1 = bounds
+        roi_data = np.asarray(data_2d[y0:y1, x0:x1], dtype=float)
+        if roi_data.size == 0:
+            self._profile_curve.setData([], [])
+            return
+        if self._profile_filter_checkbox is not None and self._profile_filter_checkbox.isChecked():
+            roi_data = self._apply_profile_outlier_filter(roi_data)
+
+        mode = "vertical"
+        if self._profile_orientation_combo is not None:
+            mode = self._profile_orientation_combo.currentText().strip().lower()
+        plot_item = self._profile_plot_widget.getPlotItem()
+        if mode.startswith("h"):
+            profile = np.nansum(roi_data, axis=1)
+            coord = np.arange(y0, y1, dtype=float)
+            plot_item.setLabel("bottom", "Y pixel")
+        else:
+            profile = np.nansum(roi_data, axis=0)
+            coord = np.arange(x0, x1, dtype=float)
+            plot_item.setLabel("bottom", "X pixel")
+
+        self._profile_curve.setData(coord, profile)
+        plot_item.enableAutoRange(axis="xy", enable=True)
+
     def eventFilter(self, watched, event):
+        if watched is self._profile_popup and event.type() == QtCore.QEvent.Close:
+            if self.profile_checkbox is not None and self.profile_checkbox.isChecked():
+                self.profile_checkbox.setChecked(False)
+            return super().eventFilter(watched, event)
+
         if watched is self._measure_scene and self._measure_enabled:
             event_type = event.type()
             if event_type == QtCore.QEvent.GraphicsSceneMousePress:
@@ -510,6 +812,8 @@ class MainScreen(display.MITRDisplay):
         self.auto_levels_checkbox.toggled.connect(self._on_auto_levels_toggled)
         self.reset_levels_button = QtWidgets.QPushButton("Reset Levels")
         self.reset_levels_button.clicked.connect(self._reset_levels_to_default)
+        self.reset_levels_button.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
+        self.reset_levels_button.setFixedWidth(self.reset_levels_button.sizeHint().width())
         auto_block = QtWidgets.QWidget()
         auto_layout = QtWidgets.QVBoxLayout(auto_block)
         auto_layout.setContentsMargins(0, 0, 0, 0)
@@ -531,6 +835,15 @@ class MainScreen(display.MITRDisplay):
         measure_layout.setSpacing(2)
         measure_layout.addWidget(self.measure_line_checkbox)
         measure_layout.addWidget(self.measure_readout_label)
+        self.profile_checkbox = QtWidgets.QCheckBox("Profile")
+        self.profile_checkbox.setChecked(False)
+        self.profile_checkbox.toggled.connect(self._on_profile_toggled)
+        if pg is None:
+            self.profile_checkbox.setEnabled(False)
+            self.profile_checkbox.setToolTip("pyqtgraph is unavailable.")
+        measure_layout.addWidget(self.profile_checkbox)
+        measure_block.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
+        measure_block.setMaximumWidth(165)
 
         self.min_spinbox = QtWidgets.QDoubleSpinBox()
         self.min_spinbox.setDecimals(3)
@@ -661,13 +974,21 @@ class MainScreen(display.MITRDisplay):
         gamma_layout.addWidget(self.gamma_slider)
         controls_layout.addWidget(gamma_block)
 
+        # Keep these slider-style control blocks compact so they don't dominate row width.
+        compact_block_max_width = 180
+        compact_blocks = (min_block, max_block, low_pct_block, high_pct_block, gamma_block)
+        for block in compact_blocks:
+            block.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
+            block.setMinimumWidth(0)
+            block.setMaximumWidth(compact_block_max_width)
+
         self.colormap_combo = QtWidgets.QComboBox()
         self._colormap_options = self._discover_colormap_options(image_view)
         for label, _ in self._colormap_options:
             self.colormap_combo.addItem(label)
         self.colormap_combo.currentIndexChanged.connect(self._on_colormap_changed)
-        self.colormap_combo.setMinimumWidth(140)
-        self.colormap_combo.setMaximumWidth(140)
+        self.colormap_combo.setMinimumWidth(128)
+        self.colormap_combo.setMaximumWidth(128)
         color_map_block = QtWidgets.QWidget()
         color_map_layout = QtWidgets.QVBoxLayout(color_map_block)
         color_map_layout.setContentsMargins(0, 0, 0, 0)
@@ -681,7 +1002,7 @@ class MainScreen(display.MITRDisplay):
         color_map_layout.addLayout(color_map_top)
         color_map_layout.addWidget(self.colormap_combo)
         color_map_layout.setAlignment(self.colormap_combo, QtCore.Qt.AlignLeft)
-        color_map_block.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+        color_map_block.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         controls_layout.addWidget(color_map_block)
         current_cmap = image_view.property("colorMap")
         for i, (_, value) in enumerate(self._colormap_options):
@@ -695,14 +1016,24 @@ class MainScreen(display.MITRDisplay):
         if histogram_block is not None:
             controls_layout.addWidget(histogram_block)
 
-        spread_widgets = [auto_block, min_block, max_block, low_pct_block, high_pct_block, gamma_block, color_map_block]
-        for idx, w in enumerate(spread_widgets):
-            w.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-            controls_layout.setStretch(idx, 1)
-        controls_layout.setStretch(len(spread_widgets), 1)  # measure block
+        # Let non-compact blocks absorb extra width, keep slider blocks narrow.
+        for block in compact_blocks:
+            idx = controls_layout.indexOf(block)
+            if idx >= 0:
+                controls_layout.setStretch(idx, 0)
+        idx = controls_layout.indexOf(auto_block)
+        if idx >= 0:
+            controls_layout.setStretch(idx, 0)
+        idx = controls_layout.indexOf(color_map_block)
+        if idx >= 0:
+            controls_layout.setStretch(idx, 0)
+        idx = controls_layout.indexOf(measure_block)
+        if idx >= 0:
+            controls_layout.setStretch(idx, 0)
         if histogram_block is not None:
-            controls_layout.setStretch(len(spread_widgets) + 1, 2)
-        controls_layout.addStretch(1)
+            idx = controls_layout.indexOf(histogram_block)
+            if idx >= 0:
+                controls_layout.setStretch(idx, 1)
         controls.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
         controls.setMaximumHeight(120)
 
@@ -733,13 +1064,15 @@ class MainScreen(display.MITRDisplay):
             return None
 
         block = QtWidgets.QWidget()
+        block.setMinimumWidth(145)
+        block.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
         layout = QtWidgets.QVBoxLayout(block)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
 
         histogram_plot = pg.PlotWidget()
-        histogram_plot.setMinimumWidth(220)
-        histogram_plot.setMaximumWidth(320)
+        histogram_plot.setMinimumWidth(145)
+        histogram_plot.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed)
         histogram_plot.setMinimumHeight(56)
         histogram_plot.setMaximumHeight(56)
         histogram_plot.setMenuEnabled(False)
@@ -1201,6 +1534,8 @@ class MainScreen(display.MITRDisplay):
 
         self._last_image = image
         self._schedule_histogram_update()
+        if self._profile_enabled:
+            self._update_profile_plot()
         if not self.auto_levels_checkbox.isChecked():
             if not self._manual_levels_initialized:
                 self._auto_levels_from_current_image()
