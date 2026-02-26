@@ -80,7 +80,6 @@ class MainScreen(display.MITRDisplay):
         self._histogram_plot_item = None
         self._histogram_low_line = None
         self._histogram_high_line = None
-        self._histogram_stats_label = None
         self._histogram_update_pending = False
         self._histogram_max_samples = 200000
         self._histogram_bins = 128
@@ -482,9 +481,22 @@ class MainScreen(display.MITRDisplay):
             self.colormap_combo.addItem(label)
         self.colormap_combo.currentIndexChanged.connect(self._on_colormap_changed)
         self.colormap_combo.setMinimumWidth(140)
+        self.colormap_combo.setMaximumWidth(140)
+        color_map_block = QtWidgets.QWidget()
+        color_map_layout = QtWidgets.QVBoxLayout(color_map_block)
+        color_map_layout.setContentsMargins(0, 0, 0, 0)
+        color_map_layout.setSpacing(2)
         color_map_label = QtWidgets.QLabel("Color map")
-        controls_layout.addWidget(color_map_label)
-        controls_layout.addWidget(self.colormap_combo)
+        color_map_top = QtWidgets.QHBoxLayout()
+        color_map_top.setContentsMargins(0, 0, 0, 0)
+        color_map_top.setSpacing(4)
+        color_map_top.addWidget(color_map_label)
+        color_map_top.addStretch(1)
+        color_map_layout.addLayout(color_map_top)
+        color_map_layout.addWidget(self.colormap_combo)
+        color_map_layout.setAlignment(self.colormap_combo, QtCore.Qt.AlignLeft)
+        color_map_block.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+        controls_layout.addWidget(color_map_block)
         current_cmap = image_view.property("colorMap")
         for i, (_, value) in enumerate(self._colormap_options):
             if value == current_cmap:
@@ -499,10 +511,9 @@ class MainScreen(display.MITRDisplay):
         for idx, w in enumerate(spread_widgets):
             w.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
             controls_layout.setStretch(idx, 1)
-        controls_layout.setStretch(len(spread_widgets), 0)      # "Color map" label
-        controls_layout.setStretch(len(spread_widgets) + 1, 1)  # combo box
+        controls_layout.setStretch(len(spread_widgets), 1)  # color map block
         if histogram_block is not None:
-            controls_layout.setStretch(len(spread_widgets) + 2, 2)
+            controls_layout.setStretch(len(spread_widgets) + 1, 2)
         controls_layout.addStretch(1)
         controls.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
         controls.setMaximumHeight(120)
@@ -564,12 +575,6 @@ class MainScreen(display.MITRDisplay):
         self._histogram_plot_item = plot_item
 
         layout.addWidget(histogram_plot)
-
-        self._histogram_stats_label = QtWidgets.QLabel("Clip: low 0.0% high 0.0%")
-        stats_font = self._histogram_stats_label.font()
-        stats_font.setPointSize(max(8, stats_font.pointSize() - 1))
-        self._histogram_stats_label.setFont(stats_font)
-        layout.addWidget(self._histogram_stats_label)
 
         self._update_histogram_markers()
         return block
@@ -971,13 +976,6 @@ class MainScreen(display.MITRDisplay):
             self._histogram_plot_item.setYRange(0.0, ymax * 1.05, padding=0.0)
 
         self._update_histogram_markers()
-
-        if self._histogram_stats_label is not None and hasattr(self, "min_spinbox") and hasattr(self, "max_spinbox"):
-            low_level = float(self.min_spinbox.value())
-            high_level = float(self.max_spinbox.value())
-            low_clip = 100.0 * float(np.mean(sample <= low_level))
-            high_clip = 100.0 * float(np.mean(sample >= high_level))
-            self._histogram_stats_label.setText(f"Clip: low {low_clip:.1f}% high {high_clip:.1f}%")
 
     def _startup_autoscale_tick(self):
         self._startup_autoscale_attempts += 1
