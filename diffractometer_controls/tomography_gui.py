@@ -1,4 +1,6 @@
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 
 # from pydm.display import Display
@@ -48,6 +50,8 @@ except Exception:
 class MainScreen(display.MITRDisplay):
     re_dispatcher: RemoteDispatcher
     re_client: RunEngineClient
+    profile_compute_ready = QtCore.Signal(object)
+    profile_worker_idle = QtCore.Signal()
 
     def __init__(self, parent=None, args=None, macros=None, ui_filename='tomography_gui.ui'):
         super().__init__(parent, args, macros, ui_filename)
@@ -109,6 +113,17 @@ class MainScreen(display.MITRDisplay):
         self._profile_filter_method_combo = None
         self._profile_plot_widget = None
         self._profile_curve = None
+        self._profile_worker_lock = threading.Lock()
+        self._profile_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="profile-worker")
+        self._profile_worker_future = None
+        self._profile_pending_request = None
+        self._profile_request_counter = 0
+        self._profile_latest_requested_id = 0
+        self._profile_roi_dragging = False
+        # Higher preview target -> less downsampling, better drag-time profile quality.
+        self._profile_preview_target_pixels = 90000
+        self.profile_compute_ready.connect(self._on_profile_compute_ready)
+        self.profile_worker_idle.connect(self._on_profile_worker_idle)
 
         image_view = self.ui.cameraImage
         self._install_display_controls(image_view)
@@ -140,6 +155,7 @@ class MainScreen(display.MITRDisplay):
         self._startup_autoscale_timer.setInterval(200)
         self._startup_autoscale_timer.timeout.connect(self._startup_autoscale_tick)
         self._startup_autoscale_timer.start()
+        self.destroyed.connect(self._shutdown_profile_worker)
 
     def _get_image_viewbox(self):
         image_view = self.ui.cameraImage
@@ -339,7 +355,9 @@ class MainScreen(display.MITRDisplay):
                 )
                 roi.addScaleHandle([1, 1], [0, 0])
                 roi.addScaleHandle([0, 0], [1, 1])
-                roi.sigRegionChanged.connect(self._update_profile_plot)
+                roi.sigRegionChanged.connect(self._on_profile_roi_changed)
+                if hasattr(roi, "sigRegionChangeFinished"):
+                    roi.sigRegionChangeFinished.connect(self._on_profile_roi_change_finished)
                 self._profile_roi = roi
             except Exception:
                 self._profile_roi = None
@@ -439,6 +457,9 @@ class MainScreen(display.MITRDisplay):
         else:
             if self._profile_popup is not None:
                 self._profile_popup.hide()
+            self._profile_roi_dragging = False
+            self._cancel_profile_requests()
+            self._set_profile_curve_data([], [], "X pixel")
 
     def _on_profile_filter_toggled(self, enabled):
         checked = bool(enabled)
@@ -453,6 +474,167 @@ class MainScreen(display.MITRDisplay):
         if isinstance(method, str) and method:
             return method
         return "mad"
+
+    def _on_profile_roi_changed(self, *args):
+        if not self._profile_enabled:
+            return
+        self._profile_roi_dragging = True
+        request = self._build_profile_request(preview=True)
+        if request is None:
+            self._cancel_profile_requests()
+            self._set_profile_curve_data([], [], "X pixel")
+            return
+        self._queue_profile_request(request)
+
+    def _on_profile_roi_change_finished(self, *args):
+        self._profile_roi_dragging = False
+        self._update_profile_plot()
+
+    def _shutdown_profile_worker(self, *args):
+        with self._profile_worker_lock:
+            worker = self._profile_worker
+            self._profile_worker = None
+            self._profile_worker_future = None
+            self._profile_pending_request = None
+        if worker is not None:
+            try:
+                worker.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                worker.shutdown(wait=False)
+            except Exception:
+                pass
+
+    def _cancel_profile_requests(self):
+        with self._profile_worker_lock:
+            self._profile_pending_request = None
+            self._profile_latest_requested_id += 1
+
+    def _set_profile_curve_data(self, coord, profile, axis_label):
+        if self._profile_curve is None or self._profile_plot_widget is None:
+            return
+        plot_item = self._profile_plot_widget.getPlotItem()
+        plot_item.setLabel("bottom", axis_label)
+        self._profile_curve.setData(coord, profile)
+        plot_item.enableAutoRange(axis="xy", enable=True)
+
+    def _preview_filter_method(self, method):
+        if method == "median6":
+            if scipy_stats is not None:
+                return "sigmaclip"
+            return "percentile"
+        return method
+
+    def _preview_stride(self, roi_data):
+        total = int(np.size(roi_data))
+        if total <= 0:
+            return 1
+        target = max(4000, int(self._profile_preview_target_pixels))
+        stride = int(np.sqrt(float(total) / float(target)))
+        return max(1, stride)
+
+    def _build_profile_request(self, preview=False):
+        if not self._profile_enabled:
+            return None
+        data_2d = self._profile_source_2d()
+        if data_2d is None:
+            return None
+        self._ensure_profile_roi()
+        bounds = self._roi_bounds_for_image(data_2d)
+        if bounds is None:
+            return None
+
+        x0, x1, y0, y1 = bounds
+        roi_data = np.asarray(data_2d[y0:y1, x0:x1], dtype=float)
+        if roi_data.size == 0:
+            return None
+
+        mode = "vertical"
+        if self._profile_orientation_combo is not None:
+            mode = self._profile_orientation_combo.currentText().strip().lower()
+
+        filter_enabled = self._profile_filter_checkbox is not None and self._profile_filter_checkbox.isChecked()
+        filter_method = self._profile_filter_method() if filter_enabled else "mad"
+        if preview:
+            stride = self._preview_stride(roi_data)
+            if stride > 1:
+                roi_data = roi_data[::stride, ::stride]
+            filter_method = self._preview_filter_method(filter_method)
+            if mode.startswith("h"):
+                y1 = y0 + roi_data.shape[0]
+            else:
+                x1 = x0 + roi_data.shape[1]
+
+        return {
+            "roi_data": np.array(roi_data, copy=True),
+            "mode": mode,
+            "x0": int(x0),
+            "x1": int(x1),
+            "y0": int(y0),
+            "y1": int(y1),
+            "filter_enabled": bool(filter_enabled),
+            "filter_method": filter_method,
+        }
+
+    def _queue_profile_request(self, request):
+        with self._profile_worker_lock:
+            self._profile_request_counter += 1
+            request["id"] = self._profile_request_counter
+            self._profile_latest_requested_id = request["id"]
+            self._profile_pending_request = request
+            should_submit = self._profile_worker_future is None
+        if should_submit:
+            self._submit_next_profile_request()
+
+    def _submit_next_profile_request(self):
+        with self._profile_worker_lock:
+            if self._profile_worker is None or self._profile_worker_future is not None:
+                return
+            request = self._profile_pending_request
+            self._profile_pending_request = None
+            if request is None:
+                return
+            future = self._profile_worker.submit(self._compute_profile_request, request)
+            self._profile_worker_future = future
+        future.add_done_callback(self._on_profile_compute_done)
+
+    def _on_profile_compute_done(self, future):
+        result = None
+        try:
+            result = future.result()
+        except Exception:
+            result = None
+        if result is not None:
+            try:
+                self.profile_compute_ready.emit(result)
+            except Exception:
+                pass
+        try:
+            self.profile_worker_idle.emit()
+        except Exception:
+            pass
+
+    def _on_profile_worker_idle(self):
+        with self._profile_worker_lock:
+            self._profile_worker_future = None
+            has_pending = self._profile_pending_request is not None
+        if has_pending:
+            self._submit_next_profile_request()
+
+    def _on_profile_compute_ready(self, result):
+        if not isinstance(result, dict):
+            return
+        if not self._profile_enabled:
+            return
+        if self._profile_curve is None or self._profile_plot_widget is None:
+            return
+        request_id = int(result.get("id", 0))
+        if request_id < int(self._profile_latest_requested_id):
+            return
+        self._set_profile_curve_data(
+            result.get("coord", []),
+            result.get("profile", []),
+            result.get("axis_label", "X pixel"),
+        )
 
     def _roi_bounds_for_image(self, data_2d):
         if self._profile_roi is None or data_2d is None:
@@ -481,13 +663,14 @@ class MainScreen(display.MITRDisplay):
             return None
         return x0, x1, y0, y1
 
-    def _apply_profile_outlier_filter(self, roi_data):
+    def _apply_profile_outlier_filter(self, roi_data, method=None):
         filtered = np.asarray(roi_data, dtype=float)
         finite = filtered[np.isfinite(filtered)]
         if finite.size == 0:
             return filtered
 
-        method = self._profile_filter_method()
+        if method is None:
+            method = self._profile_filter_method()
 
         if method == "median6" and scipy_ndimage is not None:
             work = np.array(filtered, copy=True)
@@ -525,46 +708,55 @@ class MainScreen(display.MITRDisplay):
             return filtered
         return np.clip(filtered, low, high)
 
+    def _compute_profile_request(self, request):
+        roi_data = np.asarray(request.get("roi_data"), dtype=float)
+        if roi_data.size == 0:
+            return {
+                "id": int(request.get("id", 0)),
+                "coord": np.array([], dtype=float),
+                "profile": np.array([], dtype=float),
+                "axis_label": "X pixel",
+            }
+
+        if bool(request.get("filter_enabled", False)):
+            roi_data = self._apply_profile_outlier_filter(
+                roi_data,
+                method=request.get("filter_method"),
+            )
+
+        x0 = int(request.get("x0", 0))
+        x1 = int(request.get("x1", x0))
+        y0 = int(request.get("y0", 0))
+        y1 = int(request.get("y1", y0))
+        mode = str(request.get("mode", "vertical")).strip().lower()
+
+        if mode.startswith("h"):
+            profile = np.nansum(roi_data, axis=1)
+            coord = np.arange(y0, y1, dtype=float)
+            axis_label = "Y pixel"
+        else:
+            profile = np.nansum(roi_data, axis=0)
+            coord = np.arange(x0, x1, dtype=float)
+            axis_label = "X pixel"
+
+        return {
+            "id": int(request.get("id", 0)),
+            "coord": coord,
+            "profile": profile,
+            "axis_label": axis_label,
+        }
+
     def _update_profile_plot(self, *args):
         if not self._profile_enabled:
             return
         if self._profile_curve is None or self._profile_plot_widget is None:
             return
-
-        data_2d = self._profile_source_2d()
-        if data_2d is None:
-            self._profile_curve.setData([], [])
+        request = self._build_profile_request(preview=False)
+        if request is None:
+            self._cancel_profile_requests()
+            self._set_profile_curve_data([], [], "X pixel")
             return
-
-        self._ensure_profile_roi()
-        bounds = self._roi_bounds_for_image(data_2d)
-        if bounds is None:
-            self._profile_curve.setData([], [])
-            return
-
-        x0, x1, y0, y1 = bounds
-        roi_data = np.asarray(data_2d[y0:y1, x0:x1], dtype=float)
-        if roi_data.size == 0:
-            self._profile_curve.setData([], [])
-            return
-        if self._profile_filter_checkbox is not None and self._profile_filter_checkbox.isChecked():
-            roi_data = self._apply_profile_outlier_filter(roi_data)
-
-        mode = "vertical"
-        if self._profile_orientation_combo is not None:
-            mode = self._profile_orientation_combo.currentText().strip().lower()
-        plot_item = self._profile_plot_widget.getPlotItem()
-        if mode.startswith("h"):
-            profile = np.nansum(roi_data, axis=1)
-            coord = np.arange(y0, y1, dtype=float)
-            plot_item.setLabel("bottom", "Y pixel")
-        else:
-            profile = np.nansum(roi_data, axis=0)
-            coord = np.arange(x0, x1, dtype=float)
-            plot_item.setLabel("bottom", "X pixel")
-
-        self._profile_curve.setData(coord, profile)
-        plot_item.enableAutoRange(axis="xy", enable=True)
+        self._queue_profile_request(request)
 
     def eventFilter(self, watched, event):
         if watched is self._profile_popup and event.type() == QtCore.QEvent.Close:
@@ -1534,7 +1726,7 @@ class MainScreen(display.MITRDisplay):
 
         self._last_image = image
         self._schedule_histogram_update()
-        if self._profile_enabled:
+        if self._profile_enabled and not self._profile_roi_dragging:
             self._update_profile_plot()
         if not self.auto_levels_checkbox.isChecked():
             if not self._manual_levels_initialized:
