@@ -159,7 +159,13 @@ def discover_frames(
     positions_csv: Optional[Path] = None,
     series_key: Optional[str] = None,
 ) -> List[FrameInfo]:
-    all_files = [*image_dir.glob("*.tif"), *image_dir.glob("*.tiff"), *image_dir.glob("*.TIF"), *image_dir.glob("*.TIFF")]
+    # On Windows, glob is case-insensitive, so separate *.tif/*.TIF patterns
+    # can return duplicates. Use a single suffix-based pass instead.
+    all_files = [
+        p
+        for p in image_dir.iterdir()
+        if p.is_file() and p.suffix.lower() in {".tif", ".tiff"}
+    ]
     if not all_files:
         raise RuntimeError(f"No TIFF files found in {image_dir}")
 
@@ -1496,6 +1502,10 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             "Locked global edge from near-min sigma: "
             f"frame={ref_idx + 1}, m={m_med:.6f}, b={b_med:.6f}"
         )
+        # On initial lock, jump the viewer to the selected near-minimum frame.
+        # This also makes the fixed-edge rerun prioritize that frame first.
+        if prev_line is None and ref_idx != int(self.current_index):
+            self._load_frame(ref_idx)
         # Preserve existing points and overwrite frame-by-frame as refreshed results arrive.
         self._start_bulk_reprocess(
             preserve_existing_results=True,
