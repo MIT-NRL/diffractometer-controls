@@ -10,15 +10,27 @@ motor position.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import csv
 import math
 import os
 import re
 import sys
+import threading
 from collections import OrderedDict, deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Tuple
+
+# Keep per-task CPU usage predictable on shared control PCs.
+# Users can override these before launch if they want higher throughput.
+for _env_var in (
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+):
+    os.environ.setdefault(_env_var, "1")
 
 import numpy as np
 
@@ -545,7 +557,7 @@ def analyze_roi(
     if sigma_param is None:
         return result
 
-    sigma_val = float(sigma_param.value) if sigma_param.value is not None else np.nan
+    sigma_val = abs(float(sigma_param.value)) if sigma_param.value is not None else np.nan
     sigma_err = (
         float(sigma_param.stderr)
         if getattr(sigma_param, "stderr", None) is not None
@@ -657,9 +669,14 @@ def _analyze_filtered_worker(
     filtered: np.ndarray,
     roi_bounds: Tuple[int, int, int, int],
     fixed_edge_line: Optional[Tuple[float, float]] = None,
+    cancel_event: Optional[threading.Event] = None,
 ) -> FitResult:
+    if cancel_event is not None and cancel_event.is_set():
+        return None
     x0, x1, y0, y1 = roi_bounds
     roi_img = filtered[y0:y1, x0:x1]
+    if cancel_event is not None and cancel_event.is_set():
+        return None
     return analyze_roi(
         roi_img,
         x0_abs=float(x0),
@@ -715,7 +732,15 @@ def _bulk_reprocess_cached_worker(
 
 
 class FocusOfflineWindow(QtWidgets.QMainWindow):
-    def __init__(self, frames: List[FrameInfo], interval_ms: int = 500, parent=None):
+    def __init__(
+        self,
+        frames: List[FrameInfo],
+        interval_ms: int = 500,
+        max_workers_total: int = 8,
+        bulk_workers: Optional[int] = None,
+        full_workers: Optional[int] = None,
+        parent=None,
+    ):
         super().__init__(parent=parent)
         self.setWindowTitle("Offline Focus Scan Viewer")
         self.resize(1500, 900)
@@ -730,12 +755,38 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._full_filtered_cache: OrderedDict[int, np.ndarray] = OrderedDict()
         self._max_full_cache_size = max(16, min(len(self.frames), 128))
         self._results: Dict[int, FitResult] = {}
+        self._result_is_full: Dict[int, bool] = {}
         self._current_filtered: Optional[np.ndarray] = None
 
+        # Total worker budget across all pools:
+        #   task queue (single-thread) + bulk reprocess + full prepare.
+        self._max_workers_total = int(max(3, max_workers_total))
+        _task_workers = 1
+        _remaining_workers = int(max(2, self._max_workers_total - _task_workers))
+        req_bulk = int(max(1, bulk_workers)) if bulk_workers is not None else None
+        req_full = int(max(1, full_workers)) if full_workers is not None else None
+        if req_bulk is None and req_full is None:
+            _bulk_workers = 1
+            _full_workers = int(max(1, _remaining_workers - _bulk_workers))
+        elif req_bulk is not None and req_full is None:
+            _bulk_workers = int(min(req_bulk, max(1, _remaining_workers - 1)))
+            _full_workers = int(max(1, _remaining_workers - _bulk_workers))
+        elif req_bulk is None and req_full is not None:
+            _full_workers = int(min(req_full, max(1, _remaining_workers - 1)))
+            _bulk_workers = int(max(1, _remaining_workers - _full_workers))
+        else:
+            assert req_bulk is not None and req_full is not None
+            if (req_bulk + req_full) <= _remaining_workers:
+                _bulk_workers = int(req_bulk)
+                _full_workers = int(req_full)
+            else:
+                _bulk_workers = int(min(req_bulk, max(1, _remaining_workers - 1)))
+                _full_workers = int(max(1, _remaining_workers - _bulk_workers))
+
         self._thread_pool = QtCore.QThreadPool(self)
-        self._thread_pool.setMaxThreadCount(1)
+        self._thread_pool.setMaxThreadCount(_task_workers)
         self._bulk_thread_pool = QtCore.QThreadPool(self)
-        self._bulk_worker_count = int(max(1, min(8, (os.cpu_count() or 2) - 1)))
+        self._bulk_worker_count = _bulk_workers
         self._bulk_thread_pool.setMaxThreadCount(self._bulk_worker_count)
         self._task_queue: deque = deque()
         self._task_queue_max = 32
@@ -746,17 +797,26 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._stream_next_index: Optional[int] = None
         self._analysis_token = 0
         self._analysis_inflight = False
+        self._analysis_cancel_event: Optional[threading.Event] = None
         self._pending_analysis_request: Optional[
             Tuple[np.ndarray, Tuple[int, int, int, int], int, Optional[Tuple[float, float]]]
         ] = None
-        self._full_thread_pool = QtCore.QThreadPool(self)
-        self._full_worker_count = int(max(1, min(8, (os.cpu_count() or 2) - 1)))
-        self._full_thread_pool.setMaxThreadCount(self._full_worker_count)
+        self._last_committed_roi_rect: Optional[Tuple[float, float, float, float]] = None
+        self._suppress_roi_callbacks = False
+        # Keep ROI dragging responsive by default: recompute on release.
+        self._live_roi_preview = False
+        self._full_worker_count = _full_workers
         self._full_queue: deque = deque()
         self._full_queue_max = 64
         self._full_running_count = 0
         self._full_queued_indices: Set[int] = set()
         self._full_active_indices: Set[int] = set()
+        self._full_refresh_active_indices: Set[int] = set()
+        self._full_future_to_index: Dict[object, int] = {}
+        self._full_process_pool = concurrent.futures.ProcessPoolExecutor(
+            max_workers=self._full_worker_count
+        )
+        self._pause_full_prepare = False
         self._bulk_reprocess_active = False
         self._bulk_reprocess_token = 0
         self._bulk_reprocess_total = 0
@@ -767,6 +827,8 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._full_edge_refined = False
         self._full_dynamic_results_ready = False
         self._full_dynamic_pass_requested = False
+        self._full_prepare_refresh_requested = False
+        self._roi_generation = 0
         self._roi_reprocess_after_scan = False
         self._pending_bulk_reprocess: Optional[
             Tuple[bool, Optional[Tuple[int, ...]], bool, bool, str]
@@ -778,8 +840,21 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._edge_min_candidates = 3
         self._optimal_focus_position: float = np.nan
         self._optimal_focus_sigma: float = np.nan
+        self._shutting_down = False
 
         self._build_ui()
+        self._last_committed_roi_rect = self._roi_rect()
+        self._log(
+            f"Worker limits: total={self._max_workers_total}, "
+            f"task=1, bulk={self._bulk_worker_count}, full={self._full_worker_count} (processes)"
+        )
+        self._log(
+            "Math thread caps: "
+            f"OMP={os.environ.get('OMP_NUM_THREADS')}, "
+            f"MKL={os.environ.get('MKL_NUM_THREADS')}, "
+            f"OPENBLAS={os.environ.get('OPENBLAS_NUM_THREADS')}, "
+            f"NUMEXPR={os.environ.get('NUMEXPR_NUM_THREADS')}"
+        )
         self._log(f"Viewer initialized with {len(self.frames)} frames")
         self._load_frame(0)
 
@@ -877,9 +952,21 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.mtf_plot.getPlotItem().vb.enableAutoRange(x=False)
 
         self.sigma_metric_plot = pg.PlotWidget(title="ESF Sigma vs Motor")
-        self.sigma_metric_plot.addLegend()
-        self.curve_sigma = self.sigma_metric_plot.plot(
-            pen=pg.mkPen(40, 160, 90, width=2), symbol="o", symbolSize=6, name="step_sigma"
+        self.curve_sigma_quick = self.sigma_metric_plot.plot(
+            pen=None,
+            symbol="o",
+            symbolSize=5,
+            symbolBrush=pg.mkBrush(170, 170, 170),
+            symbolPen=pg.mkPen(120, 120, 120, width=1),
+            name="quick",
+        )
+        self.curve_sigma_full = self.sigma_metric_plot.plot(
+            pen=None,
+            symbol="o",
+            symbolSize=7,
+            symbolBrush=pg.mkBrush(40, 160, 90),
+            symbolPen=pg.mkPen(30, 120, 70, width=1),
+            name="full",
         )
         self.curve_sigma_highlight = self.sigma_metric_plot.plot(
             pen=None,
@@ -897,8 +984,21 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.sigma_metric_plot.setLabel("left", "step_sigma")
 
         self.psf_metric_plot = pg.PlotWidget(title="PSF Width vs Motor")
-        self.curve_psf = self.psf_metric_plot.plot(
-            pen=pg.mkPen(210, 120, 30, width=2), symbol="o", symbolSize=6
+        self.curve_psf_quick = self.psf_metric_plot.plot(
+            pen=None,
+            symbol="o",
+            symbolSize=5,
+            symbolBrush=pg.mkBrush(175, 175, 175),
+            symbolPen=pg.mkPen(120, 120, 120, width=1),
+            name="quick",
+        )
+        self.curve_psf_full = self.psf_metric_plot.plot(
+            pen=None,
+            symbol="o",
+            symbolSize=7,
+            symbolBrush=pg.mkBrush(210, 120, 30),
+            symbolPen=pg.mkPen(160, 90, 20, width=1),
+            name="full",
         )
         self.curve_psf_highlight = self.psf_metric_plot.plot(
             pen=None,
@@ -911,8 +1011,21 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.psf_metric_plot.setLabel("left", "psf_sigma")
 
         self.mtf_metric_plot = pg.PlotWidget(title="MTF50 vs Motor")
-        self.curve_mtf50 = self.mtf_metric_plot.plot(
-            pen=pg.mkPen(100, 90, 220, width=2), symbol="o", symbolSize=6
+        self.curve_mtf50_quick = self.mtf_metric_plot.plot(
+            pen=None,
+            symbol="o",
+            symbolSize=5,
+            symbolBrush=pg.mkBrush(170, 170, 170),
+            symbolPen=pg.mkPen(120, 120, 120, width=1),
+            name="quick",
+        )
+        self.curve_mtf50_full = self.mtf_metric_plot.plot(
+            pen=None,
+            symbol="o",
+            symbolSize=7,
+            symbolBrush=pg.mkBrush(100, 90, 220),
+            symbolPen=pg.mkPen(75, 70, 170, width=1),
+            name="full",
         )
         self.curve_mtf50_highlight = self.mtf_metric_plot.plot(
             pen=None,
@@ -949,6 +1062,15 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.edge_line_item.hide()
         self.image_view.getView().addItem(self.edge_line_item)
 
+        self.filter_queue_bar = QtWidgets.QProgressBar(self)
+        self.filter_queue_bar.setRange(0, max(1, len(self.frames)))
+        self.filter_queue_bar.setValue(0)
+        self.filter_queue_bar.setFixedWidth(230)
+        self.filter_queue_bar.setTextVisible(True)
+        self.filter_queue_bar.setFormat("Full filter queue: 0")
+        self.filter_queue_label = QtWidgets.QLabel("full 0/0")
+        self.statusBar().addPermanentWidget(self.filter_queue_bar)
+        self.statusBar().addPermanentWidget(self.filter_queue_label)
         self.statusBar().showMessage("Set ROI around foil edge, then press Play or step frames.")
 
         self.timer = QtCore.QTimer(self)
@@ -956,6 +1078,8 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._roi_analysis_timer = QtCore.QTimer(self)
         self._roi_analysis_timer.setSingleShot(True)
         self._roi_analysis_timer.setInterval(180)
+        self._full_future_timer = QtCore.QTimer(self)
+        self._full_future_timer.setInterval(40)
 
         self.btn_prev.clicked.connect(self._prev_frame)
         self.btn_next.clicked.connect(self._next_frame)
@@ -964,8 +1088,11 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.speed_spin.valueChanged.connect(self._on_interval_changed)
         self.timer.timeout.connect(self._tick)
         self._roi_analysis_timer.timeout.connect(self._recompute_current)
+        self._full_future_timer.timeout.connect(self._drain_full_prepare_futures)
         self.roi.sigRegionChanged.connect(self._on_roi_region_changed)
         self.roi.sigRegionChangeFinished.connect(self._on_roi_region_change_finished)
+        self._full_future_timer.start()
+        self._update_filter_queue_indicator()
 
     def _log(self, message: str):
         ts = QtCore.QDateTime.currentDateTime().toString("HH:mm:ss")
@@ -1009,6 +1136,23 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 "Fixed edge line: "
                 f"m={self._fixed_edge_line[0]:.6f}, b={self._fixed_edge_line[1]:.6f}"
             )
+
+    def _filter_queue_count(self) -> int:
+        full_pending = int(len(self._full_queue) + self._full_running_count)
+        # Only track heavy full-image filtering backlog here.
+        full_backlog = max(0, int(len(self._seen_frame_indices) - len(self._full_filtered_cache)))
+        return max(0, full_pending, full_backlog)
+
+    def _update_filter_queue_indicator(self):
+        if not hasattr(self, "filter_queue_bar"):
+            return
+        total = max(1, int(len(self.frames)))
+        full_ready = int(min(total, len(self._full_filtered_cache)))
+        queue_count = self._filter_queue_count()
+        self.filter_queue_bar.setRange(0, total)
+        self.filter_queue_bar.setValue(int(min(total, max(0, queue_count))))
+        self.filter_queue_bar.setFormat(f"Full filter queue: {queue_count}")
+        self.filter_queue_label.setText(f"full {full_ready}/{len(self.frames)}")
 
     def _cache_filtered(self, idx: int, filtered: np.ndarray):
         # Backward-compatible alias: this now means quick-pass cache.
@@ -1056,6 +1200,16 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             ),
         )
 
+    def _set_display_image(self, image: np.ndarray):
+        prev_suppress = self._suppress_roi_callbacks
+        self._suppress_roi_callbacks = True
+        roi_prev_block = self.roi.blockSignals(True)
+        try:
+            self.image_view.setImage(image, autoRange=False, autoLevels=True)
+        finally:
+            self.roi.blockSignals(roi_prev_block)
+            self._suppress_roi_callbacks = prev_suppress
+
     def _roi_rect(self) -> Tuple[float, float, float, float]:
         pos = self.roi.pos()
         size = self.roi.size()
@@ -1067,6 +1221,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             and (not self.playing)
             and (not self._is_frame_loading)
             and (not self._task_worker_busy)
+            and (len(self._full_refresh_active_indices) == 0)
             and (len(self._task_queue) == 0)
         )
 
@@ -1076,6 +1231,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             and (not self._is_frame_loading)
             and (not self._task_worker_busy)
             and (not self._bulk_reprocess_active)
+            and (len(self._full_refresh_active_indices) == 0)
             and (len(self._task_queue) == 0)
         )
 
@@ -1136,6 +1292,8 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         reason: str = "bulk",
         defer_if_busy: bool = True,
     ) -> bool:
+        if self._shutting_down:
+            return False
         if self._bulk_reprocess_active or self._is_frame_loading or self._task_worker_busy:
             if defer_if_busy:
                 idx_tuple = tuple(int(i) for i in frame_indices) if frame_indices is not None else None
@@ -1149,10 +1307,10 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 if self._pending_bulk_reprocess != pending_spec:
                     self._pending_bulk_reprocess = pending_spec
                     self._log(f"Deferred reprocess request ({reason}) until worker is idle.")
+                self._update_filter_queue_indicator()
             return False
         if clear_queues:
             self._clear_task_queue()
-            self._clear_full_queue()
         else:
             self._clear_queued_bulk_tasks()
         self._bulk_reprocess_active = True
@@ -1173,11 +1331,15 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         if cur_idx in requested_indices:
             requested_indices = [cur_idx] + [i for i in requested_indices if i != cur_idx]
         self._bulk_reprocess_all_frames = len(requested_indices) == len(self.frames)
+        # Keep full filtering independent from reprocessing. Reprocess should
+        # consume filtered cache, not pause or flush the heavy filter queue.
+        self._pause_full_prepare = False
         self._bulk_reprocess_total = 0
         self._bulk_reprocess_done = 0
         self._current_bulk_used_fixed = self._fixed_edge_line is not None
         if not preserve_existing_results:
             self._results.clear()
+            self._result_is_full.clear()
 
         roi_rect = self._roi_rect()
         mode = "full" if self._bulk_reprocess_all_frames else "partial"
@@ -1208,11 +1370,9 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             else:
                 if not allow_disk_fallback:
                     continue
-                if self._bulk_reprocess_all_frames and idx != int(self.current_index):
-                    # In full passes, analyze non-displayed frames from ROI only.
-                    worker_fn = _bulk_reprocess_roi_worker
-                else:
-                    worker_fn = _bulk_reprocess_worker
+                # Always run full-frame worker for disk fallbacks so all-frame
+                # reprocess fills the full-quality cache consistently.
+                worker_fn = _bulk_reprocess_worker
                 ok = self._start_bulk_task(
                     token,
                     idx,
@@ -1229,16 +1389,21 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             self._bulk_reprocess_all_frames = False
             self.statusBar().showMessage("No frames available for ROI reprocess yet.")
             self._log(f"Reprocess skipped [{reason}]: no frames could be scheduled.")
+            self._update_filter_queue_indicator()
             return False
+        self._update_filter_queue_indicator()
         return True
 
     def _start_task(self, kind: str, token: int, frame_index: int, fn, *args, priority: int = 0):
+        if self._shutting_down:
+            return False
         # Single-worker FIFO queue to mirror sequential event stream processing.
         if len(self._task_queue) >= self._task_queue_max:
             self._log(
                 f"Backpressure: queue full ({len(self._task_queue)}/{self._task_queue_max}); "
                 f"could not enqueue {kind} for frame {frame_index + 1}"
             )
+            self._update_filter_queue_indicator()
             return False
         task_spec = (kind, token, frame_index, fn, args)
         if priority >= 2:
@@ -1246,10 +1411,37 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         else:
             self._task_queue.append(task_spec)
         self._pump_task_queue()
+        self._update_filter_queue_indicator()
         return True
 
     def _start_bulk_task(self, token: int, frame_index: int, fn, *args):
+        if self._shutting_down:
+            return False
         task = _TaskRunner("bulk_reprocess", token, frame_index, fn, *args)
+        task.signals.done.connect(self._on_task_done)
+        self._bulk_thread_pool.start(task, priority=0)
+        self._update_filter_queue_indicator()
+        return True
+
+    def _start_full_frame_refresh(self, frame_index: int) -> bool:
+        if self._shutting_down or self._bulk_reprocess_active:
+            return False
+        idx = int(frame_index)
+        if idx in self._full_refresh_active_indices:
+            return False
+        filtered = self._get_full_filtered_image(idx)
+        if filtered is None:
+            return False
+        self._full_refresh_active_indices.add(idx)
+        task = _TaskRunner(
+            "refresh_full_frame",
+            int(self._roi_generation),
+            idx,
+            _bulk_reprocess_cached_worker,
+            filtered,
+            self._roi_rect(),
+            self._fixed_edge_line,
+        )
         task.signals.done.connect(self._on_task_done)
         self._bulk_thread_pool.start(task, priority=0)
         return True
@@ -1293,12 +1485,25 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._task_queue.clear()
         self._queued_load_indices.clear()
         self._pending_analysis_request = None
+        self._update_filter_queue_indicator()
 
     def _clear_full_queue(self):
         self._full_queue.clear()
         self._full_queued_indices.clear()
+        self._full_active_indices.clear()
+        self._full_running_count = 0
+        # Best effort cancel of not-yet-started futures.
+        for fut in list(self._full_future_to_index.keys()):
+            try:
+                fut.cancel()
+            except Exception:
+                pass
+        self._full_future_to_index.clear()
+        self._update_filter_queue_indicator()
 
     def _enqueue_full_prepare(self, idx: int):
+        if self._shutting_down:
+            return
         idx = int(max(0, min(len(self.frames) - 1, idx)))
         if idx in self._full_queued_indices or idx in self._full_active_indices:
             return
@@ -1313,24 +1518,108 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._full_queue.append(idx)
         self._full_queued_indices.add(idx)
         self._pump_full_queue()
+        self._update_filter_queue_indicator()
 
     def _pump_full_queue(self):
+        if self._shutting_down:
+            return
+        if self._pause_full_prepare:
+            return
         while self._full_running_count < self._full_worker_count and self._full_queue:
             idx = int(self._full_queue.popleft())
             self._full_queued_indices.discard(idx)
             self._full_running_count += 1
             self._full_active_indices.add(idx)
-            task = _TaskRunner(
-                "prepare_full",
-                0,
-                idx,
-                _load_and_filter_worker,
-                self.frames[idx].path,
+            try:
+                fut = self._full_process_pool.submit(_load_and_filter_worker, self.frames[idx].path)
+            except Exception as ex:
+                self._full_running_count = max(0, int(self._full_running_count) - 1)
+                self._full_active_indices.discard(idx)
+                self._log(f"Full prepare submit failed for frame {idx + 1}: {ex}")
+                break
+            self._full_future_to_index[fut] = idx
+        self._update_filter_queue_indicator()
+
+    def _handle_full_prepare_result(self, frame_index: int, result, error):
+        self._full_running_count = max(0, int(self._full_running_count) - 1)
+        self._full_queued_indices.discard(frame_index)
+        self._full_active_indices.discard(frame_index)
+        if error is not None:
+            self._log(f"Full prepare failed for frame {frame_index + 1}: {error}")
+        elif result is not None:
+            self._cache_full_filtered(frame_index, result)
+            # If user is currently viewing this frame, refresh image/analysis with full-quality data.
+            if frame_index == self.current_index and not self._bulk_reprocess_active:
+                self._current_filtered = result
+                self._set_display_image(result)
+                self._request_analysis_current()
+            elif not self._bulk_reprocess_active:
+                # Promote this frame's plotted point from quick(gray) to full(color)
+                # as soon as full filtering completes.
+                self._start_full_frame_refresh(frame_index)
+            if (
+                (self._fixed_edge_line is None)
+                and (not self._bulk_reprocess_active)
+                and (len(self._full_filtered_cache) == len(self.frames))
+            ):
+                self._try_lock_edge_from_focus_minimum()
+            if (
+                (len(self._full_filtered_cache) <= 3)
+                or (len(self._full_filtered_cache) == len(self.frames))
+                or (len(self._full_filtered_cache) % max(1, len(self.frames) // 10) == 0)
+            ):
+                self._log(
+                    f"Full prepare progress: {len(self._full_filtered_cache)}/{len(self.frames)} cached"
+                )
+        if (
+            (len(self._full_filtered_cache) == len(self.frames))
+            and (not self._bulk_reprocess_active)
+            and (not self._full_prepare_refresh_requested)
+        ):
+            self._full_prepare_refresh_requested = True
+            self._log(
+                "Full filtering queue complete. Recomputing ROI metrics on fully filtered frames..."
             )
-            task.signals.done.connect(self._on_task_done)
-            self._full_thread_pool.start(task, priority=0)
+            self._start_bulk_reprocess(
+                preserve_existing_results=True,
+                frame_indices=None,
+                allow_disk_fallback=False,
+                clear_queues=False,
+                reason="full-prepare-complete-refresh",
+            )
+        self._pump_full_queue()
+        self._maybe_start_full_reprocess_after_scan()
+        self._update_filter_queue_indicator()
+
+    def _drain_full_prepare_futures(self):
+        if self._shutting_down:
+            return
+        if not self._full_future_to_index:
+            self._pump_full_queue()
+            return
+        done_futures = [f for f in list(self._full_future_to_index.keys()) if f.done()]
+        if not done_futures:
+            return
+        for fut in done_futures:
+            idx = int(self._full_future_to_index.pop(fut))
+            err = None
+            result = None
+            try:
+                result = fut.result()
+            except Exception as ex:
+                err = ex
+            self._handle_full_prepare_result(idx, result, err)
+        self._update_filter_queue_indicator()
 
     def _pump_task_queue(self):
+        if self._shutting_down:
+            self._task_queue.clear()
+            self._queued_load_indices.clear()
+            self._task_worker_busy = False
+            self._is_frame_loading = False
+            self._active_load_index = None
+            self._update_filter_queue_indicator()
+            return
         if self._task_worker_busy:
             return
         if not self._task_queue:
@@ -1352,6 +1641,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 self._pending_bulk_reprocess = pending
             self._maybe_start_full_reprocess_after_scan()
             self._maybe_finalize_playback_summary()
+            self._update_filter_queue_indicator()
             return
         kind, token, frame_index, fn, args = self._task_queue.popleft()
         self._task_worker_busy = True
@@ -1361,6 +1651,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         task = _TaskRunner(kind, token, frame_index, fn, *args)
         task.signals.done.connect(self._on_task_done)
         self._thread_pool.start(task, priority=0)
+        self._update_filter_queue_indicator()
 
     def _request_analysis_current(self):
         filt = self._current_filtered
@@ -1371,7 +1662,9 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         frame_idx = self.current_index
         fixed_edge_line = self._fixed_edge_line
         if self._analysis_inflight:
-            # Coalesce rapid ROI updates: only keep the latest request.
+            # Coalesce rapid requests: keep only the latest pending request.
+            # Do not cancel current analysis here, so frame-to-frame playback
+            # can still record metrics for frames that just moved off-screen.
             self._pending_analysis_request = (filt, bounds, frame_idx, fixed_edge_line)
             return
         self._launch_analysis_request(filt, bounds, frame_idx, fixed_edge_line=fixed_edge_line)
@@ -1386,6 +1679,10 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._analysis_inflight = True
         self._analysis_token += 1
         token = self._analysis_token
+        if self._analysis_cancel_event is not None:
+            self._analysis_cancel_event.set()
+        cancel_event = threading.Event()
+        self._analysis_cancel_event = cancel_event
         ok = self._start_task(
             "analyze_current",
             token,
@@ -1394,10 +1691,12 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             filtered,
             bounds,
             fixed_edge_line,
+            cancel_event,
             priority=2,
         )
         if not ok:
             self._analysis_inflight = False
+            self._analysis_cancel_event = None
 
     def _try_lock_edge_from_focus_minimum(self, allow_existing: bool = False) -> bool:
         if self._fixed_edge_line is not None and not allow_existing:
@@ -1415,7 +1714,8 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 self._full_dynamic_pass_requested = True
                 self._log("Full cache ready. Running dynamic full-pass before fixed edge lock...")
                 self._start_bulk_reprocess(
-                    preserve_existing_results=False,
+                    preserve_existing_results=True,
+                    allow_disk_fallback=False,
                     reason="dynamic-full-pass-before-lock",
                 )
             return False
@@ -1503,12 +1803,13 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             f"frame={ref_idx + 1}, m={m_med:.6f}, b={b_med:.6f}"
         )
         # On initial lock, jump the viewer to the selected near-minimum frame.
-        # This also makes the fixed-edge rerun prioritize that frame first.
+        # Use cache-only mode so this does not trigger new quick-pass loads.
         if prev_line is None and ref_idx != int(self.current_index):
-            self._load_frame(ref_idx)
+            self._load_frame(ref_idx, cached_only=True)
         # Preserve existing points and overwrite frame-by-frame as refreshed results arrive.
         self._start_bulk_reprocess(
             preserve_existing_results=True,
+            allow_disk_fallback=False,
             reason="fixed-edge-rerun",
         )
         return True
@@ -1517,6 +1818,9 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         if not self._roi_reprocess_after_scan:
             return
         if self._bulk_reprocess_active:
+            return
+        if len(self._full_filtered_cache) < len(self.frames):
+            # Wait until heavy full filtering is complete; then run cache-only reprocess.
             return
         if not self._is_dataset_complete():
             return
@@ -1527,9 +1831,9 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             "Scan complete after ROI update. Running full dynamic pass before fixed-edge lock."
         )
         self._start_bulk_reprocess(
-            preserve_existing_results=False,
+            preserve_existing_results=True,
             frame_indices=None,
-            allow_disk_fallback=True,
+            allow_disk_fallback=False,
             clear_queues=True,
             reason="scan-complete-full-reprocess",
         )
@@ -1544,34 +1848,26 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._log_final_summary("Final summary after playback")
 
     def _on_task_done(self, kind: str, token: int, frame_index: int, result, error):
+        if self._shutting_down:
+            if kind == "prepare_full":
+                self._full_running_count = max(0, int(self._full_running_count) - 1)
+                self._full_queued_indices.discard(frame_index)
+                self._full_active_indices.discard(frame_index)
+            elif kind == "refresh_full_frame":
+                self._full_refresh_active_indices.discard(frame_index)
+            elif kind == "load_filter_display":
+                self._task_worker_busy = False
+                self._is_frame_loading = False
+                self._queued_load_indices.discard(frame_index)
+                if self._active_load_index == frame_index:
+                    self._active_load_index = None
+            elif kind == "analyze_current":
+                self._task_worker_busy = False
+                self._analysis_inflight = False
+            self._update_filter_queue_indicator()
+            return
         if kind == "prepare_full":
-            self._full_running_count = max(0, int(self._full_running_count) - 1)
-            self._full_queued_indices.discard(frame_index)
-            self._full_active_indices.discard(frame_index)
-            if error is not None:
-                self._log(f"Full prepare failed for frame {frame_index + 1}: {error}")
-            elif result is not None:
-                self._cache_full_filtered(frame_index, result)
-                # If user is currently viewing this frame, refresh image/analysis with full-quality data.
-                if frame_index == self.current_index and not self._bulk_reprocess_active:
-                    self._current_filtered = result
-                    self.image_view.setImage(result, autoRange=False, autoLevels=True)
-                    self._request_analysis_current()
-                if (
-                    (self._fixed_edge_line is None)
-                    and (not self._bulk_reprocess_active)
-                    and (len(self._full_filtered_cache) == len(self.frames))
-                ):
-                    self._try_lock_edge_from_focus_minimum()
-                if (
-                    (len(self._full_filtered_cache) <= 3)
-                    or (len(self._full_filtered_cache) == len(self.frames))
-                    or (len(self._full_filtered_cache) % max(1, len(self.frames) // 10) == 0)
-                ):
-                    self._log(
-                        f"Full prepare progress: {len(self._full_filtered_cache)}/{len(self.frames)} cached"
-                    )
-            self._pump_full_queue()
+            self._handle_full_prepare_result(frame_index, result, error)
             return
 
         if kind == "bulk_reprocess":
@@ -1588,8 +1884,11 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                     self._cache_filtered(frame_index, filtered_opt)
                     if frame_index == self.current_index:
                         self._current_filtered = filtered_opt
-                        self.image_view.setImage(filtered_opt, autoRange=False, autoLevels=True)
+                        self._set_display_image(filtered_opt)
                 self._results[frame_index] = fit_result
+                self._result_is_full[frame_index] = bool(
+                    (filtered_opt is not None) or (frame_index in self._full_filtered_cache)
+                )
 
                 if frame_index == self.current_index:
                     self._update_profile_plot(fit_result)
@@ -1609,7 +1908,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 cur_full = self._get_full_filtered_image(self.current_index)
                 if cur_full is not None:
                     self._current_filtered = cur_full
-                    self.image_view.setImage(cur_full, autoRange=False, autoLevels=True)
+                    self._set_display_image(cur_full)
                 cur_result = self._results.get(self.current_index, None)
                 if cur_result is not None:
                     self._update_profile_plot(cur_result)
@@ -1643,6 +1942,25 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                         f"Reprocessing progress: {self._bulk_reprocess_done}/{self._bulk_reprocess_total}"
                     )
             self._pump_task_queue()
+            self._update_filter_queue_indicator()
+            return
+
+        if kind == "refresh_full_frame":
+            self._full_refresh_active_indices.discard(frame_index)
+            if token == int(self._roi_generation):
+                if error is None and result is not None:
+                    _, fit_result = result
+                    fit_result = self._preserve_previous_edge_geometry(frame_index, fit_result)
+                    self._results[frame_index] = fit_result
+                    self._result_is_full[frame_index] = True
+                    if frame_index == self.current_index:
+                        self._update_profile_plot(fit_result)
+                        self._try_lock_edge_from_focus_minimum()
+                    self._update_metric_plot()
+                elif error is not None:
+                    self._log(f"Full-frame ROI refresh failed for frame {frame_index + 1}: {error}")
+            self._maybe_start_full_reprocess_after_scan()
+            self._update_filter_queue_indicator()
             return
 
         self._task_worker_busy = False
@@ -1659,9 +1977,11 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             elif result is not None:
                 self._cache_filtered(frame_index, result)
                 self._seen_frame_indices.add(int(frame_index))
+                # Immediately queue full-quality filtering for this frame.
+                self._enqueue_full_prepare(frame_index)
                 self.current_index = frame_index
                 self._current_filtered = result
-                self.image_view.setImage(result, autoRange=False, autoLevels=True)
+                self._set_display_image(result)
                 # Apply best-available result immediately so overlay updates with frame changes.
                 existing_result = self._results.get(frame_index, None)
                 if existing_result is not None:
@@ -1670,29 +1990,28 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                     self.edge_line_item.hide()
                 self._request_analysis_current()
                 self._schedule_prefetch(frame_index)
-                self._enqueue_full_prepare(frame_index)
                 self._update_metric_plot()
                 self._log(
                     f"Quick frame ready: {frame_index + 1}/{len(self.frames)} "
                     f"({self.frames[frame_index].path.name})"
                 )
             self._pump_task_queue()
+            self._update_filter_queue_indicator()
             return
 
         if kind == "analyze_current":
             self._analysis_inflight = False
-            if error is not None:
+            is_current_request = token == self._analysis_token
+            if (error is not None) and is_current_request:
                 self.statusBar().showMessage(f"Fit failed for frame {frame_index + 1}: {error}")
-            elif (
-                result is not None
-                and token == self._analysis_token
-                and frame_index == self.current_index
-            ):
+            elif (result is not None) and is_current_request:
                 result = self._preserve_previous_edge_geometry(frame_index, result)
                 self._results[frame_index] = result
-                self._update_profile_plot(result)
+                self._result_is_full[frame_index] = bool(frame_index in self._full_filtered_cache)
                 self._update_metric_plot()
-                self._try_lock_edge_from_focus_minimum()
+                if frame_index == self.current_index:
+                    self._update_profile_plot(result)
+                    self._try_lock_edge_from_focus_minimum()
 
             if self._pending_analysis_request is not None:
                 pending = self._pending_analysis_request
@@ -1707,12 +2026,16 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                         fixed_edge_line=pfixed,
                     )
             self._pump_task_queue()
+            self._update_filter_queue_indicator()
             return
 
         self._pump_task_queue()
         self._maybe_finalize_playback_summary()
+        self._update_filter_queue_indicator()
 
-    def _load_frame(self, idx: int):
+    def _load_frame(self, idx: int, *, cached_only: bool = False):
+        if self._shutting_down:
+            return False
         idx = max(0, min(len(self.frames) - 1, int(idx)))
         if idx in self._queued_load_indices or idx == self._active_load_index:
             return False
@@ -1724,9 +2047,11 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         )
         if cached is not None:
             self._seen_frame_indices.add(int(idx))
+            # Ensure revisited quick-cached frames still enter the full queue.
+            self._enqueue_full_prepare(idx)
             self.current_index = idx
             self._current_filtered = cached
-            self.image_view.setImage(cached, autoRange=False, autoLevels=True)
+            self._set_display_image(cached)
             # Apply best-available result immediately so ROI edge overlay tracks frame navigation.
             cached_result = self._results.get(idx, None)
             if cached_result is not None:
@@ -1735,9 +2060,11 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 self.edge_line_item.hide()
             self._request_analysis_current()
             self._schedule_prefetch(idx)
-            self._enqueue_full_prepare(idx)
             self._update_metric_plot()
+            self._update_filter_queue_indicator()
             return True
+        if cached_only:
+            return False
 
         self._is_frame_loading = True
         self._current_filtered = None
@@ -1758,12 +2085,14 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         )
         if ok:
             self._queued_load_indices.add(idx)
+            self._update_filter_queue_indicator()
             return True
 
         self._is_frame_loading = False
         self.statusBar().showMessage(
             f"Backpressure: queue full, could not enqueue frame {idx + 1}/{len(self.frames)}"
         )
+        self._update_filter_queue_indicator()
         return False
 
     def _update_profile_plot(self, result: FitResult):
@@ -1838,9 +2167,18 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         sigma_errs: List[float] = []
         psf_sigmas: List[float] = []
         mtf50s: List[float] = []
+        xs_quick: List[float] = []
+        sigma_quick: List[float] = []
+        psf_quick: List[float] = []
+        mtf_quick: List[float] = []
+        xs_full: List[float] = []
+        sigma_full: List[float] = []
+        psf_full: List[float] = []
+        mtf_full: List[float] = []
         for idx in sorted(self._results):
             r = self._results[idx]
             pos = self.frames[idx].position
+            is_full = bool(self._result_is_full.get(idx, idx in self._full_filtered_cache))
             xs.append(pos)
             sigmas.append(r.step_sigma if np.isfinite(r.step_sigma) else np.nan)
             sigma_errs.append(
@@ -1848,6 +2186,16 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             )
             psf_sigmas.append(r.psf_sigma if np.isfinite(r.psf_sigma) else np.nan)
             mtf50s.append(r.mtf50 if np.isfinite(r.mtf50) else np.nan)
+            if is_full:
+                xs_full.append(pos)
+                sigma_full.append(r.step_sigma if np.isfinite(r.step_sigma) else np.nan)
+                psf_full.append(r.psf_sigma if np.isfinite(r.psf_sigma) else np.nan)
+                mtf_full.append(r.mtf50 if np.isfinite(r.mtf50) else np.nan)
+            else:
+                xs_quick.append(pos)
+                sigma_quick.append(r.step_sigma if np.isfinite(r.step_sigma) else np.nan)
+                psf_quick.append(r.psf_sigma if np.isfinite(r.psf_sigma) else np.nan)
+                mtf_quick.append(r.mtf50 if np.isfinite(r.mtf50) else np.nan)
 
         x_arr = np.asarray(xs, dtype=np.float64)
         sigma_arr = np.asarray(sigmas, dtype=np.float64)
@@ -1855,9 +2203,30 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         psf_sigma_arr = np.asarray(psf_sigmas, dtype=np.float64)
         mtf50_arr = np.asarray(mtf50s, dtype=np.float64)
 
-        self.curve_sigma.setData(x_arr, sigma_arr)
-        self.curve_psf.setData(x_arr, psf_sigma_arr)
-        self.curve_mtf50.setData(x_arr, mtf50_arr)
+        self.curve_sigma_quick.setData(
+            np.asarray(xs_quick, dtype=np.float64),
+            np.asarray(sigma_quick, dtype=np.float64),
+        )
+        self.curve_sigma_full.setData(
+            np.asarray(xs_full, dtype=np.float64),
+            np.asarray(sigma_full, dtype=np.float64),
+        )
+        self.curve_psf_quick.setData(
+            np.asarray(xs_quick, dtype=np.float64),
+            np.asarray(psf_quick, dtype=np.float64),
+        )
+        self.curve_psf_full.setData(
+            np.asarray(xs_full, dtype=np.float64),
+            np.asarray(psf_full, dtype=np.float64),
+        )
+        self.curve_mtf50_quick.setData(
+            np.asarray(xs_quick, dtype=np.float64),
+            np.asarray(mtf_quick, dtype=np.float64),
+        )
+        self.curve_mtf50_full.setData(
+            np.asarray(xs_full, dtype=np.float64),
+            np.asarray(mtf_full, dtype=np.float64),
+        )
 
         # Highlight current frame across all lower metric plots.
         current_idx = int(self.current_index)
@@ -1980,8 +2349,16 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._request_analysis_current()
 
     def _on_roi_region_changed(self):
+        if self._suppress_roi_callbacks:
+            return
         if self._current_filtered is None:
             return
+        # Drop in-flight ROI analysis while dragging so old ROI positions
+        # do not race back into the UI.
+        if self._analysis_cancel_event is not None:
+            self._analysis_cancel_event.set()
+        self._analysis_token += 1
+        self._pending_analysis_request = None
         x0, x1, y0, y1 = self._current_roi_bounds(self._current_filtered.shape)
         if self._is_dataset_complete():
             self.statusBar().showMessage(
@@ -1991,35 +2368,55 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage(
                 f"ROI moving: x=[{x0},{x1}) y=[{y0},{y1}) | release mouse to refit"
             )
-        self._roi_analysis_timer.start()
+        if self._live_roi_preview:
+            self._roi_analysis_timer.start()
 
     def _on_roi_region_change_finished(self):
+        if self._suppress_roi_callbacks:
+            return
         self._roi_analysis_timer.stop()
+        if self._analysis_cancel_event is not None:
+            self._analysis_cancel_event.set()
+        self._analysis_token += 1
+        self._pending_analysis_request = None
+        roi_rect = self._roi_rect()
+        if self._last_committed_roi_rect is not None:
+            max_diff = max(abs(a - b) for a, b in zip(roi_rect, self._last_committed_roi_rect))
+            if max_diff < 0.5:
+                return
+        self._last_committed_roi_rect = roi_rect
+        self._roi_generation += 1
         # ROI change invalidates any previously locked global edge geometry.
         self._fixed_edge_line = None
         self._fixed_edge_reference_index = None
         self._full_edge_refined = False
         self._full_dynamic_results_ready = False
         self._full_dynamic_pass_requested = False
+        self._full_prepare_refresh_requested = False
         self._pending_bulk_reprocess = None
         self._clear_queued_bulk_tasks()
         self._stream_next_index = int(self.current_index + 1)
         if self._is_dataset_complete():
-            # ROI changed: invalidate previous points and rebuild from scratch.
-            self._roi_reprocess_after_scan = False
-            self._start_bulk_reprocess(
-                preserve_existing_results=False,
-                frame_indices=None,
-                allow_disk_fallback=True,
-                clear_queues=True,
-                reason="roi-release-scan-finished",
-            )
+            # Dataset done: do cache-only reprocess after full filtering finishes.
+            if len(self._full_filtered_cache) >= len(self.frames):
+                self._roi_reprocess_after_scan = False
+                self._start_bulk_reprocess(
+                    preserve_existing_results=True,
+                    frame_indices=None,
+                    allow_disk_fallback=False,
+                    clear_queues=True,
+                    reason="roi-release-scan-finished",
+                )
+            else:
+                self._roi_reprocess_after_scan = True
+                self._log(
+                    "ROI updated after scan; waiting for full filtering queue "
+                    "to complete before cache-only reprocess."
+                )
             return
         # During scanning: clear stale metrics, quickly reanalyze already-collected cached frames,
         # and complete a full all-frame pass when the scan reaches the end.
         self._roi_reprocess_after_scan = True
-        self._results.clear()
-        self._update_metric_plot()
         # Always refresh current-frame peak-shape plots immediately after ROI change.
         self._recompute_current()
         cached_indices = self._cached_frame_indices_upto_current()
@@ -2076,6 +2473,49 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         if enqueued:
             self._stream_next_index = int(nxt + 1)
 
+    def closeEvent(self, event):
+        self._shutting_down = True
+        self.playing = False
+        self.timer.stop()
+        self._roi_analysis_timer.stop()
+        self._full_future_timer.stop()
+        if self._analysis_cancel_event is not None:
+            self._analysis_cancel_event.set()
+        self._analysis_inflight = False
+        self._pending_analysis_request = None
+        self._pending_bulk_reprocess = None
+        self._roi_reprocess_after_scan = False
+        self._pause_full_prepare = True
+        self._bulk_reprocess_active = False
+        self._bulk_reprocess_total = 0
+        self._bulk_reprocess_done = 0
+        self._clear_task_queue()
+        self._clear_full_queue()
+        self._full_active_indices.clear()
+        self._full_refresh_active_indices.clear()
+
+        for pool in (self._thread_pool, self._bulk_thread_pool):
+            try:
+                pool.clear()
+            except Exception:
+                pass
+        for pool in (self._thread_pool, self._bulk_thread_pool):
+            try:
+                pool.waitForDone(3000)
+            except TypeError:
+                pool.waitForDone()
+            except Exception:
+                pass
+        try:
+            self._full_process_pool.shutdown(wait=True, cancel_futures=True)
+        except TypeError:
+            self._full_process_pool.shutdown(wait=True)
+        except Exception:
+            pass
+
+        self._update_filter_queue_indicator()
+        super().closeEvent(event)
+
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Offline focus scan viewer")
@@ -2100,6 +2540,29 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Optional CSV mapping filename->position (columns: filename,position)",
     )
     p.add_argument("--interval-ms", type=int, default=500, help="Playback interval in milliseconds")
+    p.add_argument(
+        "--max-workers-total",
+        type=int,
+        default=8,
+        help=(
+            "Maximum total concurrent workers across task, bulk, and full pools "
+            "(minimum effective value is 3)."
+        ),
+    )
+    p.add_argument(
+        "--bulk-workers",
+        type=int,
+        default=1,
+        help="Optional cap for ROI/bulk reprocess workers (recommended: 1 on beamline PCs).",
+    )
+    p.add_argument(
+        "--full-workers",
+        "--filter-workers",
+        dest="full_workers",
+        type=int,
+        default=6,
+        help="Optional cap for full-filter process workers (primary CPU load).",
+    )
     return p
 
 
@@ -2129,7 +2592,13 @@ def main(argv=None) -> int:
     pg.setConfigOption("foreground", (0, 0, 0))
     pg.setConfigOption("imageAxisOrder", "row-major")
 
-    w = FocusOfflineWindow(frames=frames, interval_ms=args.interval_ms)
+    w = FocusOfflineWindow(
+        frames=frames,
+        interval_ms=args.interval_ms,
+        max_workers_total=args.max_workers_total,
+        bulk_workers=args.bulk_workers,
+        full_workers=args.full_workers,
+    )
     w.show()
     return int(app.exec_())
 
