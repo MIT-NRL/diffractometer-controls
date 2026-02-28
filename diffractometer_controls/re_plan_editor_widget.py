@@ -1,5 +1,6 @@
 import ast
 import inspect
+from qtpy import QtCore
 from qtpy import QtGui
 from qtpy.QtWidgets import QComboBox, QTableWidgetItem
 
@@ -15,18 +16,65 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         super().__init__(model, parent, editable=editable, detailed=detailed)
         # Keep internal 3-column model for compatibility, but hide checkbox column.
         self.setColumnHidden(1, True)
+        # Guard against recursive validation/closeEditor re-entry on some Qt paths.
+        self._validity_emit_in_progress = False
+        self._close_editor_in_progress = False
+        self._validate_in_progress = False
+        # Cache parameter metadata for the currently displayed item.
+        self._cached_item_params_key = None
+        self._cached_item_params = {}
+
+    def _current_item_key(self):
+        if not self._queue_item:
+            return None
+        item_name = self._queue_item.get("name")
+        if not item_name:
+            return None
+        item_type = self._queue_item.get("item_type", "plan")
+        return (str(item_type), str(item_name))
+
+    def _get_current_item_params(self):
+        key = self._current_item_key()
+        if key is None:
+            self._cached_item_params_key = None
+            self._cached_item_params = {}
+            return {}
+        if self._cached_item_params_key == key:
+            return self._cached_item_params
+        item_type, item_name = key
+        try:
+            if item_type == "instruction":
+                item_params = self.model.get_allowed_instruction_parameters(name=item_name) or {}
+            else:
+                item_params = self.model.get_allowed_plan_parameters(name=item_name) or {}
+        except Exception:
+            item_params = {}
+        self._cached_item_params_key = key
+        self._cached_item_params = item_params if isinstance(item_params, dict) else {}
+        return self._cached_item_params
+
+    def show_item(self, *, item, editable=None):
+        self._cached_item_params_key = None
+        self._cached_item_params = {}
+        super().show_item(item=item, editable=editable)
+
+    def _param_index_from_row(self, row):
+        if 0 <= row < len(self._params_indices):
+            return self._params_indices[row]
+        if 0 <= row < len(self._params):
+            return row
+        return None
+
+    def _param_from_row(self, row):
+        p_index = self._param_index_from_row(row)
+        if p_index is None:
+            return None, None
+        return p_index, self._params[p_index]
 
     def _get_param_meta(self, p_name):
         # Try to obtain parameter metadata from the model's allowed plans
         try:
-            item_name = self._queue_item.get("name", None) if self._queue_item else None
-            if not item_name:
-                return {}
-            item_type = self._queue_item.get("item_type", "plan")
-            if item_type == "plan":
-                item_params = self.model.get_allowed_plan_parameters(name=item_name) or {}
-            else:
-                item_params = self.model.get_allowed_instruction_parameters(name=item_name) or {}
+            item_params = self._get_current_item_params()
             return self._find_param_meta(item_params, p_name)
         except Exception:
             return {}
@@ -61,7 +109,9 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             else:
                 return str(v)
 
-        p = self._params[row]
+        _, p = self._param_from_row(row)
+        if p is None:
+            return
         p_name = p["name"]
         value = p["value"]
         default_value = p["parameters"].default
@@ -101,13 +151,8 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         choices = None
 
         # Attempt to get model-level parameter metadata as a fallback
-        item_name = self._queue_item.get("name", None) if self._queue_item else None
         try:
-            item_params = (
-                self.model.get_allowed_plan_parameters(name=item_name)
-                if item_name
-                else {}
-            ) or {}
+            item_params = self._get_current_item_params()
             pmeta = self._find_param_meta(item_params, p_name)
         except Exception:
             pmeta = {}
@@ -264,11 +309,14 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
 
             def _on_bool_change(*_args, _row=row, _combo=combo):
                 try:
+                    p_index = self._param_index_from_row(_row)
+                    if p_index is None:
+                        return
                     txt = _combo.currentText()
                     val = True if txt == "True" else False
-                    self._params[_row]["value"] = val
-                    self._params[_row]["is_value_set"] = True
-                    self._params[_row]["is_user_modified"] = True
+                    self._params[p_index]["value"] = val
+                    self._params[p_index]["is_value_set"] = True
+                    self._params[p_index]["is_user_modified"] = True
                     _combo.setStyleSheet("")
                     self.signal_cell_modified.emit()
                 except Exception:
@@ -311,12 +359,15 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
 
             def _on_combo_change(*_args, _row=row, _combo=combo):
                 try:
+                    p_index = self._param_index_from_row(_row)
+                    if p_index is None:
+                        return
                     txt = _combo.currentText()
                     if not str(txt).strip():
                         # Treat empty custom entry as "unset"
-                        self._params[_row]["value"] = inspect.Parameter.empty
-                        self._params[_row]["is_value_set"] = False
-                        self._params[_row]["is_user_modified"] = True
+                        self._params[p_index]["value"] = inspect.Parameter.empty
+                        self._params[p_index]["is_value_set"] = False
+                        self._params[p_index]["is_user_modified"] = True
                         _combo.setStyleSheet("color: #777;")
                         self.signal_cell_modified.emit()
                         return
@@ -324,9 +375,9 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                         val = ast.literal_eval(txt)
                     except Exception:
                         val = txt
-                    self._params[_row]["value"] = val
-                    self._params[_row]["is_value_set"] = True
-                    self._params[_row]["is_user_modified"] = True
+                    self._params[p_index]["value"] = val
+                    self._params[p_index]["is_value_set"] = True
+                    self._params[p_index]["is_user_modified"] = True
                     _combo.setStyleSheet("")
                     self.signal_cell_modified.emit()
                 except Exception:
@@ -363,111 +414,138 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
     def _validate_cell_values(self):
         if self._validation_disabled:
             return
+        if self._validate_in_progress:
+            return
+        self._validate_in_progress = True
 
-        data_valid = True
-        for n, p_index in enumerate(self._params_indices):
-            p = self._params[p_index]
-            if p["is_value_set"]:
-                widget = self.cellWidget(n, 2)
-                if widget is not None:
-                    try:
-                        if isinstance(widget, QComboBox):
-                            txt = widget.currentText()
-                            if not str(txt).strip():
-                                # Empty entry is invalid for required params
-                                is_required = (
-                                    p["parameters"].default == inspect.Parameter.empty
-                                    and p["parameters"].kind
-                                    not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
-                                )
-                                if is_required:
-                                    cell_valid = False
-                                    data_valid = False
-                                else:
-                                    cell_valid = True
-                                # Do not override value when empty
-                                continue
-                            try:
-                                p["value"] = ast.literal_eval(txt)
-                            except Exception:
-                                p["value"] = txt
-                            cell_valid = True
-                        else:
-                            cell_valid = True
-                    except Exception:
-                        cell_valid = False
-                        data_valid = False
-                else:
-                    table_item = self.item(n, 2)
-                    if table_item:
-                        cell_valid = True
-                        cell_text = table_item.text()
-                        exp_t = p.get("expected_type")
+        try:
+            data_valid = True
+            for n, p_index in enumerate(self._params_indices):
+                p = self._params[p_index]
+                if p["is_value_set"]:
+                    widget = self.cellWidget(n, 2)
+                    if widget is not None:
                         try:
-                            p["value"] = ast.literal_eval(cell_text)
-                        except Exception:
-                            if exp_t in (int, float, bool):
+                            if isinstance(widget, QComboBox):
+                                txt = widget.currentText()
+                                if not str(txt).strip():
+                                    # Empty entry is invalid for required params
+                                    is_required = (
+                                        p["parameters"].default == inspect.Parameter.empty
+                                        and p["parameters"].kind
+                                        not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+                                    )
+                                    if is_required:
+                                        cell_valid = False
+                                        data_valid = False
+                                        widget.setStyleSheet("color: #b00020;")
+                                    else:
+                                        cell_valid = True
+                                        widget.setStyleSheet("color: #777;")
+                                    # Do not override value when empty
+                                    continue
                                 try:
-                                    if exp_t is bool:
-                                        # Allow case-insensitive true/false
-                                        low = str(cell_text).strip().lower()
-                                        if low in ("true", "false"):
-                                            p["value"] = (low == "true")
+                                    p["value"] = ast.literal_eval(txt)
+                                except Exception:
+                                    p["value"] = txt
+                                cell_valid = True
+                                widget.setStyleSheet("")
+                            else:
+                                cell_valid = True
+                        except Exception:
+                            cell_valid = False
+                            data_valid = False
+                    else:
+                        table_item = self.item(n, 2)
+                        if table_item:
+                            cell_valid = True
+                            cell_text = table_item.text()
+                            exp_t = p.get("expected_type")
+                            try:
+                                p["value"] = ast.literal_eval(cell_text)
+                            except Exception:
+                                if exp_t in (int, float, bool):
+                                    try:
+                                        if exp_t is bool:
+                                            # Allow case-insensitive true/false
+                                            low = str(cell_text).strip().lower()
+                                            if low in ("true", "false"):
+                                                p["value"] = (low == "true")
+                                                cell_valid = True
+                                            else:
+                                                raise ValueError("Invalid bool")
+                                        else:
+                                            p["value"] = exp_t(cell_text)
+                                            cell_valid = True
+                                    except Exception:
+                                        cell_valid = False
+                                        data_valid = False
+                                else:
+                                    # Treat as a plain string if no strict type is expected
+                                    p["value"] = cell_text
+                                    cell_valid = True
+                            else:
+                                # Validate parsed value against expected type if known.
+                                if exp_t is int:
+                                    if isinstance(p["value"], bool):
+                                        cell_valid = False
+                                        data_valid = False
+                                    elif isinstance(p["value"], float):
+                                        if p["value"].is_integer():
+                                            p["value"] = int(p["value"])
                                             cell_valid = True
                                         else:
-                                            raise ValueError("Invalid bool")
-                                    else:
-                                        p["value"] = exp_t(cell_text)
-                                        cell_valid = True
-                                except Exception:
-                                    cell_valid = False
-                                    data_valid = False
-                            else:
-                                # Treat as a plain string if no strict type is expected
-                                p["value"] = cell_text
-                                cell_valid = True
-                        else:
-                            # Validate parsed value against expected type if known.
-                            if exp_t is int:
-                                if isinstance(p["value"], bool):
-                                    cell_valid = False
-                                    data_valid = False
-                                elif isinstance(p["value"], float):
-                                    if p["value"].is_integer():
-                                        p["value"] = int(p["value"])
+                                            cell_valid = False
+                                            data_valid = False
+                                    elif isinstance(p["value"], int):
                                         cell_valid = True
                                     else:
                                         cell_valid = False
                                         data_valid = False
-                                elif isinstance(p["value"], int):
-                                    cell_valid = True
-                                else:
-                                    cell_valid = False
-                                    data_valid = False
-                            elif exp_t is float:
-                                if isinstance(p["value"], (int, float)) and not isinstance(p["value"], bool):
-                                    p["value"] = float(p["value"])
-                                    cell_valid = True
-                                else:
-                                    cell_valid = False
-                                    data_valid = False
-                            elif exp_t is bool:
-                                if isinstance(p["value"], bool):
-                                    cell_valid = True
-                                else:
-                                    cell_valid = False
-                                    data_valid = False
+                                elif exp_t is float:
+                                    if isinstance(p["value"], (int, float)) and not isinstance(p["value"], bool):
+                                        p["value"] = float(p["value"])
+                                        cell_valid = True
+                                    else:
+                                        cell_valid = False
+                                        data_valid = False
+                                elif exp_t is bool:
+                                    if isinstance(p["value"], bool):
+                                        cell_valid = True
+                                    else:
+                                        cell_valid = False
+                                        data_valid = False
 
-                        table_item.setForeground(self._text_color_valid if cell_valid else self._text_color_invalid)
+                            blocker = QtCore.QSignalBlocker(self)
+                            try:
+                                table_item.setForeground(
+                                    self._text_color_valid if cell_valid else self._text_color_invalid
+                                )
+                            finally:
+                                del blocker
 
-        self.signal_parameters_valid.emit(data_valid)
+            if self._validity_emit_in_progress:
+                return
+            self._validity_emit_in_progress = True
+            try:
+                self.signal_parameters_valid.emit(data_valid)
+            finally:
+                self._validity_emit_in_progress = False
+        finally:
+            self._validate_in_progress = False
 
     def closeEditor(self, editor, hint):
-        super().closeEditor(editor, hint)
-        # Ensure validation runs after edits are committed to the model.
-        self._validate_cell_values()
-        if self._enable_signal_cell_modified:
-            self.signal_cell_modified.emit()
+        if self._close_editor_in_progress:
+            return
+        self._close_editor_in_progress = True
+        try:
+            super().closeEditor(editor, hint)
+            # Ensure validation runs after edits are committed to the model.
+            self._validate_cell_values()
+            if self._enable_signal_cell_modified:
+                self.signal_cell_modified.emit()
+        finally:
+            self._close_editor_in_progress = False
 
     def table_item_changed(self, table_item):
         try:
@@ -475,13 +553,16 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                 return
             row = self.row(table_item)
             column = self.column(table_item)
+            _, p = self._param_from_row(row)
+            if p is None:
+                return
             if column == 1:
                 is_checked = table_item.checkState() == rec.Qt.Checked
-                if self._params[row]["is_value_set"] != is_checked:
-                    if is_checked and self._params[row]["value"] == inspect.Parameter.empty:
-                        self._params[row]["value"] = self._params[row]["parameters"].default
+                if p["is_value_set"] != is_checked:
+                    if is_checked and p["value"] == inspect.Parameter.empty:
+                        p["value"] = p["parameters"].default
 
-                    self._params[row]["is_value_set"] = is_checked
+                    p["is_value_set"] = is_checked
 
                     self._enable_signal_cell_modified = False
                     self._show_row_value(row=row)
@@ -491,22 +572,30 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                 table_item_col2 = self.item(row, 2)
                 if table_item_col2 is not None:
                     txt = table_item_col2.text()
-                    default_val = self._params[row]["parameters"].default
+                    default_val = p["parameters"].default
                     if (default_val != inspect.Parameter.empty) and (not str(txt).strip()):
                         # Clearing optional field reverts to implicit default.
-                        self._params[row]["is_value_set"] = False
-                        self._params[row]["value"] = inspect.Parameter.empty
-                        table_item_col2.setForeground(QtGui.QBrush(QtGui.QColor(120, 120, 120)))
+                        p["is_value_set"] = False
+                        p["value"] = inspect.Parameter.empty
+                        blocker = QtCore.QSignalBlocker(self)
+                        try:
+                            table_item_col2.setForeground(QtGui.QBrush(QtGui.QColor(120, 120, 120)))
+                        finally:
+                            del blocker
                     else:
-                        self._params[row]["is_value_set"] = True
-                        self._params[row]["is_user_modified"] = True
-                        table_item_col2.setForeground(self._text_color_valid)
+                        p["is_value_set"] = True
+                        p["is_user_modified"] = True
+                        blocker = QtCore.QSignalBlocker(self)
+                        try:
+                            table_item_col2.setForeground(self._text_color_valid)
+                        finally:
+                            del blocker
 
             if column in (1, 2):
                 self._validate_cell_values()
                 if self._enable_signal_cell_modified:
                     self.signal_cell_modified.emit()
-        except ValueError:
+        except (ValueError, IndexError):
             pass
 
     def _params_to_item(self, params, item):
@@ -522,9 +611,6 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                         if p.get("value") is None and p["parameters"].default is None:
                             # Treat default None as unset (avoid sending None to qserver).
                             kwargs.pop(name, None)
-                            continue
-                        if not p.get("is_user_modified"):
-                            continue
                     except Exception:
                         continue
         except Exception:
@@ -542,6 +628,8 @@ class RePlanEditorWidget(rec.QtRePlanEditor):
 
     def __init__(self, model, parent=None):
         super().__init__(model, parent)
+        self._pending_parameters_valid = None
+        self._parameters_valid_update_scheduled = False
         try:
             # Replace the table used by the internal editor widget and
             # swap it into the layout so it is visible.
@@ -555,7 +643,7 @@ class RePlanEditorWidget(rec.QtRePlanEditor):
                 pass
 
             # Reconnect signals expected by the editor.
-            new.signal_parameters_valid.connect(self._plan_editor._slot_parameters_valid)
+            new.signal_parameters_valid.connect(self._queue_parameters_valid_update)
             new.signal_item_description_changed.connect(self._plan_editor._slot_item_description_changed)
             new.signal_cell_modified.connect(self._plan_editor._switch_to_editing_mode)
 
@@ -573,3 +661,18 @@ class RePlanEditorWidget(rec.QtRePlanEditor):
             # Fall back silently if internal layout changes in future versions
             # of bluesky-widgets and attribute names differ.
             pass
+
+    def _queue_parameters_valid_update(self, is_valid):
+        self._pending_parameters_valid = bool(is_valid)
+        if self._parameters_valid_update_scheduled:
+            return
+        self._parameters_valid_update_scheduled = True
+        QtCore.QTimer.singleShot(0, self._flush_parameters_valid_update)
+
+    def _flush_parameters_valid_update(self):
+        self._parameters_valid_update_scheduled = False
+        if self._pending_parameters_valid is None:
+            return
+        is_valid = self._pending_parameters_valid
+        self._pending_parameters_valid = None
+        self._plan_editor._slot_parameters_valid(is_valid)
