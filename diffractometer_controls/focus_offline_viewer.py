@@ -598,7 +598,7 @@ def analyze_roi(
                 result.mtf_f = freq
                 result.mtf_y = mtf
 
-                # PSF estimate: fit Gaussian width to derivative trace (PFT/LSF).
+                # LSF width estimate from Gaussian fit to derivative trace (PFT/LSF).
                 try:
                     g_mod = lm.models.GaussianModel(prefix="psf_")
                     c_mod = lm.models.ConstantModel(prefix="base_")
@@ -802,6 +802,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             Tuple[np.ndarray, Tuple[int, int, int, int], int, Optional[Tuple[float, float]]]
         ] = None
         self._last_committed_roi_rect: Optional[Tuple[float, float, float, float]] = None
+        self._roi_initialized_from_first_frame = False
         self._suppress_roi_callbacks = False
         # Keep ROI dragging responsive by default: recompute on release.
         self._live_roi_preview = False
@@ -838,8 +839,13 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._playback_summary_pending = False
         self._edge_near_fraction = 0.10
         self._edge_min_candidates = 3
+        self._local_fit_points = 7
         self._optimal_focus_position: float = np.nan
         self._optimal_focus_sigma: float = np.nan
+        self._optimal_psf_position: float = np.nan
+        self._optimal_psf_sigma: float = np.nan
+        self._optimal_mtf50_position: float = np.nan
+        self._optimal_mtf50_value: float = np.nan
         self._shutting_down = False
 
         self._build_ui()
@@ -876,6 +882,10 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.speed_spin.setSingleStep(50)
         self.speed_spin.setValue(self.interval_ms)
         self.speed_spin.setSuffix(" ms")
+        self.local_fit_points_spin = QtWidgets.QSpinBox()
+        self.local_fit_points_spin.setRange(3, 31)
+        self.local_fit_points_spin.setSingleStep(2)
+        self.local_fit_points_spin.setValue(self._local_fit_points)
 
         control_row.addWidget(self.btn_prev)
         control_row.addWidget(self.btn_next)
@@ -883,6 +893,8 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         control_row.addWidget(self.btn_recompute)
         control_row.addWidget(QtWidgets.QLabel("Interval:"))
         control_row.addWidget(self.speed_spin)
+        control_row.addWidget(QtWidgets.QLabel("Local fit pts:"))
+        control_row.addWidget(self.local_fit_points_spin)
         self.optimal_focus_label = QtWidgets.QLabel("Optimal motor position: --")
         control_row.addWidget(self.optimal_focus_label)
         control_row.addStretch(1)
@@ -976,14 +988,14 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             symbolPen=pg.mkPen(0, 0, 0, width=2),
         )
         self.curve_quad_fit = self.sigma_metric_plot.plot(
-            pen=pg.mkPen(180, 90, 200, width=2), name="quadratic fit"
+            pen=pg.mkPen(180, 90, 200, width=2, style=QtCore.Qt.DashLine), name="local quadratic fit"
         )
         self.sigma_error_bars = pg.ErrorBarItem()
         self.sigma_metric_plot.addItem(self.sigma_error_bars)
         self.sigma_metric_plot.setLabel("bottom", "Motor position")
         self.sigma_metric_plot.setLabel("left", "step_sigma")
 
-        self.psf_metric_plot = pg.PlotWidget(title="PSF Width vs Motor")
+        self.psf_metric_plot = pg.PlotWidget(title="LSF Width vs Motor")
         self.curve_psf_quick = self.psf_metric_plot.plot(
             pen=None,
             symbol="o",
@@ -1007,8 +1019,11 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             symbolBrush=pg.mkBrush(255, 220, 0),
             symbolPen=pg.mkPen(0, 0, 0, width=2),
         )
+        self.curve_psf_fit = self.psf_metric_plot.plot(
+            pen=pg.mkPen(180, 90, 200, width=2, style=QtCore.Qt.DashLine)
+        )
         self.psf_metric_plot.setLabel("bottom", "Motor position")
-        self.psf_metric_plot.setLabel("left", "psf_sigma")
+        self.psf_metric_plot.setLabel("left", "lsf_sigma")
 
         self.mtf_metric_plot = pg.PlotWidget(title="MTF50 vs Motor")
         self.curve_mtf50_quick = self.mtf_metric_plot.plot(
@@ -1033,6 +1048,9 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             symbolSize=13,
             symbolBrush=pg.mkBrush(255, 220, 0),
             symbolPen=pg.mkPen(0, 0, 0, width=2),
+        )
+        self.curve_mtf50_fit = self.mtf_metric_plot.plot(
+            pen=pg.mkPen(180, 90, 200, width=2, style=QtCore.Qt.DashLine)
         )
         self.mtf_metric_plot.setLabel("bottom", "Motor position")
         self.mtf_metric_plot.setLabel("left", "MTF50 (px^-1)")
@@ -1086,6 +1104,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.btn_play.toggled.connect(self._toggle_play)
         self.btn_recompute.clicked.connect(self._recompute_current)
         self.speed_spin.valueChanged.connect(self._on_interval_changed)
+        self.local_fit_points_spin.valueChanged.connect(self._on_local_fit_points_changed)
         self.timer.timeout.connect(self._tick)
         self._roi_analysis_timer.timeout.connect(self._recompute_current)
         self._full_future_timer.timeout.connect(self._drain_full_prepare_futures)
@@ -1119,16 +1138,30 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._log(f"Final params: analyzed_frames={len(self._results)}/{len(self.frames)}")
         if np.isfinite(self._optimal_focus_position) and np.isfinite(self._optimal_focus_sigma):
             self._log(
-                "Optimal focus (quadratic): "
+                "Optimal step_sigma (local quadratic): "
                 f"motor={self._optimal_focus_position:.5f}, sigma={self._optimal_focus_sigma:.5f}"
             )
         else:
-            self._log("Optimal focus (quadratic): unavailable")
+            self._log("Optimal step_sigma (local quadratic): unavailable")
+        if np.isfinite(self._optimal_psf_position) and np.isfinite(self._optimal_psf_sigma):
+            self._log(
+                "Optimal lsf_sigma (local quadratic): "
+                f"motor={self._optimal_psf_position:.5f}, lsf_sigma={self._optimal_psf_sigma:.5f}"
+            )
+        else:
+            self._log("Optimal lsf_sigma (local quadratic): unavailable")
+        if np.isfinite(self._optimal_mtf50_position) and np.isfinite(self._optimal_mtf50_value):
+            self._log(
+                "Optimal mtf50 (local quadratic): "
+                f"motor={self._optimal_mtf50_position:.5f}, mtf50={self._optimal_mtf50_value:.5f}"
+            )
+        else:
+            self._log("Optimal mtf50 (local quadratic): unavailable")
         self._log(
             "Best observed frame: "
             f"frame={best_idx + 1}, motor={best_pos:.5f}, "
             f"sigma={best_r.step_sigma:.5f}, "
-            f"psf_sigma={best_r.psf_sigma:.5f}, "
+            f"lsf_sigma={best_r.psf_sigma:.5f}, "
             f"mtf50={best_r.mtf50:.5f}"
         )
         if self._fixed_edge_line is not None:
@@ -1214,6 +1247,31 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         pos = self.roi.pos()
         size = self.roi.size()
         return (float(pos.x()), float(pos.y()), float(size.x()), float(size.y()))
+
+    def _initialize_roi_from_shape(self, shape: Tuple[int, int]):
+        if self._roi_initialized_from_first_frame:
+            return
+        h, w = int(shape[0]), int(shape[1])
+        if h <= 2 or w <= 2:
+            return
+        max_w = max(8, w - 2)
+        max_h = max(8, h - 2)
+        roi_w = int(min(max_w, max(8, round(w * 0.22))))
+        roi_h = int(min(max_h, max(8, round(h * 0.12))))
+        x0 = float((w - roi_w) / 2.0)
+        y0 = float((h - roi_h) / 2.0)
+
+        prev_suppress = self._suppress_roi_callbacks
+        self._suppress_roi_callbacks = True
+        roi_prev_block = self.roi.blockSignals(True)
+        try:
+            self.roi.setPos([x0, y0], finish=False)
+            self.roi.setSize([float(roi_w), float(roi_h)], finish=False)
+        finally:
+            self.roi.blockSignals(roi_prev_block)
+            self._suppress_roi_callbacks = prev_suppress
+        self._last_committed_roi_rect = self._roi_rect()
+        self._roi_initialized_from_first_frame = True
 
     def _is_scan_finished(self) -> bool:
         return (
@@ -1975,6 +2033,8 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 self.statusBar().showMessage(f"Failed to load/filter frame {frame_index + 1}: {error}")
                 self._log(f"Load/filter failed for frame {frame_index + 1}: {error}")
             elif result is not None:
+                if not self._roi_initialized_from_first_frame:
+                    self._initialize_roi_from_shape(result.shape)
                 self._cache_filtered(frame_index, result)
                 self._seen_frame_indices.add(int(frame_index))
                 # Immediately queue full-quality filtering for this frame.
@@ -2046,6 +2106,8 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             f"Frame {idx + 1}/{len(self.frames)} | file={frame.path.name} | position={frame.position:.4f}"
         )
         if cached is not None:
+            if not self._roi_initialized_from_first_frame:
+                self._initialize_roi_from_shape(cached.shape)
             self._seen_frame_indices.add(int(idx))
             # Ensure revisited quick-cached frames still enter the full queue.
             self._enqueue_full_prepare(idx)
@@ -2160,6 +2222,49 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             np.asarray([y0, y1], dtype=np.float64),
         )
         self.edge_line_item.show()
+
+    @staticmethod
+    def _local_parabola_fit(
+        x: np.ndarray,
+        y: np.ndarray,
+        local_points: int = 7,
+        find: str = "min",
+    ) -> Optional[Tuple[np.ndarray, np.ndarray, float, float]]:
+        finite = np.isfinite(x) & np.isfinite(y)
+        if int(np.count_nonzero(finite)) < 3:
+            return None
+        xf = np.asarray(x[finite], dtype=np.float64)
+        yf = np.asarray(y[finite], dtype=np.float64)
+        order = np.argsort(xf)
+        xf = xf[order]
+        yf = yf[order]
+        if xf.size < 3:
+            return None
+        if find == "max":
+            center_idx = int(np.nanargmax(yf))
+        else:
+            center_idx = int(np.nanargmin(yf))
+        center_x = float(xf[center_idx])
+        local_n = int(max(3, min(local_points, xf.size)))
+        nearest = np.argsort(np.abs(xf - center_x))[:local_n]
+        nearest = np.sort(nearest)
+        x_local = xf[nearest]
+        y_local = yf[nearest]
+        if x_local.size < 3:
+            return None
+        coeff = np.polyfit(x_local, y_local, 2)
+        a, b, c = (float(coeff[0]), float(coeff[1]), float(coeff[2]))
+        if not (np.isfinite(a) and np.isfinite(b) and np.isfinite(c)) or abs(a) < 1e-15:
+            return None
+        if find == "max" and a >= 0.0:
+            return None
+        if find != "max" and a <= 0.0:
+            return None
+        x_line = np.linspace(float(np.nanmin(x_local)), float(np.nanmax(x_local)), 200)
+        y_line = np.polyval(coeff, x_line)
+        x_vertex = -b / (2.0 * a)
+        y_vertex = float(np.polyval(coeff, x_vertex))
+        return x_line, y_line, float(x_vertex), y_vertex
 
     def _update_metric_plot(self):
         xs: List[float] = []
@@ -2289,58 +2394,67 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 beam=0.0,
             )
 
-        valid = np.isfinite(x_arr) & np.isfinite(sigma_arr)
-        if valid.sum() < 3 or lm is None:
-            self.curve_quad_fit.setData([], [])
-            self._optimal_focus_position = np.nan
-            self._optimal_focus_sigma = np.nan
-            self.optimal_focus_label.setText("Optimal motor position: --")
-            return
-
-        x_fit = x_arr[valid]
-        y_fit = sigma_arr[valid]
-        if finite_err.any():
-            weight_mask = valid & np.isfinite(sigma_err_arr) & (sigma_err_arr > 0)
-            if weight_mask.sum() >= 3:
-                weights = 1.0 / sigma_err_arr[weight_mask]
-                x_weight = x_arr[weight_mask]
-                y_weight = sigma_arr[weight_mask]
-            else:
-                weights = None
-                x_weight = x_fit
-                y_weight = y_fit
-        else:
-            weights = None
-            x_weight = x_fit
-            y_weight = y_fit
-
-        try:
-            quad = lm.models.QuadraticModel()
-            params = quad.guess(y_weight, x=x_weight)
-            fit_quad = quad.fit(y_weight, params=params, x=x_weight, weights=weights)
-
-            x_line = np.linspace(float(np.nanmin(x_fit)), float(np.nanmax(x_fit)), 300)
-            y_line = quad.eval(params=fit_quad.params, x=x_line)
+        # Fit locally around current extrema using all currently available points
+        # (quick + full), then update smoothly as reprocessed points overwrite.
+        local_points = int(max(3, self._local_fit_points))
+        sigma_fit = self._local_parabola_fit(
+            x_arr, sigma_arr, local_points=local_points, find="min"
+        )
+        if sigma_fit is not None:
+            x_line, y_line, x_min, y_min = sigma_fit
             self.curve_quad_fit.setData(x_line, y_line)
-
-            a = float(fit_quad.params["a"].value)
-            b = float(fit_quad.params["b"].value)
-            if np.isfinite(a) and np.isfinite(b) and abs(a) > 1e-15:
-                x_min = -b / (2.0 * a)
-                y_min = float(quad.eval(params=fit_quad.params, x=x_min))
-                self._optimal_focus_position = float(x_min)
-                self._optimal_focus_sigma = float(y_min)
-                self.optimal_focus_label.setText(
-                    f"Optimal motor position: {float(x_min):.5f}"
-                )
-                self.statusBar().showMessage(
-                    f"Best focus (quadratic): position={x_min:.5f}, sigma={y_min:.5f}"
-                )
-        except Exception:
+            self._optimal_focus_position = float(x_min)
+            self._optimal_focus_sigma = float(y_min)
+            self.optimal_focus_label.setText(f"Optimal motor position: {float(x_min):.5f}")
+        else:
             self.curve_quad_fit.setData([], [])
             self._optimal_focus_position = np.nan
             self._optimal_focus_sigma = np.nan
             self.optimal_focus_label.setText("Optimal motor position: --")
+
+        psf_fit = self._local_parabola_fit(
+            x_arr, psf_sigma_arr, local_points=local_points, find="min"
+        )
+        if psf_fit is not None:
+            self.curve_psf_fit.setData(psf_fit[0], psf_fit[1])
+            self._optimal_psf_position = float(psf_fit[2])
+            self._optimal_psf_sigma = float(psf_fit[3])
+        else:
+            self.curve_psf_fit.setData([], [])
+            self._optimal_psf_position = np.nan
+            self._optimal_psf_sigma = np.nan
+
+        mtf_fit = self._local_parabola_fit(
+            x_arr, mtf50_arr, local_points=local_points, find="max"
+        )
+        if mtf_fit is not None:
+            self.curve_mtf50_fit.setData(mtf_fit[0], mtf_fit[1])
+            self._optimal_mtf50_position = float(mtf_fit[2])
+            self._optimal_mtf50_value = float(mtf_fit[3])
+        else:
+            self.curve_mtf50_fit.setData([], [])
+            self._optimal_mtf50_position = np.nan
+            self._optimal_mtf50_value = np.nan
+
+        if not self._bulk_reprocess_active and not self._is_frame_loading:
+            sigma_txt = (
+                f"sigma: m={self._optimal_focus_position:.5f}, v={self._optimal_focus_sigma:.5f}"
+                if np.isfinite(self._optimal_focus_position) and np.isfinite(self._optimal_focus_sigma)
+                else "sigma: n/a"
+            )
+            psf_txt = (
+                f"lsf: m={self._optimal_psf_position:.5f}, v={self._optimal_psf_sigma:.5f}"
+                if np.isfinite(self._optimal_psf_position) and np.isfinite(self._optimal_psf_sigma)
+                else "lsf: n/a"
+            )
+            mtf_txt = (
+                f"mtf50: m={self._optimal_mtf50_position:.5f}, v={self._optimal_mtf50_value:.5f}"
+                if np.isfinite(self._optimal_mtf50_position) and np.isfinite(self._optimal_mtf50_value)
+                else "mtf50: n/a"
+            )
+            self.statusBar().showMessage(
+                f"Best focus (local quadratic) | {sigma_txt} | {psf_txt} | {mtf_txt}"
+            )
 
     def _recompute_current(self):
         if self._current_filtered is None:
@@ -2443,6 +2557,18 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
     def _on_interval_changed(self, value: int):
         self.interval_ms = int(value)
         self.timer.setInterval(self.interval_ms)
+
+    def _on_local_fit_points_changed(self, value: int):
+        v = int(value)
+        if v % 2 == 0:
+            v += 1
+        v = int(max(3, min(31, v)))
+        if v != int(self.local_fit_points_spin.value()):
+            prev = self.local_fit_points_spin.blockSignals(True)
+            self.local_fit_points_spin.setValue(v)
+            self.local_fit_points_spin.blockSignals(prev)
+        self._local_fit_points = v
+        self._update_metric_plot()
 
     def _toggle_play(self, checked: bool):
         self.playing = bool(checked)
