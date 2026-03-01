@@ -53,6 +53,16 @@
      <property name="text">
       <string>Tomography GUI</string>
      </property>
+     <property name="icon">
+      <iconset>
+       <normaloff>icons/camera.svg</normaloff>icons/camera.svg</iconset>
+     </property>
+     <property name="iconSize">
+      <size>
+       <width>24</width>
+       <height>24</height>
+      </size>
+     </property>
      <property name="filenames" stdset="0">
       <stringlist>
        <string>tomography_gui.py</string>
@@ -81,6 +91,16 @@
      </property>
      <property name="text">
       <string>Diffraction GUI</string>
+     </property>
+     <property name="icon">
+      <iconset>
+       <normaloff>icons/diffraction_peak_sharp.svg</normaloff>icons/diffraction_peak_sharp.svg</iconset>
+      </property>
+     <property name="iconSize">
+      <size>
+       <width>24</width>
+       <height>24</height>
+      </size>
      </property>
      <property name="filenames" stdset="0">
       <stringlist>
