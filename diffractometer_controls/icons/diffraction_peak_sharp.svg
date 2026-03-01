@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect x="6" y="6" width="52" height="52" rx="8" ry="8" fill="#f7f9fc"/>
+  <line x1="12" y1="50" x2="52" y2="50" stroke="#2f4858" stroke-width="2.8" stroke-linecap="round"/>
+  <line x1="12" y1="50" x2="12" y2="14" stroke="#2f4858" stroke-width="2.8" stroke-linecap="round"/>
+  <polyline points="12,49 16,48.8 20,49.1 24,48.9 28,49 32,48.7 36,49 40,48.9 44,49.1 48,48.8 52,49"
+    fill="none" stroke="#86bbd8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="18" y1="49" x2="18" y2="42" stroke="#5aa9e6" stroke-width="2"/>
+  <line x1="23" y1="49" x2="23" y2="31" stroke="#5aa9e6" stroke-width="2.2"/>
+  <line x1="29" y1="49" x2="29" y2="16" stroke="#5aa9e6" stroke-width="2.4"/>
+  <line x1="34" y1="49" x2="34" y2="24" stroke="#5aa9e6" stroke-width="2.2"/>
+  <line x1="40" y1="49" x2="40" y2="36" stroke="#5aa9e6" stroke-width="2"/>
+  <line x1="46" y1="49" x2="46" y2="28" stroke="#5aa9e6" stroke-width="2.2"/>
+  <line x1="50" y1="49" x2="50" y2="40" stroke="#5aa9e6" stroke-width="2"/>
+</svg>
