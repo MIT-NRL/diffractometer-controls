@@ -33,7 +33,7 @@ class FocusOnlineBridge(QtCore.QObject):
     _log_received = QtCore.Signal(str)
     _run_stopped = QtCore.Signal()
     _go_focus_requested = QtCore.Signal(str)
-    _scan_focus_requested = QtCore.Signal(str)
+    _scan_focus_requested = QtCore.Signal(str, float)
     _extend_left_requested = QtCore.Signal()
     _extend_right_requested = QtCore.Signal()
     _mark_complete_requested = QtCore.Signal()
@@ -54,10 +54,12 @@ class FocusOnlineBridge(QtCore.QObject):
         on_mark_complete=None,
         focus_metric_options=("mtf50", "lsf_sigma", "step_sigma"),
         default_focus_metric="mtf50",
+        default_scan_step=0.1667,
         interval_ms: int = 200,
         max_workers_total: int = 8,
         bulk_workers: int = 1,
         full_workers: int = 6,
+        full_cache_gb: float = 10.0,
         parent=None,
     ):
         super().__init__(parent=parent)
@@ -74,10 +76,12 @@ class FocusOnlineBridge(QtCore.QObject):
         self.on_mark_complete = on_mark_complete
         self.focus_metric_options = tuple(str(v) for v in focus_metric_options)
         self.default_focus_metric = str(default_focus_metric)
+        self.default_scan_step = float(max(1e-4, default_scan_step))
         self.interval_ms = int(max(50, interval_ms))
         self.max_workers_total = int(max(3, max_workers_total))
         self.bulk_workers = int(max(1, bulk_workers))
         self.full_workers = int(max(1, full_workers))
+        self.full_cache_gb = float(max(0.25, full_cache_gb))
 
         self.window: Optional[FocusOfflineWindow] = None
 
@@ -86,6 +90,7 @@ class FocusOnlineBridge(QtCore.QObject):
         self._seen_paths = set()
         self._fallback_position = 0.0
         self._focus_metric_combo: Optional[QtWidgets.QComboBox] = None
+        self._scan_step_spin: Optional[QtWidgets.QDoubleSpinBox] = None
         self._go_focus_button: Optional[QtWidgets.QPushButton] = None
         self._scan_focus_button: Optional[QtWidgets.QPushButton] = None
         self._extend_left_button: Optional[QtWidgets.QPushButton] = None
@@ -141,25 +146,40 @@ class FocusOnlineBridge(QtCore.QObject):
             combo.setCurrentText(self.default_focus_metric)
         elif "mtf50" in opts:
             combo.setCurrentText("mtf50")
+        step_label = QtWidgets.QLabel("Scan step:", self.window)
+        step_spin = QtWidgets.QDoubleSpinBox(self.window)
+        step_spin.setDecimals(4)
+        step_spin.setRange(0.0001, 1000.0)
+        step_spin.setSingleStep(0.01)
+        step_spin.setValue(float(self.default_scan_step))
+        step_spin.setKeyboardTracking(False)
+        step_spin.setToolTip("Step size for Scan Around Focus (scroll mouse wheel to adjust).")
         go_btn = QtWidgets.QPushButton("Go to Focus", self.window)
         scan_btn = QtWidgets.QPushButton("Scan Around Focus", self.window)
         extend_left_btn = QtWidgets.QPushButton("Extend Left +3", self.window)
         extend_right_btn = QtWidgets.QPushButton("Extend Right +3", self.window)
         complete_btn = QtWidgets.QPushButton("Complete", self.window)
         go_btn.clicked.connect(lambda: self._go_focus_requested.emit(str(combo.currentText())))
-        scan_btn.clicked.connect(lambda: self._scan_focus_requested.emit(str(combo.currentText())))
+        scan_btn.clicked.connect(
+            lambda: self._scan_focus_requested.emit(
+                str(combo.currentText()), float(step_spin.value())
+            )
+        )
         extend_left_btn.clicked.connect(lambda: self._extend_left_requested.emit())
         extend_right_btn.clicked.connect(lambda: self._extend_right_requested.emit())
         complete_btn.clicked.connect(lambda: self._mark_complete_requested.emit())
         # Append after the existing stretch spacer so this control group is right aligned.
         control_row.addWidget(metric_label)
         control_row.addWidget(combo)
+        control_row.addWidget(step_label)
+        control_row.addWidget(step_spin)
         control_row.addWidget(go_btn)
         control_row.addWidget(scan_btn)
         control_row.addWidget(extend_left_btn)
         control_row.addWidget(extend_right_btn)
         control_row.addWidget(complete_btn)
         self._focus_metric_combo = combo
+        self._scan_step_spin = step_spin
         self._go_focus_button = go_btn
         self._scan_focus_button = scan_btn
         self._extend_left_button = extend_left_btn
@@ -176,13 +196,17 @@ class FocusOnlineBridge(QtCore.QObject):
         except Exception as ex:
             self._log_received.emit(f"Go to Focus handler failed: {ex}")
 
-    @QtCore.Slot(str)
-    def _on_scan_focus_requested(self, metric: str):
+    @QtCore.Slot(str, float)
+    def _on_scan_focus_requested(self, metric: str, step_size: float):
         if self.on_scan_around_focus is None:
             self._log_received.emit("Scan Around Focus clicked, but no handler is attached.")
             return
         try:
-            self.on_scan_around_focus(str(metric))
+            try:
+                self.on_scan_around_focus(str(metric), float(step_size))
+            except TypeError:
+                # Backward compatibility for older callbacks that only accept metric.
+                self.on_scan_around_focus(str(metric))
         except Exception as ex:
             self._log_received.emit(f"Scan Around Focus handler failed: {ex}")
 
@@ -215,6 +239,8 @@ class FocusOnlineBridge(QtCore.QObject):
             self._go_focus_button.setEnabled(False)
         if self._scan_focus_button is not None:
             self._scan_focus_button.setEnabled(False)
+        if self._scan_step_spin is not None:
+            self._scan_step_spin.setEnabled(False)
         if self._extend_left_button is not None:
             self._extend_left_button.setEnabled(False)
         if self._extend_right_button is not None:
@@ -372,6 +398,8 @@ class FocusOnlineBridge(QtCore.QObject):
                 max_workers_total=self.max_workers_total,
                 bulk_workers=self.bulk_workers,
                 full_workers=self.full_workers,
+                full_cache_gb=self.full_cache_gb,
+                allow_file_open=False,
             )
             self.window.installEventFilter(self)
             self.window.setWindowTitle("Online Focus Scan Viewer")
@@ -410,10 +438,12 @@ def attach_to_run_engine(
     on_mark_complete=None,
     focus_metric_options=("mtf50", "lsf_sigma", "step_sigma"),
     default_focus_metric="mtf50",
+    default_scan_step=0.1667,
     interval_ms: int = 200,
     max_workers_total: int = 8,
     bulk_workers: int = 1,
     full_workers: int = 6,
+    full_cache_gb: float = 10.0,
 ) -> Tuple[FocusOnlineBridge, int]:
     """Attach online viewer to a local RunEngine stream."""
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -433,10 +463,12 @@ def attach_to_run_engine(
         on_mark_complete=on_mark_complete,
         focus_metric_options=focus_metric_options,
         default_focus_metric=default_focus_metric,
+        default_scan_step=default_scan_step,
         interval_ms=interval_ms,
         max_workers_total=max_workers_total,
         bulk_workers=bulk_workers,
         full_workers=full_workers,
+        full_cache_gb=full_cache_gb,
     )
     token = int(re.subscribe(bridge.on_document))
     return bridge, token
@@ -459,6 +491,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-workers-total", type=int, default=8, help="Total worker cap")
     p.add_argument("--bulk-workers", type=int, default=1, help="Bulk/ROI workers")
     p.add_argument("--full-workers", type=int, default=6, help="Full filter process workers")
+    p.add_argument("--full-cache-gb", type=float, default=10.0, help="Full filtered cache budget (GB)")
     return p
 
 
@@ -478,6 +511,7 @@ def main(argv=None) -> int:
         max_workers_total=args.max_workers_total,
         bulk_workers=args.bulk_workers,
         full_workers=args.full_workers,
+        full_cache_gb=args.full_cache_gb,
     )
 
     from bluesky.callbacks.zmq import RemoteDispatcher
