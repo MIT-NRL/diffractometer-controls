@@ -3,6 +3,8 @@ import warnings
 import subprocess
 import time
 import math
+import sys
+import threading
 from pathlib import Path
 
 import qtawesome as qta
@@ -35,8 +37,15 @@ from pydm.widgets import PyDMByteIndicator, PyDMRelatedDisplayButton
 from bluesky_queueserver_api.zmq import REManagerAPI
 from pydm.widgets.channel import PyDMChannel
 
+log = logging.getLogger(__name__)
+WF_NORM_FILTER_SETTINGS_KEY = "analysis/wf_norm_filter_method"
+WF_NORM_FILTER_OUTLIER = "outlier"
+WF_NORM_FILTER_MEDIAN = "median"
+WF_NORM_FILTER_RUNTIME_PROPERTY = "analysis_wf_norm_filter_method_runtime"
+
 class MITRMainWindow(PyDMMainWindow):
     re_manager_api: REManagerAPI
+    adaptive_focus_plan_started = QtCore.Signal(str, str)
     _RUN_STATE_INDEX_MAP = {
         0: "IDLE",
         1: "RUNNING",
@@ -71,10 +80,20 @@ class MITRMainWindow(PyDMMainWindow):
         self._run_finish_font_px = 16
         self._run_progress_font_px = 15
         self._run_is_dark_mode = False
+        self._focus_online_proc = None
+        self._focus_online_session_id = None
+        self._focus_online_run_uid = None
+        self._focus_doc_dispatcher = None
+        self._focus_doc_thread = None
+        self._focus_data_addr = None
+        self._focus_qs_control_addr = "tcp://localhost:60615"
+        self._focus_qs_info_addr = "tcp://localhost:60625"
         from application import MITRApplication
         app = MITRApplication.instance()
         self.re_manager_api = app.re_manager_api
+        self.adaptive_focus_plan_started.connect(self._on_adaptive_focus_plan_started)
         self.customize_ui()
+        self._start_adaptive_focus_listener()
 
 
     def customize_ui(self):
@@ -133,6 +152,42 @@ class MITRMainWindow(PyDMMainWindow):
 
         # Add a "Control System" menu to the menu bar
         control_system_menu = self.menuBar().addMenu("Control System")
+        analysis_menu = self.menuBar().addMenu("Analysis")
+        self.menuBar().insertMenu(control_system_menu.menuAction(), analysis_menu)
+
+        normalization_menu = analysis_menu.addMenu("Normalization filtering")
+        normalization_action_group = QtGui.QActionGroup(normalization_menu)
+        normalization_action_group.setExclusive(True)
+        norm_outlier_action = normalization_menu.addAction("Remove outliers (tomopy)")
+        norm_outlier_action.setCheckable(True)
+        normalization_action_group.addAction(norm_outlier_action)
+        norm_median_action = normalization_menu.addAction("Median filter")
+        norm_median_action.setCheckable(True)
+        normalization_action_group.addAction(norm_median_action)
+
+        tomopy_available = self._is_tomopy_available()
+        if not tomopy_available:
+            norm_outlier_action.setText("Remove outliers (tomopy, not installed)")
+            norm_outlier_action.setEnabled(False)
+            norm_outlier_action.setToolTip("tomopy is not available in this environment.")
+            normalization_menu.setToolTipsVisible(True)
+            normalization_menu.setToolTip("tomopy not installed: remove-outliers disabled, median filter is used.")
+
+        settings = QtCore.QSettings()
+        default_method = WF_NORM_FILTER_OUTLIER if tomopy_available else WF_NORM_FILTER_MEDIAN
+        current_method = str(settings.value(WF_NORM_FILTER_SETTINGS_KEY, default_method)).strip().lower()
+        if current_method not in {WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}:
+            current_method = default_method
+        if current_method == WF_NORM_FILTER_OUTLIER and not tomopy_available:
+            current_method = WF_NORM_FILTER_MEDIAN
+            settings.setValue(WF_NORM_FILTER_SETTINGS_KEY, current_method)
+        app = QApplication.instance()
+        if app is not None:
+            app.setProperty(WF_NORM_FILTER_RUNTIME_PROPERTY, current_method)
+        norm_outlier_action.setChecked(current_method == WF_NORM_FILTER_OUTLIER)
+        norm_median_action.setChecked(current_method == WF_NORM_FILTER_MEDIAN)
+        norm_outlier_action.triggered.connect(lambda checked=False: self._set_norm_filter_setting(WF_NORM_FILTER_OUTLIER))
+        norm_median_action.triggered.connect(lambda checked=False: self._set_norm_filter_setting(WF_NORM_FILTER_MEDIAN))
 
         # Add a "Bluesky Controls" submenu
         bluesky_menu = control_system_menu.addMenu("Bluesky Controls")
@@ -239,6 +294,35 @@ class MITRMainWindow(PyDMMainWindow):
             # open_in_new_window=True
         ))
         control_system_menu.addAction(controls_action)
+
+    def _is_tomopy_available(self):
+        try:
+            import tomopy  # noqa: F401
+            return True
+        except Exception:
+            return False
+
+    def _set_norm_filter_setting(self, method):
+        m = str(method).strip().lower() if method is not None else WF_NORM_FILTER_OUTLIER
+        if m not in {WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}:
+            m = WF_NORM_FILTER_OUTLIER
+        forced_median = False
+        if m == WF_NORM_FILTER_OUTLIER and not self._is_tomopy_available():
+            m = WF_NORM_FILTER_MEDIAN
+            forced_median = True
+        settings = QtCore.QSettings()
+        settings.setValue(WF_NORM_FILTER_SETTINGS_KEY, m)
+        settings.sync()
+        app = QApplication.instance()
+        if app is not None:
+            app.setProperty(WF_NORM_FILTER_RUNTIME_PROPERTY, m)
+        try:
+            if forced_median:
+                self.statusBar().showMessage("tomopy not installed; normalization filter set to: median", 3000)
+            else:
+                self.statusBar().showMessage(f"Normalization filter set to: {m}", 2500)
+        except Exception:
+            pass
 
     def _setup_run_status_widget(self, toolbar):
         prefix = f"{self.macros.get('P', '')}Bluesky:Run:"
@@ -560,6 +644,147 @@ class MITRMainWindow(PyDMMainWindow):
             self._run_progress.setValue(0)
             self._run_progress.setFormat("No active run")
 
+    @staticmethod
+    def _parse_tcp_host(addr, default_host="localhost"):
+        text = str(addr or "").strip()
+        if text.startswith("tcp://"):
+            text = text[6:]
+        if ":" in text:
+            host = text.rsplit(":", 1)[0].strip()
+        else:
+            host = text.strip()
+        if not host or host in {"*", "0.0.0.0"}:
+            return str(default_host)
+        return host
+
+    def _start_adaptive_focus_listener(self):
+        if self._focus_doc_dispatcher is not None:
+            return
+        try:
+            client = getattr(self.re_manager_api, "_client", None)
+            control_addr = getattr(client, "_zmq_server_address", "tcp://localhost:60615")
+            info_addr = getattr(self.re_manager_api, "_zmq_info_addr", "tcp://localhost:60625")
+            self._focus_qs_control_addr = str(control_addr)
+            self._focus_qs_info_addr = str(info_addr)
+            host = self._parse_tcp_host(info_addr, default_host=self._parse_tcp_host(control_addr))
+            self._focus_data_addr = f"{host}:5568"
+            from bluesky.callbacks.zmq import RemoteDispatcher
+
+            dispatcher = RemoteDispatcher(self._focus_data_addr)
+            dispatcher.subscribe(self._on_focus_bluesky_doc)
+            thread = threading.Thread(
+                target=dispatcher.start,
+                daemon=True,
+                name="adaptive-focus-doc-listener",
+            )
+            thread.start()
+            self._focus_doc_dispatcher = dispatcher
+            self._focus_doc_thread = thread
+            log.info("Adaptive focus listener started on %s", self._focus_data_addr)
+        except Exception:
+            log.exception("Failed to start adaptive focus listener")
+
+    def _stop_adaptive_focus_listener(self):
+        dispatcher = self._focus_doc_dispatcher
+        thread = self._focus_doc_thread
+        self._focus_doc_dispatcher = None
+        self._focus_doc_thread = None
+        if dispatcher is not None:
+            try:
+                dispatcher.stop()
+            except Exception:
+                pass
+        if thread is not None:
+            try:
+                thread.join(timeout=2.0)
+            except Exception:
+                pass
+
+    def _on_focus_bluesky_doc(self, name, doc):
+        if str(name) != "start":
+            return
+        plan_name = str((doc or {}).get("plan_name", "")).strip()
+        if plan_name != "adaptive_imaging_focus_scan":
+            return
+        focus_md = (doc or {}).get("focus_adaptive", {}) or {}
+        session_id = str(focus_md.get("session_id", "")).strip()
+        run_uid = str((doc or {}).get("uid", "")).strip()
+        if not session_id:
+            return
+        self.adaptive_focus_plan_started.emit(session_id, run_uid)
+
+    @Slot(str, str)
+    def _on_adaptive_focus_plan_started(self, session_id, run_uid):
+        self._launch_focus_online_viewer(
+            session_id=str(session_id).strip(),
+            run_uid=str(run_uid).strip(),
+        )
+
+    def _stop_focus_online_viewer(self):
+        proc = self._focus_online_proc
+        self._focus_online_proc = None
+        self._focus_online_session_id = None
+        self._focus_online_run_uid = None
+        if proc is None:
+            return
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=2.0)
+                except Exception:
+                    proc.kill()
+        except Exception:
+            pass
+
+    def _launch_focus_online_viewer(self, *, session_id: str, run_uid: str):
+        if not session_id:
+            return
+        current = self._focus_online_proc
+        if (
+            current is not None
+            and current.poll() is None
+            and str(self._focus_online_session_id) == str(session_id)
+        ):
+            return
+        self._stop_focus_online_viewer()
+        viewer_script = Path(__file__).resolve().parent / "focus_online_viewer.py"
+        if not viewer_script.exists():
+            log.warning("Focus online viewer script not found: %s", viewer_script)
+            return
+        cmd = [
+            sys.executable,
+            str(viewer_script),
+            "--zmq-address",
+            str(self._focus_data_addr or "localhost:5568"),
+            "--stream-name",
+            "primary",
+            "--run-uid",
+            str(run_uid or ""),
+            "--session-id",
+            str(session_id),
+            "--qserver-control-addr",
+            str(self._focus_qs_control_addr),
+            "--qserver-info-addr",
+            str(self._focus_qs_info_addr),
+        ]
+        try:
+            proc = subprocess.Popen(cmd)
+            self._focus_online_proc = proc
+            self._focus_online_session_id = str(session_id)
+            self._focus_online_run_uid = str(run_uid or "")
+            log.info(
+                "Launched focus_online_viewer for adaptive session=%s run_uid=%s",
+                session_id,
+                run_uid,
+            )
+        except Exception:
+            log.exception(
+                "Failed to launch focus_online_viewer for session=%s run_uid=%s",
+                session_id,
+                run_uid,
+            )
+
 
     def update_window_title(self):
         if self.showing_file_path_in_title_bar:
@@ -573,6 +798,9 @@ class MITRMainWindow(PyDMMainWindow):
 
     def cleanup_before_close(self):
         """Stop local timers/channels so app shutdown is not delayed."""
+        self._stop_focus_online_viewer()
+        self._stop_adaptive_focus_listener()
+
         for timer_name in ("_run_eta_timer", "_run_anim_timer"):
             timer = getattr(self, timer_name, None)
             if timer is not None:
