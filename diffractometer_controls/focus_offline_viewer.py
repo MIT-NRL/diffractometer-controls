@@ -35,7 +35,7 @@ for _env_var in (
 import numpy as np
 
 try:
-    from qtpy import QtCore, QtWidgets
+    from qtpy import QtCore, QtGui, QtWidgets
 except Exception as ex:  # pragma: no cover
     raise SystemExit(f"qtpy is required: {ex}")
 
@@ -897,6 +897,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         super().__init__(parent=parent)
         # Ensure consistent image orientation no matter who instantiates this window.
         pg.setConfigOption("imageAxisOrder", "row-major")
+        self._apply_pyqtgraph_theme_from_palette()
         self.setWindowTitle("Offline Focus Scan Viewer")
         self.resize(1500, 900)
 
@@ -1275,21 +1276,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.filter_queue_bar.setFixedHeight(18)
         self.filter_queue_bar.setTextVisible(True)
         self.filter_queue_bar.setAlignment(QtCore.Qt.AlignCenter)
-        # Keep queue progress readable in dark and light app themes.
-        self.filter_queue_bar.setStyleSheet(
-            "QProgressBar {"
-            " border: 1px solid #5f6368;"
-            " border-radius: 4px;"
-            " background-color: #202124;"
-            " color: #f1f3f4;"
-            " text-align: center;"
-            "}"
-            "QProgressBar::chunk {"
-            " background-color: #3daee9;"
-            " border-radius: 3px;"
-            " margin: 1px;"
-            "}"
-        )
+        self._apply_filter_queue_theme()
         self.filter_queue_bar.setFormat("Full filter queue: 0")
         self.filter_queue_label = QtWidgets.QLabel("full 0/0")
         self.statusBar().addPermanentWidget(self.filter_queue_bar)
@@ -1318,6 +1305,34 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.roi.sigRegionChangeFinished.connect(self._on_roi_region_change_finished)
         self._full_future_timer.start()
         self._update_filter_queue_indicator()
+
+    def _apply_pyqtgraph_theme_from_palette(self):
+        pal = self.palette()
+        bg = pal.color(QtGui.QPalette.Window)
+        fg = pal.color(QtGui.QPalette.WindowText)
+        pg.setConfigOption("background", (bg.red(), bg.green(), bg.blue()))
+        pg.setConfigOption("foreground", (fg.red(), fg.green(), fg.blue()))
+
+    def _apply_filter_queue_theme(self):
+        pal = self.palette()
+        border = pal.color(QtGui.QPalette.Mid)
+        bg = pal.color(QtGui.QPalette.Base)
+        text = pal.color(QtGui.QPalette.Text)
+        chunk = pal.color(QtGui.QPalette.Highlight)
+        self.filter_queue_bar.setStyleSheet(
+            "QProgressBar {"
+            f" border: 1px solid {border.name()};"
+            " border-radius: 4px;"
+            f" background-color: {bg.name()};"
+            f" color: {text.name()};"
+            " text-align: center;"
+            "}"
+            "QProgressBar::chunk {"
+            f" background-color: {chunk.name()};"
+            " border-radius: 3px;"
+            " margin: 1px;"
+            "}"
+        )
 
     def _log(self, message: str):
         ts = QtCore.QDateTime.currentDateTime().toString("HH:mm:ss")
@@ -3106,6 +3121,19 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         enqueued = self._load_frame(nxt)
         if enqueued:
             self._stream_next_index = int(nxt + 1)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event is None:
+            return
+        if event.type() in (
+            QtCore.QEvent.PaletteChange,
+            QtCore.QEvent.ApplicationPaletteChange,
+            QtCore.QEvent.StyleChange,
+        ):
+            self._apply_pyqtgraph_theme_from_palette()
+            if hasattr(self, "filter_queue_bar"):
+                self._apply_filter_queue_theme()
 
     def closeEvent(self, event):
         self._shutting_down = True
