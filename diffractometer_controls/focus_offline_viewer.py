@@ -164,6 +164,101 @@ def _load_positions_from_csv(csv_path: Path) -> Dict[str, float]:
     return out
 
 
+def _parse_position_from_tag_value(value, key_name: str = "DetCameraFocusDist") -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            out = _parse_position_from_tag_value(item, key_name=key_name)
+            if out is not None:
+                return out
+        return None
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        try:
+            out = float(value)
+            return out if np.isfinite(out) else None
+        except Exception:
+            return None
+    if isinstance(value, (bytes, bytearray)):
+        try:
+            value = value.decode("utf-8", errors="ignore")
+        except Exception:
+            return None
+    text = str(value).strip()
+    if not text:
+        return None
+    # Expected format from areaDetector TIFF tags: "DetCameraFocusDist:25.400000"
+    if ":" in text:
+        lhs, rhs = text.split(":", 1)
+        if (not key_name) or (str(lhs).strip() == str(key_name).strip()):
+            try:
+                out = float(str(rhs).strip())
+                return out if np.isfinite(out) else None
+            except Exception:
+                return None
+    try:
+        out = float(text)
+        return out if np.isfinite(out) else None
+    except Exception:
+        return None
+
+
+def _read_tiff_focus_position(
+    path: Path, *, tag_code: int = 65064, key_name: str = "DetCameraFocusDist"
+) -> Optional[float]:
+    def _can_contain_named_text(v) -> bool:
+        if isinstance(v, (str, bytes, bytearray)):
+            return True
+        if isinstance(v, (list, tuple)):
+            return any(isinstance(item, (str, bytes, bytearray)) for item in v)
+        return False
+
+    # Try Pillow first; lightweight and already a dependency fallback for image reads.
+    try:
+        from PIL import Image
+
+        with Image.open(path) as img:
+            tags = getattr(img, "tag_v2", None)
+            if tags is not None:
+                if int(tag_code) in tags:
+                    out = _parse_position_from_tag_value(tags.get(int(tag_code)), key_name=key_name)
+                    if out is not None:
+                        return out
+                # Fallback: scan all custom values for key_name prefix.
+                for _k, v in tags.items():
+                    if not _can_contain_named_text(v):
+                        continue
+                    out = _parse_position_from_tag_value(v, key_name=key_name)
+                    if out is not None:
+                        return out
+    except Exception:
+        pass
+
+    # Fallback: tifffile if available.
+    try:
+        import tifffile
+
+        with tifffile.TiffFile(str(path)) as tf:
+            page = tf.pages[0]
+            tags = page.tags
+            if int(tag_code) in tags:
+                out = _parse_position_from_tag_value(
+                    tags[int(tag_code)].value, key_name=key_name
+                )
+                if out is not None:
+                    return out
+            for t in tags.values():
+                v = getattr(t, "value", None)
+                if not _can_contain_named_text(v):
+                    continue
+                out = _parse_position_from_tag_value(v, key_name=key_name)
+                if out is not None:
+                    return out
+    except Exception:
+        pass
+    return None
+
+
 def discover_frames(
     image_dir: Path,
     start_position: float,
@@ -224,9 +319,65 @@ def discover_frames(
 
     frames: List[FrameInfo] = []
     for i, path in enumerate(files):
-        pos = csv_positions.get(path.name, start_position + i * step_size)
+        if path.name in csv_positions:
+            pos = float(csv_positions[path.name])
+        else:
+            tag_pos = _read_tiff_focus_position(path)
+            if tag_pos is not None:
+                pos = float(tag_pos)
+            else:
+                pos = float(start_position + i * step_size)
         frames.append(FrameInfo(index=i, path=path, position=float(pos)))
     return frames
+
+
+def build_frames_from_files(
+    file_paths: Sequence[Path],
+    start_position: float = 0.0,
+    step_size: float = 1.0,
+) -> List[FrameInfo]:
+    files = []
+    seen = set()
+    for path in file_paths:
+        p = Path(path).expanduser()
+        try:
+            p = p.resolve()
+        except Exception:
+            p = p.absolute()
+        if (not p.exists()) or (not p.is_file()):
+            continue
+        if p.suffix.lower() not in {".tif", ".tiff"}:
+            continue
+        key = str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        files.append(p)
+    if not files:
+        raise RuntimeError("No valid TIFF files selected.")
+    parsed = []
+    for path in files:
+        _series, idx = _extract_series_and_index(path)
+        parsed.append((path, idx))
+    files_sorted = [
+        p
+        for p, _ in sorted(
+            parsed,
+            key=lambda item: (
+                item[1] if item[1] is not None else 10**12,
+                _natural_key(item[0]),
+            ),
+        )
+    ]
+    out: List[FrameInfo] = []
+    for i, path in enumerate(files_sorted):
+        tag_pos = _read_tiff_focus_position(path)
+        if tag_pos is not None:
+            pos = float(tag_pos)
+        else:
+            pos = float(start_position + i * step_size)
+        out.append(FrameInfo(index=i, path=path, position=pos))
+    return out
 
 
 def preprocess_image(image: np.ndarray, median_size: int = 6) -> np.ndarray:
@@ -739,6 +890,8 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         max_workers_total: int = 8,
         bulk_workers: Optional[int] = None,
         full_workers: Optional[int] = None,
+        full_cache_gb: float = 10.0,
+        allow_file_open: bool = True,
         parent=None,
     ):
         super().__init__(parent=parent)
@@ -751,11 +904,17 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.current_index = 0
         self.playing = False
         self.interval_ms = int(max(50, interval_ms))
+        self._allow_file_open = bool(allow_file_open)
+        self._last_open_dir = (
+            str(frames[0].path.parent) if frames else str(Path.cwd())
+        )
 
         self._quick_filtered_cache: OrderedDict[int, np.ndarray] = OrderedDict()
-        self._max_quick_cache_size = 12
+        self._max_quick_cache_bytes = int(2 * (1024**3))
+        self._quick_cache_bytes = 0
         self._full_filtered_cache: OrderedDict[int, np.ndarray] = OrderedDict()
-        self._max_full_cache_size = max(16, min(len(self.frames), 128))
+        self._max_full_cache_bytes = int(max(0.25, float(full_cache_gb)) * (1024**3))
+        self._full_cache_bytes = 0
         self._results: Dict[int, FitResult] = {}
         self._result_is_full: Dict[int, bool] = {}
         self._current_filtered: Optional[np.ndarray] = None
@@ -825,6 +984,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._bulk_reprocess_token = 0
         self._bulk_reprocess_total = 0
         self._bulk_reprocess_done = 0
+        self._bulk_reprocess_uses_disk = False
         self._current_bulk_used_fixed = False
         self._fixed_edge_line: Optional[Tuple[float, float]] = None
         self._fixed_edge_reference_index: Optional[int] = None
@@ -832,6 +992,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._full_dynamic_results_ready = False
         self._full_dynamic_pass_requested = False
         self._full_prepare_refresh_requested = False
+        self._last_full_prepare_logged_count = -1
         self._roi_generation = 0
         self._roi_reprocess_after_scan = False
         self._pending_bulk_reprocess: Optional[
@@ -840,6 +1001,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._bulk_reprocess_all_frames = False
         self._seen_frame_indices: Set[int] = set()
         self._playback_summary_pending = False
+        self._load_generation = 0
         self._edge_near_fraction = 0.10
         self._edge_min_candidates = 3
         self._local_fit_points = 7
@@ -864,8 +1026,17 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             f"OPENBLAS={os.environ.get('OPENBLAS_NUM_THREADS')}, "
             f"NUMEXPR={os.environ.get('NUMEXPR_NUM_THREADS')}"
         )
+        self._log(
+            f"Cache budgets: quick={self._max_quick_cache_bytes / (1024**3):.1f} GB, "
+            f"full={self._max_full_cache_bytes / (1024**3):.1f} GB"
+        )
         self._log(f"Viewer initialized with {len(self.frames)} frames")
-        self._load_frame(0)
+        if self.frames:
+            self._load_frame(0)
+        else:
+            self.frame_label.setText("No files loaded. Use Open Files... to select TIFF images.")
+            self.statusBar().showMessage("No files loaded. Click Open Files... to begin.")
+            self._log("No startup image set. Use Open Files... to load TIFF frames.")
 
     def _build_ui(self):
         central = QtWidgets.QWidget(self)
@@ -877,15 +1048,13 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
 
         self.btn_prev = QtWidgets.QPushButton("Prev")
         self.btn_next = QtWidgets.QPushButton("Next")
+        self.btn_open_files = (
+            QtWidgets.QPushButton("Open Files...") if self._allow_file_open else None
+        )
         self.btn_play = QtWidgets.QPushButton("Play")
         self.btn_play.setCheckable(True)
         self.btn_play.hide()
         self.btn_recompute = QtWidgets.QPushButton("Recompute ROI")
-        self.speed_spin = QtWidgets.QSpinBox()
-        self.speed_spin.setRange(50, 5000)
-        self.speed_spin.setSingleStep(50)
-        self.speed_spin.setValue(self.interval_ms)
-        self.speed_spin.setSuffix(" ms")
         self.local_fit_points_spin = QtWidgets.QSpinBox()
         self.local_fit_points_spin.setRange(3, 31)
         self.local_fit_points_spin.setSingleStep(2)
@@ -893,9 +1062,9 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
 
         control_row.addWidget(self.btn_prev)
         control_row.addWidget(self.btn_next)
+        if self.btn_open_files is not None:
+            control_row.addWidget(self.btn_open_files)
         control_row.addWidget(self.btn_recompute)
-        control_row.addWidget(QtWidgets.QLabel("Interval:"))
-        control_row.addWidget(self.speed_spin)
         control_row.addWidget(QtWidgets.QLabel("Local fit pts:"))
         control_row.addWidget(self.local_fit_points_spin)
         self.optimal_focus_label = QtWidgets.QLabel("Optimal motor position: --")
@@ -1125,7 +1294,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.filter_queue_label = QtWidgets.QLabel("full 0/0")
         self.statusBar().addPermanentWidget(self.filter_queue_bar)
         self.statusBar().addPermanentWidget(self.filter_queue_label)
-        self.statusBar().showMessage("Set ROI around foil edge, then press Play or step frames.")
+        self.statusBar().showMessage("Set ROI around foil edge, then step frames.")
 
         self.timer = QtCore.QTimer(self)
         self.timer.setInterval(self.interval_ms)
@@ -1137,9 +1306,10 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
 
         self.btn_prev.clicked.connect(self._prev_frame)
         self.btn_next.clicked.connect(self._next_frame)
+        if self.btn_open_files is not None:
+            self.btn_open_files.clicked.connect(self._open_files_dialog)
         self.btn_play.toggled.connect(self._toggle_play)
         self.btn_recompute.clicked.connect(self._recompute_current)
-        self.speed_spin.valueChanged.connect(self._on_interval_changed)
         self.local_fit_points_spin.valueChanged.connect(self._on_local_fit_points_changed)
         self.timer.timeout.connect(self._tick)
         self._roi_analysis_timer.timeout.connect(self._recompute_current)
@@ -1222,11 +1392,25 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             return True
         return bool(self._full_prepared_count() >= len(self.frames))
 
+    def _needs_disk_fallback_for_all_frames(self) -> bool:
+        # Full filtered images are cached with bounded capacity. Once frame count
+        # exceeds cache size, all-frame reruns must use disk+cache.
+        return bool(len(self._full_filtered_cache) < len(self.frames))
+
+    def _bulk_reprocess_queue_count(self) -> int:
+        if not self._bulk_reprocess_active:
+            return 0
+        if not self._bulk_reprocess_uses_disk:
+            return 0
+        remaining = int(self._bulk_reprocess_total - self._bulk_reprocess_done)
+        return max(0, remaining)
+
     def _filter_queue_count(self) -> int:
         full_pending = int(len(self._full_queue) + self._full_running_count)
         # Only track heavy full-image filtering backlog here.
         full_backlog = max(0, int(len(self._seen_frame_indices) - self._full_prepared_seen_count()))
-        return max(0, full_pending, full_backlog)
+        bulk_pending = self._bulk_reprocess_queue_count()
+        return max(0, full_pending, full_backlog, bulk_pending)
 
     def _update_filter_queue_indicator(self):
         if not hasattr(self, "filter_queue_bar"):
@@ -1234,17 +1418,39 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         total = max(1, int(len(self.frames)))
         full_ready = int(min(total, self._full_prepared_count()))
         queue_count = self._filter_queue_count()
+        bulk_pending = self._bulk_reprocess_queue_count()
         self.filter_queue_bar.setRange(0, total)
         self.filter_queue_bar.setValue(int(min(total, max(0, queue_count))))
-        self.filter_queue_bar.setFormat(f"Full filter queue: {queue_count}")
+        if bulk_pending > 0:
+            self.filter_queue_bar.setFormat(f"Reprocess queue: {queue_count}")
+        else:
+            self.filter_queue_bar.setFormat(f"Full filter queue: {queue_count}")
         self.filter_queue_label.setText(f"full {full_ready}/{len(self.frames)}")
+
+    @staticmethod
+    def _array_nbytes(arr: np.ndarray) -> int:
+        try:
+            return int(arr.nbytes)
+        except Exception:
+            return int(np.asarray(arr).nbytes)
 
     def _cache_filtered(self, idx: int, filtered: np.ndarray):
         # Backward-compatible alias: this now means quick-pass cache.
+        idx = int(idx)
+        new_bytes = self._array_nbytes(filtered)
+        if idx in self._quick_filtered_cache:
+            old = self._quick_filtered_cache.pop(idx)
+            self._quick_cache_bytes = max(0, int(self._quick_cache_bytes - self._array_nbytes(old)))
         self._quick_filtered_cache[idx] = filtered
-        self._quick_filtered_cache.move_to_end(idx, last=True)
-        while len(self._quick_filtered_cache) > self._max_quick_cache_size:
-            self._quick_filtered_cache.popitem(last=False)
+        self._quick_cache_bytes += int(new_bytes)
+        while (
+            self._quick_cache_bytes > self._max_quick_cache_bytes
+            and len(self._quick_filtered_cache) > 1
+        ):
+            _old_idx, old_arr = self._quick_filtered_cache.popitem(last=False)
+            self._quick_cache_bytes = max(
+                0, int(self._quick_cache_bytes - self._array_nbytes(old_arr))
+            )
 
     def _get_filtered_image(self, idx: int) -> Optional[np.ndarray]:
         # Prefer fully processed frames when available.
@@ -1258,11 +1464,22 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         return None
 
     def _cache_full_filtered(self, idx: int, filtered: np.ndarray):
-        self._full_prepared_indices.add(int(idx))
+        idx = int(idx)
+        self._full_prepared_indices.add(idx)
+        new_bytes = self._array_nbytes(filtered)
+        if idx in self._full_filtered_cache:
+            old = self._full_filtered_cache.pop(idx)
+            self._full_cache_bytes = max(0, int(self._full_cache_bytes - self._array_nbytes(old)))
         self._full_filtered_cache[idx] = filtered
-        self._full_filtered_cache.move_to_end(idx, last=True)
-        while len(self._full_filtered_cache) > self._max_full_cache_size:
-            self._full_filtered_cache.popitem(last=False)
+        self._full_cache_bytes += int(new_bytes)
+        while (
+            self._full_cache_bytes > self._max_full_cache_bytes
+            and len(self._full_filtered_cache) > 1
+        ):
+            _old_idx, old_arr = self._full_filtered_cache.popitem(last=False)
+            self._full_cache_bytes = max(
+                0, int(self._full_cache_bytes - self._array_nbytes(old_arr))
+            )
         # Keep display/navigation cache aligned with full-quality data.
         self._cache_filtered(idx, filtered)
 
@@ -1456,6 +1673,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._pause_full_prepare = False
         self._bulk_reprocess_total = 0
         self._bulk_reprocess_done = 0
+        self._bulk_reprocess_uses_disk = bool(allow_disk_fallback)
         self._current_bulk_used_fixed = self._fixed_edge_line is not None
         if not preserve_existing_results:
             self._results.clear()
@@ -1465,7 +1683,9 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         mode = "full" if self._bulk_reprocess_all_frames else "partial"
         source_mode = "disk+cache" if allow_disk_fallback else "cache-only"
         line_mode = "fixed-edge" if self._fixed_edge_line is not None else "dynamic-edge"
-        use_quick_cache = not allow_disk_fallback
+        # Prefer cached filtered frames (full first, then quick) to avoid
+        # unnecessary disk rereads during ROI reprocess.
+        use_quick_cache = True
         self.statusBar().showMessage(
             f"Reprocessing ({mode}) {len(requested_indices)} frames ({line_mode}, {source_mode})..."
         )
@@ -1475,6 +1695,8 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             f"full_cache_ready={self._full_prepared_count()}/{len(self.frames)}, "
             f"workers={self._bulk_worker_count}"
         )
+        cached_jobs = 0
+        disk_jobs = 0
         for idx in requested_indices:
             frame = self.frames[idx]
             cached = self._get_cached_for_bulk(idx, use_quick_cache=use_quick_cache)
@@ -1487,6 +1709,8 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                     roi_rect,
                     self._fixed_edge_line,
                 )
+                if ok:
+                    cached_jobs += 1
             else:
                 if not allow_disk_fallback:
                     continue
@@ -1501,16 +1725,23 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                     roi_rect,
                     self._fixed_edge_line,
                 )
+                if ok:
+                    disk_jobs += 1
             if ok:
                 self._bulk_reprocess_total += 1
 
         if self._bulk_reprocess_total <= 0:
             self._bulk_reprocess_active = False
+            self._bulk_reprocess_uses_disk = False
             self._bulk_reprocess_all_frames = False
             self.statusBar().showMessage("No frames available for ROI reprocess yet.")
             self._log(f"Reprocess skipped [{reason}]: no frames could be scheduled.")
             self._update_filter_queue_indicator()
             return False
+        self._log(
+            f"Reprocessing scheduling: cached={cached_jobs}, disk={disk_jobs}, "
+            f"total={self._bulk_reprocess_total}"
+        )
         self._update_filter_queue_indicator()
         return True
 
@@ -1685,10 +1916,14 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 self._try_lock_edge_from_focus_minimum()
             full_ready = self._full_prepared_count()
             if (
-                (full_ready <= 3)
-                or (full_ready == len(self.frames))
-                or (full_ready % max(1, len(self.frames) // 10) == 0)
+                (full_ready != int(self._last_full_prepare_logged_count))
+                and (
+                    (full_ready <= 3)
+                    or (full_ready == len(self.frames))
+                    or (full_ready % max(1, len(self.frames) // 10) == 0)
+                )
             ):
+                self._last_full_prepare_logged_count = int(full_ready)
                 self._log(
                     f"Full prepare progress: {full_ready}/{len(self.frames)} cached"
                 )
@@ -1698,16 +1933,25 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             and (not self._full_prepare_refresh_requested)
         ):
             self._full_prepare_refresh_requested = True
-            self._log(
-                "Full filtering queue complete. Recomputing ROI metrics on fully filtered frames..."
+            needs_full_refresh = any(
+                (i not in self._results) or (not bool(self._result_is_full.get(i, False)))
+                for i in range(len(self.frames))
             )
-            self._start_bulk_reprocess(
-                preserve_existing_results=True,
-                frame_indices=None,
-                allow_disk_fallback=False,
-                clear_queues=False,
-                reason="full-prepare-complete-refresh",
-            )
+            if needs_full_refresh:
+                self._log(
+                    "Full filtering queue complete. Recomputing ROI metrics on fully filtered frames..."
+                )
+                self._start_bulk_reprocess(
+                    preserve_existing_results=True,
+                    frame_indices=None,
+                    allow_disk_fallback=self._needs_disk_fallback_for_all_frames(),
+                    clear_queues=False,
+                    reason="full-prepare-complete-refresh",
+                )
+            else:
+                self._log(
+                    "Full filtering queue complete. Per-frame ROI metrics are already current."
+                )
         self._pump_full_queue()
         self._maybe_start_full_reprocess_after_scan()
         self._update_filter_queue_indicator()
@@ -1819,7 +2063,9 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             self._analysis_inflight = False
             self._analysis_cancel_event = None
 
-    def _try_lock_edge_from_focus_minimum(self, allow_existing: bool = False) -> bool:
+    def _try_lock_edge_from_focus_minimum(
+        self, allow_existing: bool = False, rerun_with_fixed_edge: bool = True
+    ) -> bool:
         if self._fixed_edge_line is not None and not allow_existing:
             return False
         if self._fixed_edge_line is None and not self._full_dynamic_results_ready:
@@ -1836,7 +2082,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 self._log("Full cache ready. Running dynamic full-pass before fixed edge lock...")
                 self._start_bulk_reprocess(
                     preserve_existing_results=True,
-                    allow_disk_fallback=False,
+                    allow_disk_fallback=self._needs_disk_fallback_for_all_frames(),
                     reason="dynamic-full-pass-before-lock",
                 )
             return False
@@ -1916,21 +2162,34 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 f"max_shift={max_shift_px:.3f}px; rerunning full reprocess."
             )
 
-        self.statusBar().showMessage(
-            f"Locked edge from near-min sigma at frame {ref_idx + 1}; reprocessing all frames with fixed edge."
-        )
         self._log(
             "Locked global edge from near-min sigma: "
             f"frame={ref_idx + 1}, m={m_med:.6f}, b={b_med:.6f}"
         )
-        # On initial lock, jump the viewer to the selected near-minimum frame.
-        # Use cache-only mode so this does not trigger new quick-pass loads.
+        if not bool(rerun_with_fixed_edge):
+            self.statusBar().showMessage(
+                f"Locked edge from near-min sigma at frame {ref_idx + 1}; "
+                "skipping fixed-edge rerun (disk-backed all-frame mode)."
+            )
+            self._log(
+                "Skipping fixed-edge rerun for this cycle to avoid repeated disk rereads."
+            )
+            if self._current_filtered is not None:
+                self._request_analysis_current()
+            elif self.current_index in self._results:
+                self._update_profile_plot(self._results[self.current_index])
+            return False
+        self.statusBar().showMessage(
+            f"Locked edge from near-min sigma at frame {ref_idx + 1}; reprocessing all frames with fixed edge."
+        )
+        # On initial lock, jump the viewer to the selected near-minimum frame
+        # without triggering a new quick-pass load.
         if prev_line is None and ref_idx != int(self.current_index):
             self._load_frame(ref_idx, cached_only=True)
         # Preserve existing points and overwrite frame-by-frame as refreshed results arrive.
         self._start_bulk_reprocess(
             preserve_existing_results=True,
-            allow_disk_fallback=False,
+            allow_disk_fallback=self._needs_disk_fallback_for_all_frames(),
             reason="fixed-edge-rerun",
         )
         return True
@@ -1941,7 +2200,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         if self._bulk_reprocess_active:
             return
         if not self._all_frames_full_prepared():
-            # Wait until heavy full filtering is complete; then run cache-only reprocess.
+            # Wait until heavy full filtering is complete; then rerun all-frame ROI metrics.
             return
         if not self._is_dataset_complete():
             return
@@ -1954,7 +2213,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._start_bulk_reprocess(
             preserve_existing_results=True,
             frame_indices=None,
-            allow_disk_fallback=False,
+            allow_disk_fallback=self._needs_disk_fallback_for_all_frames(),
             clear_queues=True,
             reason="scan-complete-full-reprocess",
         )
@@ -2017,6 +2276,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
 
             if self._bulk_reprocess_done >= self._bulk_reprocess_total:
                 self._bulk_reprocess_active = False
+                self._bulk_reprocess_uses_disk = False
                 if (
                     self._bulk_reprocess_all_frames
                     and self._fixed_edge_line is None
@@ -2039,12 +2299,24 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 )
                 self._log(f"Reprocessing complete: {self._bulk_reprocess_done}/{self._bulk_reprocess_total}")
                 reran = False
+                rerun_with_fixed = not self._needs_disk_fallback_for_all_frames()
                 if self._fixed_edge_line is None:
-                    reran = self._try_lock_edge_from_focus_minimum()
+                    reran = self._try_lock_edge_from_focus_minimum(
+                        rerun_with_fixed_edge=rerun_with_fixed
+                    )
                 elif not self._full_edge_refined:
                     self._full_edge_refined = True
-                    self._log("Refining fixed edge from full-pass results...")
-                    reran = self._try_lock_edge_from_focus_minimum(allow_existing=True)
+                    if rerun_with_fixed:
+                        self._log("Refining fixed edge from full-pass results...")
+                    else:
+                        self._log(
+                            "Refining fixed edge from full-pass results "
+                            "(no additional rerun in disk-backed mode)..."
+                        )
+                    reran = self._try_lock_edge_from_focus_minimum(
+                        allow_existing=True,
+                        rerun_with_fixed_edge=rerun_with_fixed,
+                    )
                 if reran:
                     self._pump_task_queue()
                     return
@@ -2055,9 +2327,14 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 self.statusBar().showMessage(
                     f"ROI reprocessing... {self._bulk_reprocess_done}/{self._bulk_reprocess_total}"
                 )
+                log_step = (
+                    1
+                    if int(self._bulk_reprocess_total) <= 40
+                    else max(1, int(self._bulk_reprocess_total) // 10)
+                )
                 if (
                     self._bulk_reprocess_done == 1
-                    or (self._bulk_reprocess_done % max(1, self._bulk_reprocess_total // 10) == 0)
+                    or (self._bulk_reprocess_done % log_step == 0)
                 ):
                     self._log(
                         f"Reprocessing progress: {self._bulk_reprocess_done}/{self._bulk_reprocess_total}"
@@ -2092,6 +2369,10 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 self._active_load_index = None
 
         if kind == "load_filter_display":
+            if token != int(self._load_generation):
+                self._pump_task_queue()
+                self._update_filter_queue_indicator()
+                return
             if error is not None:
                 self.statusBar().showMessage(f"Failed to load/filter frame {frame_index + 1}: {error}")
                 self._log(f"Load/filter failed for frame {frame_index + 1}: {error}")
@@ -2159,6 +2440,8 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
     def _load_frame(self, idx: int, *, cached_only: bool = False):
         if self._shutting_down:
             return False
+        if not self.frames:
+            return False
         idx = max(0, min(len(self.frames) - 1, int(idx)))
         if idx in self._queued_load_indices or idx == self._active_load_index:
             return False
@@ -2199,7 +2482,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             f"Loading quick pass for frame {idx + 1}/{len(self.frames)} in background..."
         )
         self._log(f"Loading quick pass for frame {idx + 1}/{len(self.frames)}")
-        token = 0
+        token = int(self._load_generation)
         ok = self._start_task(
             "load_filter_display",
             token,
@@ -2330,6 +2613,36 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         return x_line, y_line, float(x_vertex), y_vertex
 
     def _update_metric_plot(self):
+        if not self.frames:
+            self.curve_sigma_quick.setData([], [])
+            self.curve_sigma_full.setData([], [])
+            self.curve_sigma_highlight.setData([], [])
+            self.curve_quad_fit.setData([], [])
+            self.curve_psf_quick.setData([], [])
+            self.curve_psf_full.setData([], [])
+            self.curve_psf_highlight.setData([], [])
+            self.curve_psf_fit.setData([], [])
+            self.curve_mtf50_quick.setData([], [])
+            self.curve_mtf50_full.setData([], [])
+            self.curve_mtf50_highlight.setData([], [])
+            self.curve_mtf50_fit.setData([], [])
+            empty = np.empty(0, dtype=np.float64)
+            self.sigma_error_bars.setData(
+                x=empty,
+                y=empty,
+                top=empty,
+                bottom=empty,
+                beam=0.0,
+            )
+            self._optimal_focus_position = np.nan
+            self._optimal_focus_sigma = np.nan
+            self._optimal_psf_position = np.nan
+            self._optimal_psf_sigma = np.nan
+            self._optimal_mtf50_position = np.nan
+            self._optimal_mtf50_value = np.nan
+            self.optimal_focus_label.setText("Optimal motor position: --")
+            return
+
         xs: List[float] = []
         sigmas: List[float] = []
         sigma_errs: List[float] = []
@@ -2468,12 +2781,10 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             self.curve_quad_fit.setData(x_line, y_line)
             self._optimal_focus_position = float(x_min)
             self._optimal_focus_sigma = float(y_min)
-            self.optimal_focus_label.setText(f"Optimal motor position: {float(x_min):.5f}")
         else:
             self.curve_quad_fit.setData([], [])
             self._optimal_focus_position = np.nan
             self._optimal_focus_sigma = np.nan
-            self.optimal_focus_label.setText("Optimal motor position: --")
 
         psf_fit = self._local_parabola_fit(
             x_arr, psf_sigma_arr, local_points=local_points, find="min"
@@ -2498,6 +2809,17 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             self.curve_mtf50_fit.setData([], [])
             self._optimal_mtf50_position = np.nan
             self._optimal_mtf50_value = np.nan
+
+        if np.isfinite(self._optimal_mtf50_position):
+            self.optimal_focus_label.setText(
+                f"Optimal motor position (MTF50): {self._optimal_mtf50_position:.5f}"
+            )
+        elif np.isfinite(self._optimal_focus_position):
+            self.optimal_focus_label.setText(
+                f"Optimal motor position (sigma): {self._optimal_focus_position:.5f}"
+            )
+        else:
+            self.optimal_focus_label.setText("Optimal motor position: --")
 
         if not self._bulk_reprocess_active and not self._is_frame_loading:
             sigma_txt = (
@@ -2548,6 +2870,114 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         if self._live_roi_preview:
             self._roi_analysis_timer.start()
 
+    def _open_files_dialog(self):
+        start_dir = self._last_open_dir or str(Path.cwd())
+        files, _selected_filter = QtWidgets.QFileDialog.getOpenFileNames(
+            self,
+            "Select TIFF files",
+            start_dir,
+            "TIFF Images (*.tif *.tiff);;All Files (*)",
+        )
+        if not files:
+            return
+        first_path = Path(files[0]).expanduser()
+        self._last_open_dir = str(first_path.parent)
+        try:
+            frames = build_frames_from_files(files, start_position=0.0, step_size=1.0)
+        except Exception as ex:
+            self.statusBar().showMessage(f"Open files failed: {ex}")
+            self._log(f"Open files failed: {ex}")
+            return
+        self._replace_dataset(frames, source="file dialog")
+
+    def _replace_dataset(self, frames: Sequence[FrameInfo], source: str = "manual"):
+        new_frames = [
+            FrameInfo(index=i, path=Path(f.path), position=float(f.position))
+            for i, f in enumerate(frames)
+        ]
+        if not new_frames:
+            return
+
+        self.playing = False
+        self.timer.stop()
+        self.btn_play.blockSignals(True)
+        self.btn_play.setChecked(False)
+        self.btn_play.blockSignals(False)
+        self.btn_play.setText("Play")
+
+        if self._analysis_cancel_event is not None:
+            self._analysis_cancel_event.set()
+        self._analysis_cancel_event = None
+        self._analysis_inflight = False
+        self._pending_analysis_request = None
+        self._analysis_token += 1
+        self._load_generation += 1
+        self._roi_generation += 1
+        self._bulk_reprocess_token += 1
+
+        self._pending_bulk_reprocess = None
+        self._roi_reprocess_after_scan = False
+        self._pause_full_prepare = False
+        self._bulk_reprocess_active = False
+        self._bulk_reprocess_total = 0
+        self._bulk_reprocess_done = 0
+        self._bulk_reprocess_uses_disk = False
+        self._bulk_reprocess_all_frames = False
+        self._current_bulk_used_fixed = False
+        self._full_dynamic_results_ready = False
+        self._full_dynamic_pass_requested = False
+        self._full_prepare_refresh_requested = False
+        self._last_full_prepare_logged_count = -1
+        self._full_edge_refined = False
+        self._fixed_edge_line = None
+        self._fixed_edge_reference_index = None
+        self._playback_summary_pending = False
+        self._stream_next_index = None
+
+        self._clear_task_queue()
+        self._clear_full_queue()
+
+        self._quick_filtered_cache.clear()
+        self._quick_cache_bytes = 0
+        self._full_filtered_cache.clear()
+        self._full_cache_bytes = 0
+        self._full_prepared_indices.clear()
+        self._results.clear()
+        self._result_is_full.clear()
+        self._seen_frame_indices.clear()
+        self._current_filtered = None
+        self._roi_initialized_from_first_frame = False
+        self._last_committed_roi_rect = self._roi_rect()
+
+        self._optimal_focus_position = np.nan
+        self._optimal_focus_sigma = np.nan
+        self._optimal_psf_position = np.nan
+        self._optimal_psf_sigma = np.nan
+        self._optimal_mtf50_position = np.nan
+        self._optimal_mtf50_value = np.nan
+
+        self.frames = new_frames
+        self.current_index = 0
+        self.edge_line_item.hide()
+        self.esf_raw_curve.setData([], [])
+        self.esf_fit_curve.setData([], [])
+        self.pft_curve.setData([], [])
+        self.mtf_curve.setData([], [])
+        self.mtf50_line.hide()
+        self.frame_label.setText("")
+        self._update_metric_plot()
+        self._update_filter_queue_indicator()
+
+        self.statusBar().showMessage(
+            f"Loaded {len(self.frames)} files from {source}; starting full filtering queue..."
+        )
+        self._log(
+            f"Dataset replaced ({source}): {len(self.frames)} frames. Starting processing."
+        )
+        self._load_frame(0)
+        for idx in range(len(self.frames)):
+            self._enqueue_full_prepare(idx)
+
     def _on_roi_region_change_finished(self):
         if self._suppress_roi_callbacks:
             return
@@ -2574,13 +3004,13 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._clear_queued_bulk_tasks()
         self._stream_next_index = int(self.current_index + 1)
         if self._is_dataset_complete():
-            # Dataset done: do cache-only reprocess after full filtering finishes.
+            # Dataset done: rerun all-frame ROI metrics after full filtering finishes.
             if self._all_frames_full_prepared():
                 self._roi_reprocess_after_scan = False
                 self._start_bulk_reprocess(
                     preserve_existing_results=True,
                     frame_indices=None,
-                    allow_disk_fallback=False,
+                    allow_disk_fallback=self._needs_disk_fallback_for_all_frames(),
                     clear_queues=True,
                     reason="roi-release-scan-finished",
                 )
@@ -2588,7 +3018,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 self._roi_reprocess_after_scan = True
                 self._log(
                     "ROI updated after scan; waiting for full filtering queue "
-                    "to complete before cache-only reprocess."
+                    "to complete before all-frame ROI reprocess."
                 )
             return
         # During scanning: clear stale metrics, quickly reanalyze already-collected cached frames,
@@ -2726,8 +3156,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "image_dir",
         nargs="?",
-        default="/Users/seanfayfar/MIT Dropbox/Sean Fayfar/Experiments/MIT NRL/4DH4/Imaging/2026/Calibration/Focusing",
-        help="Directory containing TIFF images",
+        default=None,
+        help="Optional directory containing TIFF images (if omitted, use Open Files... in the UI)",
     )
     p.add_argument("--start-position", type=float, default=0.0, help="Fake motor start position")
     p.add_argument("--step-size", type=float, default=1.0, help="Fake motor step size")
@@ -2750,7 +3180,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=8,
         help=(
             "Maximum total concurrent workers across task, bulk, and full pools "
-            "(minimum effective value is 3)."
+            "(minimum effective value is 3). "
+            "Auto-raised if needed to satisfy requested --full-workers/--c."
         ),
     )
     p.add_argument(
@@ -2762,10 +3193,27 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--full-workers",
         "--filter-workers",
+        "--max-processes",
+        "--c",
         dest="full_workers",
         type=int,
         default=6,
-        help="Optional cap for full-filter process workers (primary CPU load).",
+        help=(
+            "Optional cap for full-filter process workers (primary CPU load). "
+            "Aliases: --max-processes, --c. "
+            "Total worker budget is auto-adjusted to honor this value."
+        ),
+    )
+    p.add_argument(
+        "--full-cache-gb",
+        "--max-ram-gb",
+        "--mem",
+        type=float,
+        default=10.0,
+        help=(
+            "Full filtered image cache budget in GB (LRU, minimum 0.25 GB). "
+            "Aliases: --max-ram-gb, --mem"
+        ),
     )
     return p
 
@@ -2775,33 +3223,42 @@ def main(argv=None) -> int:
     if lm is None:
         raise SystemExit("lmfit is required for step-model fitting. Install with: pip install lmfit")
 
-    image_dir = Path(args.image_dir).expanduser().resolve()
-    if not image_dir.exists():
-        raise SystemExit(f"Image directory does not exist: {image_dir}")
-
     positions_csv = Path(args.positions_csv).expanduser().resolve() if args.positions_csv else None
     if positions_csv is not None and not positions_csv.exists():
         raise SystemExit(f"Positions CSV does not exist: {positions_csv}")
 
-    frames = discover_frames(
-        image_dir=image_dir,
-        start_position=args.start_position,
-        step_size=args.step_size,
-        positions_csv=positions_csv,
-        series_key=args.series_key,
+    frames: List[FrameInfo] = []
+    if args.image_dir:
+        image_dir = Path(args.image_dir).expanduser().resolve()
+        if not image_dir.exists():
+            raise SystemExit(f"Image directory does not exist: {image_dir}")
+        frames = discover_frames(
+            image_dir=image_dir,
+            start_position=args.start_position,
+            step_size=args.step_size,
+            positions_csv=positions_csv,
+            series_key=args.series_key,
+        )
+
+    requested_full_workers = int(max(1, int(args.full_workers)))
+    requested_bulk_workers = int(max(1, int(args.bulk_workers)))
+    effective_max_workers_total = int(
+        max(
+            int(args.max_workers_total),
+            1 + requested_bulk_workers + requested_full_workers,
+        )
     )
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-    pg.setConfigOption("background", (252, 252, 252))
-    pg.setConfigOption("foreground", (0, 0, 0))
     pg.setConfigOption("imageAxisOrder", "row-major")
 
     w = FocusOfflineWindow(
         frames=frames,
         interval_ms=args.interval_ms,
-        max_workers_total=args.max_workers_total,
-        bulk_workers=args.bulk_workers,
-        full_workers=args.full_workers,
+        max_workers_total=effective_max_workers_total,
+        bulk_workers=requested_bulk_workers,
+        full_workers=requested_full_workers,
+        full_cache_gb=args.full_cache_gb,
     )
     w.show()
     return int(app.exec_())
