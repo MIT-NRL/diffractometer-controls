@@ -32,50 +32,21 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout_4">
    <item>
-    <widget class="PyDMImageView" name="cameraImage">
-     <property name="font">
-      <font>
-       <pointsize>12</pointsize>
-      </font>
-     </property>
-     <property name="contextMenuPolicy">
-      <enum>Qt::DefaultContextMenu</enum>
-     </property>
+    <widget class="PyDMEmbeddedDisplay" name="camURLViewerEmbeddedDisplay">
      <property name="toolTip">
-      <string>ca://${P}${im}ArrayData</string>
+      <string/>
      </property>
-     <property name="autoFillBackground">
-      <bool>false</bool>
+     <property name="frameShape">
+      <enum>QFrame::Box</enum>
      </property>
-     <property name="styleSheet">
-      <string notr="true"/>
+     <property name="lineWidth">
+      <number>1</number>
      </property>
-     <property name="colorMapMax" stdset="0">
-      <double>1024.000000000000000</double>
+     <property name="macros" stdset="0">
+      <string>P=${P},R=${R},im=${im}</string>
      </property>
-     <property name="colorMap" stdset="0">
-      <enum>PyDMImageView::Monochrome</enum>
-     </property>
-     <property name="autoDownsample" stdset="0">
-      <bool>false</bool>
-     </property>
-     <property name="imageWidth" stdset="0">
-      <number>0</number>
-     </property>
-     <property name="normalizeData" stdset="0">
-      <bool>true</bool>
-     </property>
-     <property name="readingOrder" stdset="0">
-      <enum>PyDMImageView::Clike</enum>
-     </property>
-     <property name="imageChannel" stdset="0">
-      <string>ca://${P}${im}ArrayData</string>
-     </property>
-     <property name="widthChannel" stdset="0">
-      <string>ca://${P}${im}ArraySize1_RBV</string>
-     </property>
-     <property name="heightChannel" stdset="0">
-      <string>ca://${P}${im}ArraySize2_RBV</string>
+     <property name="filename" stdset="0">
+      <string>cam_url_display.py</string>
      </property>
     </widget>
    </item>
@@ -371,9 +342,9 @@ background-color: rgb(213, 213, 213)</string>
    <header>pydm.widgets.byte</header>
   </customwidget>
   <customwidget>
-   <class>PyDMImageView</class>
-   <extends>QWidget</extends>
-   <header>pydm.widgets.image</header>
+   <class>PyDMEmbeddedDisplay</class>
+   <extends>QFrame</extends>
+   <header>pydm.widgets.embedded_display</header>
   </customwidget>
   <customwidget>
    <class>PyDMLineEdit</class>

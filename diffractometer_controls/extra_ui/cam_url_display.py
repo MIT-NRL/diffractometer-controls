@@ -23,7 +23,7 @@ class URLCamDisplay(Display):
         self._connect_image_channels()
 
     def ui_filename(self):
-        return "cam_url.ui"
+        return "cam_url_viewer.ui"
 
     def _install_image_widget(self):
         old_widget = self.ui.cameraImage

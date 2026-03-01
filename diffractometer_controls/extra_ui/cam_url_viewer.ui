@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>Form</class>
+ <widget class="QWidget" name="Form">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>626</width>
+    <height>500</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Form</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout_4">
+   <item>
+    <widget class="PyDMImageView" name="cameraImage">
+     <property name="font">
+      <font>
+       <pointsize>12</pointsize>
+      </font>
+     </property>
+     <property name="contextMenuPolicy">
+      <enum>Qt::DefaultContextMenu</enum>
+     </property>
+     <property name="toolTip">
+      <string>ca://${P}${im}ArrayData</string>
+     </property>
+     <property name="autoFillBackground">
+      <bool>false</bool>
+     </property>
+     <property name="styleSheet">
+      <string notr="true"/>
+     </property>
+     <property name="colorMapMax" stdset="0">
+      <double>1024.000000000000000</double>
+     </property>
+     <property name="colorMap" stdset="0">
+      <enum>PyDMImageView::Monochrome</enum>
+     </property>
+     <property name="autoDownsample" stdset="0">
+      <bool>false</bool>
+     </property>
+     <property name="imageWidth" stdset="0">
+      <number>0</number>
+     </property>
+     <property name="normalizeData" stdset="0">
+      <bool>true</bool>
+     </property>
+     <property name="readingOrder" stdset="0">
+      <enum>PyDMImageView::Clike</enum>
+     </property>
+     <property name="imageChannel" stdset="0">
+      <string>ca://${P}${im}ArrayData</string>
+     </property>
+     <property name="widthChannel" stdset="0">
+      <string>ca://${P}${im}ArraySize1_RBV</string>
+     </property>
+     <property name="heightChannel" stdset="0">
+      <string>ca://${P}${im}ArraySize2_RBV</string>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>PyDMImageView</class>
+   <extends>QWidget</extends>
+   <header>pydm.widgets.image</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>
