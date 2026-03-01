@@ -12,6 +12,14 @@ from typing import Dict, Optional, Tuple
 
 from qtpy import QtCore, QtWidgets
 import pyqtgraph as pg
+import numpy as np
+
+try:
+    from bluesky_queueserver_api import BFunc
+    from bluesky_queueserver_api.zmq import REManagerAPI
+except Exception:
+    BFunc = None
+    REManagerAPI = None
 
 try:
     from focus_offline_viewer import FocusOfflineWindow, FrameInfo
@@ -24,6 +32,47 @@ def _is_number(value) -> bool:
         return math.isfinite(float(value))
     except Exception:
         return False
+
+
+class QueueServerAdaptiveClient:
+    """Submit adaptive focus commands to Queue Server via function_execute."""
+
+    def __init__(
+        self,
+        *,
+        session_id: str,
+        zmq_control_addr: str,
+        zmq_info_addr: str,
+        user: str = "focus_online_viewer",
+        user_group: str = "primary",
+    ):
+        if REManagerAPI is None or BFunc is None:
+            raise RuntimeError(
+                "bluesky_queueserver_api is required for adaptive command mode."
+            )
+        self.session_id = str(session_id).strip()
+        if not self.session_id:
+            raise ValueError("session_id must be non-empty")
+        self._api = REManagerAPI(
+            zmq_control_addr=str(zmq_control_addr),
+            zmq_info_addr=str(zmq_info_addr),
+        )
+        self._user = str(user)
+        self._user_group = str(user_group)
+
+    def submit(self, command: str, payload: Optional[Dict] = None) -> Dict:
+        item = BFunc(
+            "adaptive_focus_submit_command",
+            str(self.session_id),
+            str(command),
+            dict(payload or {}),
+        )
+        return self._api.function_execute(
+            item,
+            run_in_background=True,
+            user=self._user,
+            user_group=self._user_group,
+        )
 
 
 class FocusOnlineBridge(QtCore.QObject):
@@ -60,6 +109,8 @@ class FocusOnlineBridge(QtCore.QObject):
         bulk_workers: int = 1,
         full_workers: int = 6,
         full_cache_gb: float = 10.0,
+        preprocess_mode: str = "tomopy_outlier",
+        preprocess_size: int = 7,
         parent=None,
     ):
         super().__init__(parent=parent)
@@ -82,6 +133,8 @@ class FocusOnlineBridge(QtCore.QObject):
         self.bulk_workers = int(max(1, bulk_workers))
         self.full_workers = int(max(1, full_workers))
         self.full_cache_gb = float(max(0.25, full_cache_gb))
+        self.preprocess_mode = str(preprocess_mode or "median")
+        self.preprocess_size = int(max(1, preprocess_size))
 
         self.window: Optional[FocusOfflineWindow] = None
 
@@ -117,9 +170,31 @@ class FocusOnlineBridge(QtCore.QObject):
             window.show()
             window.raise_()
             window.activateWindow()
-            # Some window managers apply focus changes asynchronously.
+            # Some window managers apply focus changes asynchronously or ignore
+            # a plain raise()/activate() for newly spawned processes. Use a
+            # one-shot topmost pulse, then clear it.
+            def _pulse_topmost():
+                try:
+                    window.setWindowFlag(QtCore.Qt.WindowStaysOnTopHint, True)
+                    window.show()
+                    window.raise_()
+                    window.activateWindow()
+                    QtCore.QTimer.singleShot(250, _clear_topmost)
+                except Exception:
+                    pass
+
+            def _clear_topmost():
+                try:
+                    window.setWindowFlag(QtCore.Qt.WindowStaysOnTopHint, False)
+                    window.show()
+                    window.raise_()
+                    window.activateWindow()
+                except Exception:
+                    pass
+
             QtCore.QTimer.singleShot(0, window.raise_)
             QtCore.QTimer.singleShot(0, window.activateWindow)
+            QtCore.QTimer.singleShot(30, _pulse_topmost)
         except Exception:
             pass
 
@@ -254,6 +329,37 @@ class FocusOnlineBridge(QtCore.QObject):
             self.on_mark_complete()
         except Exception as ex:
             self._log_received.emit(f"Complete handler failed: {ex}")
+
+    def get_focus_target(self, metric: str = "mtf50") -> Optional[float]:
+        if self.window is None:
+            return None
+        m = str(metric or "mtf50").strip().lower()
+        if m == "mtf50":
+            target = getattr(self.window, "_optimal_mtf50_position", np.nan)
+        elif m == "lsf_sigma":
+            target = getattr(self.window, "_optimal_psf_position", np.nan)
+        else:
+            target = getattr(self.window, "_optimal_focus_position", np.nan)
+        try:
+            target = float(target)
+        except Exception:
+            target = np.nan
+        if np.isfinite(target):
+            return target
+        # Fallbacks if selected metric is unavailable.
+        for attr in (
+            "_optimal_mtf50_position",
+            "_optimal_psf_position",
+            "_optimal_focus_position",
+        ):
+            val = getattr(self.window, attr, np.nan)
+            try:
+                val = float(val)
+            except Exception:
+                val = np.nan
+            if np.isfinite(val):
+                return val
+        return None
 
     def eventFilter(self, watched, event):
         if (
@@ -399,6 +505,8 @@ class FocusOnlineBridge(QtCore.QObject):
                 bulk_workers=self.bulk_workers,
                 full_workers=self.full_workers,
                 full_cache_gb=self.full_cache_gb,
+                preprocess_mode=self.preprocess_mode,
+                preprocess_size=self.preprocess_size,
                 allow_file_open=False,
             )
             self.window.installEventFilter(self)
@@ -444,6 +552,8 @@ def attach_to_run_engine(
     bulk_workers: int = 1,
     full_workers: int = 6,
     full_cache_gb: float = 10.0,
+    preprocess_mode: str = "tomopy_outlier",
+    preprocess_size: int = 7,
 ) -> Tuple[FocusOnlineBridge, int]:
     """Attach online viewer to a local RunEngine stream."""
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -469,6 +579,8 @@ def attach_to_run_engine(
         bulk_workers=bulk_workers,
         full_workers=full_workers,
         full_cache_gb=full_cache_gb,
+        preprocess_mode=preprocess_mode,
+        preprocess_size=preprocess_size,
     )
     token = int(re.subscribe(bridge.on_document))
     return bridge, token
@@ -492,6 +604,34 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--bulk-workers", type=int, default=1, help="Bulk/ROI workers")
     p.add_argument("--full-workers", type=int, default=6, help="Full filter process workers")
     p.add_argument("--full-cache-gb", type=float, default=10.0, help="Full filtered cache budget (GB)")
+    p.add_argument(
+        "--preprocess-mode",
+        type=str,
+        choices=["median", "tomopy_outlier"],
+        default="tomopy_outlier",
+        help="Prefilter mode for image processing.",
+    )
+    p.add_argument(
+        "--preprocess-size",
+        type=int,
+        default=7,
+        help="Kernel size for selected prefilter mode.",
+    )
+    p.add_argument("--session-id", type=str, default=None, help="Adaptive focus session id from plan metadata")
+    p.add_argument(
+        "--qserver-control-addr",
+        type=str,
+        default="tcp://localhost:60615",
+        help="Queue Server control address (used when --session-id is set)",
+    )
+    p.add_argument(
+        "--qserver-info-addr",
+        type=str,
+        default="tcp://localhost:60625",
+        help="Queue Server info address (used when --session-id is set)",
+    )
+    p.add_argument("--qserver-user", type=str, default="focus_online_viewer", help="Queue Server API user name")
+    p.add_argument("--qserver-user-group", type=str, default="primary", help="Queue Server API user group")
     return p
 
 
@@ -512,7 +652,67 @@ def main(argv=None) -> int:
         bulk_workers=args.bulk_workers,
         full_workers=args.full_workers,
         full_cache_gb=args.full_cache_gb,
+        preprocess_mode=args.preprocess_mode,
+        preprocess_size=args.preprocess_size,
     )
+
+    if args.session_id:
+        try:
+            cmd_client = QueueServerAdaptiveClient(
+                session_id=str(args.session_id),
+                zmq_control_addr=str(args.qserver_control_addr),
+                zmq_info_addr=str(args.qserver_info_addr),
+                user=str(args.qserver_user),
+                user_group=str(args.qserver_user_group),
+            )
+
+            def _submit(command: str, payload: Optional[Dict] = None):
+                resp = cmd_client.submit(command, payload=payload)
+                ok = bool(resp.get("success", resp.get("ok", False)))
+                if ok:
+                    bridge._on_log_received(
+                        f"Adaptive command submitted: {command}"
+                    )
+                else:
+                    bridge._on_log_received(
+                        f"Adaptive command failed: {command} :: {resp}"
+                    )
+
+            def _on_go_to_focus(metric: str):
+                target = bridge.get_focus_target(metric)
+                payload = {}
+                if target is not None and np.isfinite(float(target)):
+                    payload["target_position"] = float(target)
+                payload["metric"] = str(metric)
+                _submit("go_to_focus", payload=payload)
+
+            def _on_scan_around_focus(metric: str, step_size: float):
+                target = bridge.get_focus_target(metric)
+                payload = {
+                    "metric": str(metric),
+                    "step_size": float(max(1e-4, float(step_size))),
+                    "num_points": 7,
+                }
+                if target is not None and np.isfinite(float(target)):
+                    payload["center"] = float(target)
+                _submit("scan_around_focus", payload=payload)
+
+            def _on_extend_left():
+                _submit("extend_left", payload={"num_points": 3})
+
+            def _on_extend_right():
+                _submit("extend_right", payload={"num_points": 3})
+
+            def _on_complete():
+                _submit("complete", payload={})
+
+            bridge.on_go_to_focus = _on_go_to_focus
+            bridge.on_scan_around_focus = _on_scan_around_focus
+            bridge.on_extend_left = _on_extend_left
+            bridge.on_extend_right = _on_extend_right
+            bridge.on_mark_complete = _on_complete
+        except Exception as ex:
+            print(f"Adaptive command client init failed: {ex}")
 
     from bluesky.callbacks.zmq import RemoteDispatcher
 
