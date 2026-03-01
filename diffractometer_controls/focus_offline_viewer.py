@@ -742,6 +742,8 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         parent=None,
     ):
         super().__init__(parent=parent)
+        # Ensure consistent image orientation no matter who instantiates this window.
+        pg.setConfigOption("imageAxisOrder", "row-major")
         self.setWindowTitle("Offline Focus Scan Viewer")
         self.resize(1500, 900)
 
@@ -813,6 +815,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._full_queued_indices: Set[int] = set()
         self._full_active_indices: Set[int] = set()
         self._full_refresh_active_indices: Set[int] = set()
+        self._full_prepared_indices: Set[int] = set()
         self._full_future_to_index: Dict[object, int] = {}
         self._full_process_pool = concurrent.futures.ProcessPoolExecutor(
             max_workers=self._full_worker_count
@@ -876,6 +879,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.btn_next = QtWidgets.QPushButton("Next")
         self.btn_play = QtWidgets.QPushButton("Play")
         self.btn_play.setCheckable(True)
+        self.btn_play.hide()
         self.btn_recompute = QtWidgets.QPushButton("Recompute ROI")
         self.speed_spin = QtWidgets.QSpinBox()
         self.speed_spin.setRange(50, 5000)
@@ -889,7 +893,6 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
 
         control_row.addWidget(self.btn_prev)
         control_row.addWidget(self.btn_next)
-        control_row.addWidget(self.btn_play)
         control_row.addWidget(self.btn_recompute)
         control_row.addWidget(QtWidgets.QLabel("Interval:"))
         control_row.addWidget(self.speed_spin)
@@ -1070,7 +1073,23 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
 
         # ROI setup
         self.image_item = self.image_view.getImageItem()
-        self.roi = pg.RectROI([100, 100], [400, 200], pen=pg.mkPen(255, 200, 0, width=2))
+        # Force a stable, non-inverted grayscale mapping independent of app theme.
+        try:
+            self.image_view.setPredefinedGradient("grey")
+        except Exception:
+            try:
+                hist = getattr(self.image_view.ui, "histogram", None)
+                if hist is not None and hasattr(hist, "gradient"):
+                    hist.gradient.loadPreset("grey")
+            except Exception:
+                pass
+        try:
+            lut = np.arange(256, dtype=np.uint8)
+            lut = np.column_stack((lut, lut, lut, np.full_like(lut, 255)))
+            self.image_item.setLookupTable(lut)
+        except Exception:
+            pass
+        self.roi = pg.RectROI([100, 100], [200, 400], pen=pg.mkPen(255, 200, 0, width=2))
         self.roi.addScaleHandle([1, 1], [0, 0])
         self.roi.addScaleHandle([0, 0], [1, 1])
         self.image_view.getView().addItem(self.roi)
@@ -1084,7 +1103,24 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.filter_queue_bar.setRange(0, max(1, len(self.frames)))
         self.filter_queue_bar.setValue(0)
         self.filter_queue_bar.setFixedWidth(230)
+        self.filter_queue_bar.setFixedHeight(18)
         self.filter_queue_bar.setTextVisible(True)
+        self.filter_queue_bar.setAlignment(QtCore.Qt.AlignCenter)
+        # Keep queue progress readable in dark and light app themes.
+        self.filter_queue_bar.setStyleSheet(
+            "QProgressBar {"
+            " border: 1px solid #5f6368;"
+            " border-radius: 4px;"
+            " background-color: #202124;"
+            " color: #f1f3f4;"
+            " text-align: center;"
+            "}"
+            "QProgressBar::chunk {"
+            " background-color: #3daee9;"
+            " border-radius: 3px;"
+            " margin: 1px;"
+            "}"
+        )
         self.filter_queue_bar.setFormat("Full filter queue: 0")
         self.filter_queue_label = QtWidgets.QLabel("full 0/0")
         self.statusBar().addPermanentWidget(self.filter_queue_bar)
@@ -1170,17 +1206,33 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 f"m={self._fixed_edge_line[0]:.6f}, b={self._fixed_edge_line[1]:.6f}"
             )
 
+    def _full_prepared_count(self) -> int:
+        n_frames = int(len(self.frames))
+        if n_frames <= 0:
+            return 0
+        return int(sum(1 for idx in self._full_prepared_indices if 0 <= int(idx) < n_frames))
+
+    def _full_prepared_seen_count(self) -> int:
+        if not self._seen_frame_indices:
+            return 0
+        return int(sum(1 for idx in self._seen_frame_indices if int(idx) in self._full_prepared_indices))
+
+    def _all_frames_full_prepared(self) -> bool:
+        if not self.frames:
+            return True
+        return bool(self._full_prepared_count() >= len(self.frames))
+
     def _filter_queue_count(self) -> int:
         full_pending = int(len(self._full_queue) + self._full_running_count)
         # Only track heavy full-image filtering backlog here.
-        full_backlog = max(0, int(len(self._seen_frame_indices) - len(self._full_filtered_cache)))
+        full_backlog = max(0, int(len(self._seen_frame_indices) - self._full_prepared_seen_count()))
         return max(0, full_pending, full_backlog)
 
     def _update_filter_queue_indicator(self):
         if not hasattr(self, "filter_queue_bar"):
             return
         total = max(1, int(len(self.frames)))
-        full_ready = int(min(total, len(self._full_filtered_cache)))
+        full_ready = int(min(total, self._full_prepared_count()))
         queue_count = self._filter_queue_count()
         self.filter_queue_bar.setRange(0, total)
         self.filter_queue_bar.setValue(int(min(total, max(0, queue_count))))
@@ -1206,6 +1258,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         return None
 
     def _cache_full_filtered(self, idx: int, filtered: np.ndarray):
+        self._full_prepared_indices.add(int(idx))
         self._full_filtered_cache[idx] = filtered
         self._full_filtered_cache.move_to_end(idx, last=True)
         while len(self._full_filtered_cache) > self._max_full_cache_size:
@@ -1256,8 +1309,17 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             return
         max_w = max(8, w - 2)
         max_h = max(8, h - 2)
-        roi_w = int(min(max_w, max(8, round(w * 0.22))))
-        roi_h = int(min(max_h, max(8, round(h * 0.12))))
+        # Default ROI aspect ratio: height:width = 2:1.
+        roi_w = int(max(8, round(w * 0.12)))
+        roi_h = int(max(8, round(roi_w * 2.0)))
+        if roi_h > max_h:
+            roi_h = int(max_h)
+            roi_w = int(max(8, round(roi_h / 2.0)))
+        if roi_w > max_w:
+            roi_w = int(max_w)
+            roi_h = int(max(8, round(roi_w * 2.0)))
+        roi_w = int(min(max_w, max(8, roi_w)))
+        roi_h = int(min(max_h, max(8, roi_h)))
         x0 = float((w - roi_w) / 2.0)
         y0 = float((h - roi_h) / 2.0)
 
@@ -1300,7 +1362,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         return bool(
             (last_idx in self._seen_frame_indices)
             or (len(self._seen_frame_indices) >= len(self.frames))
-            or (len(self._full_filtered_cache) >= len(self.frames))
+            or self._all_frames_full_prepared()
             or (len(self._results) >= len(self.frames))
         )
 
@@ -1410,7 +1472,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._log(
             f"Reprocessing started [{reason}]: requested={len(requested_indices)}, mode={mode}, "
             f"line={line_mode}, source={source_mode}, "
-            f"full_cache_ready={len(self._full_filtered_cache)}/{len(self.frames)}, "
+            f"full_cache_ready={self._full_prepared_count()}/{len(self.frames)}, "
             f"workers={self._bulk_worker_count}"
         )
         for idx in requested_indices:
@@ -1618,19 +1680,20 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             if (
                 (self._fixed_edge_line is None)
                 and (not self._bulk_reprocess_active)
-                and (len(self._full_filtered_cache) == len(self.frames))
+                and self._all_frames_full_prepared()
             ):
                 self._try_lock_edge_from_focus_minimum()
+            full_ready = self._full_prepared_count()
             if (
-                (len(self._full_filtered_cache) <= 3)
-                or (len(self._full_filtered_cache) == len(self.frames))
-                or (len(self._full_filtered_cache) % max(1, len(self.frames) // 10) == 0)
+                (full_ready <= 3)
+                or (full_ready == len(self.frames))
+                or (full_ready % max(1, len(self.frames) // 10) == 0)
             ):
                 self._log(
-                    f"Full prepare progress: {len(self._full_filtered_cache)}/{len(self.frames)} cached"
+                    f"Full prepare progress: {full_ready}/{len(self.frames)} cached"
                 )
         if (
-            (len(self._full_filtered_cache) == len(self.frames))
+            self._all_frames_full_prepared()
             and (not self._bulk_reprocess_active)
             and (not self._full_prepare_refresh_requested)
         ):
@@ -1761,7 +1824,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             return False
         if self._fixed_edge_line is None and not self._full_dynamic_results_ready:
             # Do not lock edge from quick-pass metrics; wait for dynamic full-pass results.
-            if len(self._full_filtered_cache) < len(self.frames):
+            if not self._all_frames_full_prepared():
                 return False
             if (
                 (not self._full_dynamic_pass_requested)
@@ -1877,7 +1940,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             return
         if self._bulk_reprocess_active:
             return
-        if len(self._full_filtered_cache) < len(self.frames):
+        if not self._all_frames_full_prepared():
             # Wait until heavy full filtering is complete; then run cache-only reprocess.
             return
         if not self._is_dataset_complete():
@@ -1945,7 +2008,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                         self._set_display_image(filtered_opt)
                 self._results[frame_index] = fit_result
                 self._result_is_full[frame_index] = bool(
-                    (filtered_opt is not None) or (frame_index in self._full_filtered_cache)
+                    (filtered_opt is not None) or (frame_index in self._full_prepared_indices)
                 )
 
                 if frame_index == self.current_index:
@@ -2067,7 +2130,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             elif (result is not None) and is_current_request:
                 result = self._preserve_previous_edge_geometry(frame_index, result)
                 self._results[frame_index] = result
-                self._result_is_full[frame_index] = bool(frame_index in self._full_filtered_cache)
+                self._result_is_full[frame_index] = bool(frame_index in self._full_prepared_indices)
                 self._update_metric_plot()
                 if frame_index == self.current_index:
                     self._update_profile_plot(result)
@@ -2283,7 +2346,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         for idx in sorted(self._results):
             r = self._results[idx]
             pos = self.frames[idx].position
-            is_full = bool(self._result_is_full.get(idx, idx in self._full_filtered_cache))
+            is_full = bool(self._result_is_full.get(idx, idx in self._full_prepared_indices))
             xs.append(pos)
             sigmas.append(r.step_sigma if np.isfinite(r.step_sigma) else np.nan)
             sigma_errs.append(
@@ -2512,7 +2575,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._stream_next_index = int(self.current_index + 1)
         if self._is_dataset_complete():
             # Dataset done: do cache-only reprocess after full filtering finishes.
-            if len(self._full_filtered_cache) >= len(self.frames):
+            if self._all_frames_full_prepared():
                 self._roi_reprocess_after_scan = False
                 self._start_bulk_reprocess(
                     preserve_existing_results=True,
@@ -2549,10 +2612,25 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         )
 
     def _prev_frame(self):
-        self._load_frame(self.current_index - 1)
+        self._load_frame(self._neighbor_index_by_position(-1))
 
     def _next_frame(self):
-        self._load_frame(self.current_index + 1)
+        self._load_frame(self._neighbor_index_by_position(+1))
+
+    def _neighbor_index_by_position(self, step: int) -> int:
+        if not self.frames:
+            return int(self.current_index)
+        ordered = sorted(
+            range(len(self.frames)),
+            key=lambda i: (float(self.frames[i].position), int(i)),
+        )
+        cur_idx = int(max(0, min(len(self.frames) - 1, int(self.current_index))))
+        try:
+            cur_rank = int(ordered.index(cur_idx))
+        except ValueError:
+            cur_rank = 0
+        next_rank = int(max(0, min(len(ordered) - 1, cur_rank + int(step))))
+        return int(ordered[next_rank])
 
     def _on_interval_changed(self, value: int):
         self.interval_ms = int(value)
