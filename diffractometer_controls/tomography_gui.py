@@ -1,6 +1,8 @@
+import os
 import sys
 import threading
-from concurrent.futures import ThreadPoolExecutor
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import numpy as np
 
 # from pydm.display import Display
@@ -46,12 +48,26 @@ try:
 except Exception:
     scipy_ndimage = None
 
+try:
+    from wf_norm_worker import build_wf_norm_array_worker
+except Exception:
+    try:
+        from diffractometer_controls.wf_norm_worker import build_wf_norm_array_worker
+    except Exception:
+        build_wf_norm_array_worker = None
+
+WF_NORM_FILTER_SETTINGS_KEY = "analysis/wf_norm_filter_method"
+WF_NORM_FILTER_OUTLIER = "outlier"
+WF_NORM_FILTER_MEDIAN = "median"
+WF_NORM_FILTER_RUNTIME_PROPERTY = "analysis_wf_norm_filter_method_runtime"
+
 
 class MainScreen(display.MITRDisplay):
     re_dispatcher: RemoteDispatcher
     re_client: RunEngineClient
     profile_compute_ready = QtCore.Signal(object)
     profile_worker_idle = QtCore.Signal()
+    wf_norm_ready = QtCore.Signal(object)
 
     def __init__(self, parent=None, args=None, macros=None, ui_filename='tomography_gui.ui'):
         super().__init__(parent, args, macros, ui_filename)
@@ -89,12 +105,42 @@ class MainScreen(display.MITRDisplay):
         self._acquire_time_total = 0.0
         self._time_remaining_value = 0.0
         self._histogram_curve = None
+        self._histogram_plot_widget = None
         self._histogram_plot_item = None
+        self._histogram_axis = None
+        self._histogram_viewport = None
+        self._histogram_user_view_active = False
         self._histogram_low_line = None
         self._histogram_high_line = None
         self._histogram_update_pending = False
         self._histogram_max_samples = 200000
         self._histogram_bins = 128
+        self._wf_norm_array = None
+        self._wf_norm_reciprocal = None
+        self._wf_norm_reciprocal_t = None
+        # Treat very small finite values as valid denominators; avoid rejecting
+        # normalized/float-scaled WF images that are << 1.0.
+        self._wf_norm_eps = float(np.finfo(np.float32).tiny)
+        self._wf_norm_mismatch_count = 0
+        self._wf_norm_mismatch_limit = 5
+        self._wf_norm_last_dir = ""
+        self._wf_norm_filter_method = WF_NORM_FILTER_OUTLIER
+        self._wf_norm_outlier_size = 7
+        self._wf_norm_median_size = 6
+        self._wf_norm_busy = False
+        self._wf_norm_worker_lock = threading.Lock()
+        self._wf_norm_mp_ctx = None
+        self._wf_norm_worker = None
+        self._wf_norm_future = None
+        self._wf_norm_status_timer = None
+        self._wf_norm_status_index = 0
+        self._wf_norm_status_method = ""
+        self._wf_norm_requested_method = ""
+        self._wf_norm_tomopy_available = None
+        self._wf_norm_image_update_in_progress = False
+        self._last_source_image = None
+        self.wf_norm_checkbox = None
+        self.wf_norm_select_button = None
         self.measure_line_checkbox = None
         self.measure_readout_label = None
         self.profile_checkbox = None
@@ -124,6 +170,7 @@ class MainScreen(display.MITRDisplay):
         self._profile_preview_target_pixels = 90000
         self.profile_compute_ready.connect(self._on_profile_compute_ready)
         self.profile_worker_idle.connect(self._on_profile_worker_idle)
+        self.wf_norm_ready.connect(self._on_wf_norm_ready)
 
         image_view = self.ui.cameraImage
         self._install_display_controls(image_view)
@@ -156,6 +203,7 @@ class MainScreen(display.MITRDisplay):
         self._startup_autoscale_timer.timeout.connect(self._startup_autoscale_tick)
         self._startup_autoscale_timer.start()
         self.destroyed.connect(self._shutdown_profile_worker)
+        self.destroyed.connect(self._shutdown_wf_norm_worker)
 
     def _get_image_viewbox(self):
         image_view = self.ui.cameraImage
@@ -304,9 +352,18 @@ class MainScreen(display.MITRDisplay):
             self._enforce_pan_interaction()
 
     def _profile_source_2d(self):
-        if self._last_image is None:
+        data_source = self._last_image
+        if self._is_wf_norm_active():
+            # For profile analysis, explicitly derive from the latest raw frame
+            # when possible so ROI statistics track normalized display values.
+            raw_candidate = self._last_source_image if self._last_source_image is not None else self._last_image
+            normalized = self._normalize_image_with_wf_for_analysis(raw_candidate)
+            if normalized is not None:
+                data_source = normalized
+
+        if data_source is None:
             return None
-        data = np.asarray(self._last_image)
+        data = np.asarray(data_source)
         if data.size == 0:
             return None
         if data.ndim == 2:
@@ -320,6 +377,22 @@ class MainScreen(display.MITRDisplay):
         squeezed = np.squeeze(data)
         if squeezed.ndim == 2:
             return squeezed
+        return None
+
+    def _normalize_image_with_wf_for_analysis(self, image):
+        if image is None or self._wf_norm_reciprocal is None:
+            return None
+        data = np.asarray(image)
+        data = np.squeeze(data)
+        if data.ndim != 2:
+            return None
+        data_f = np.asarray(data, dtype=np.float32)
+        rec = self._wf_norm_reciprocal
+        if data_f.shape == rec.shape:
+            return data_f * rec
+        rec_t = self._wf_norm_reciprocal_t
+        if rec_t is not None and data_f.shape == rec_t.shape:
+            return data_f * rec_t
         return None
 
     def _default_profile_roi_geometry(self):
@@ -422,7 +495,7 @@ class MainScreen(display.MITRDisplay):
         plot_widget = pg.PlotWidget()
         plot_widget.showGrid(x=True, y=True, alpha=0.2)
         plot_item = plot_widget.getPlotItem()
-        plot_item.setLabel("left", "Integrated intensity")
+        plot_item.setLabel("left", "Mean intensity")
         plot_item.setLabel("bottom", "X pixel")
         curve = plot_item.plot(pen=pg.mkPen(0, 120, 230, width=2))
         layout.addWidget(plot_widget, 1)
@@ -504,6 +577,364 @@ class MainScreen(display.MITRDisplay):
             except Exception:
                 pass
 
+    def _shutdown_wf_norm_worker(self, *args):
+        self._stop_wf_norm_status_animation()
+        with self._wf_norm_worker_lock:
+            worker = self._wf_norm_worker
+            self._wf_norm_worker = None
+            self._wf_norm_mp_ctx = None
+            self._wf_norm_future = None
+            self._wf_norm_busy = False
+        if worker is not None:
+            try:
+                worker.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                worker.shutdown(wait=False)
+            except Exception:
+                pass
+
+    def _set_wf_norm_checked(self, checked):
+        if self.wf_norm_checkbox is None:
+            return
+        self.wf_norm_checkbox.blockSignals(True)
+        self.wf_norm_checkbox.setChecked(bool(checked))
+        self.wf_norm_checkbox.blockSignals(False)
+
+    def _set_wf_norm_controls_busy(self, busy, text=None):
+        self._wf_norm_busy = bool(busy)
+        if self.wf_norm_select_button is not None:
+            self.wf_norm_select_button.setEnabled(not self._wf_norm_busy)
+            if text:
+                self.wf_norm_select_button.setText(str(text))
+            else:
+                self.wf_norm_select_button.setText("Building..." if self._wf_norm_busy else "Select WF")
+
+    def _set_wf_norm_visual_state(self, state):
+        button = self.wf_norm_select_button
+        if button is None:
+            return
+        st = str(state).strip().lower() if state is not None else "idle"
+        if st == "error":
+            style = "QPushButton { background-color: rgb(255, 214, 214); border: 1px solid rgb(186, 84, 84); }"
+        else:
+            style = ""
+        button.setStyleSheet(style)
+
+    def _wf_norm_has_tomopy(self):
+        if self._wf_norm_tomopy_available is None:
+            try:
+                import tomopy  # noqa: F401
+                self._wf_norm_tomopy_available = True
+            except Exception:
+                self._wf_norm_tomopy_available = False
+        return bool(self._wf_norm_tomopy_available)
+
+    def _wf_norm_filter_label(self):
+        if self._wf_norm_filter_method == WF_NORM_FILTER_MEDIAN:
+            return f"Median filter (size={int(self._wf_norm_median_size)})"
+        return f"Remove outliers (tomopy, size={int(self._wf_norm_outlier_size)})"
+
+    def _set_wf_norm_filter_method(self, method, persist=True):
+        m = str(method).strip().lower() if method is not None else "outlier"
+        if m not in {WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}:
+            m = WF_NORM_FILTER_OUTLIER
+        if m == WF_NORM_FILTER_OUTLIER and not self._wf_norm_has_tomopy():
+            m = WF_NORM_FILTER_MEDIAN
+        self._wf_norm_filter_method = m
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.setProperty(WF_NORM_FILTER_RUNTIME_PROPERTY, self._wf_norm_filter_method)
+        if persist:
+            settings = QtCore.QSettings()
+            settings.setValue(WF_NORM_FILTER_SETTINGS_KEY, self._wf_norm_filter_method)
+            settings.sync()
+        if self.wf_norm_select_button is not None:
+            self.wf_norm_select_button.setToolTip(f"WF filter: {self._wf_norm_filter_label()}")
+
+    def _load_wf_norm_filter_method_from_settings(self):
+        app = QtWidgets.QApplication.instance()
+        runtime_value = None
+        if app is not None:
+            runtime_value = app.property(WF_NORM_FILTER_RUNTIME_PROPERTY)
+            if runtime_value is not None:
+                m = str(runtime_value).strip().lower()
+                if m in {WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}:
+                    self._set_wf_norm_filter_method(m, persist=False)
+                    return
+        settings = QtCore.QSettings()
+        try:
+            settings.sync()
+        except Exception:
+            pass
+        value = settings.value(WF_NORM_FILTER_SETTINGS_KEY, self._wf_norm_filter_method)
+        self._set_wf_norm_filter_method(value, persist=False)
+
+    def _clear_wf_norm_reference(self, disable_checkbox=True):
+        self._wf_norm_array = None
+        self._wf_norm_reciprocal = None
+        self._wf_norm_reciprocal_t = None
+        self._wf_norm_mismatch_count = 0
+        if disable_checkbox:
+            self._set_wf_norm_checked(False)
+
+    def _ensure_wf_norm_worker(self):
+        with self._wf_norm_worker_lock:
+            if self._wf_norm_mp_ctx is None:
+                self._wf_norm_mp_ctx = mp.get_context("spawn")
+            if self._wf_norm_worker is None:
+                self._wf_norm_worker = ProcessPoolExecutor(max_workers=1, mp_context=self._wf_norm_mp_ctx)
+            return self._wf_norm_worker
+
+    def _ensure_wf_norm_status_timer(self):
+        if self._wf_norm_status_timer is None:
+            timer = QtCore.QTimer(self)
+            timer.setInterval(700)
+            timer.timeout.connect(self._advance_wf_norm_status_text)
+            self._wf_norm_status_timer = timer
+        return self._wf_norm_status_timer
+
+    def _advance_wf_norm_status_text(self):
+        labels = ["Loading...", "Combining...", "Filtering..."]
+        if not labels:
+            return
+        idx = min(self._wf_norm_status_index, len(labels) - 1)
+        label = labels[idx]
+        method = str(self._wf_norm_status_method).strip().lower()
+        if method in {WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}:
+            label = f"{label[:-3]} ({method})..."
+        if self._wf_norm_status_index < (len(labels) - 1):
+            self._wf_norm_status_index += 1
+        self._set_wf_norm_controls_busy(True, text=label)
+
+    def _start_wf_norm_status_animation(self, method=""):
+        self._wf_norm_status_index = 1
+        self._wf_norm_status_method = str(method or "").strip().lower()
+        self._set_wf_norm_visual_state("busy")
+        if self._wf_norm_status_method in {WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}:
+            text = f"Loading ({self._wf_norm_status_method})..."
+        else:
+            text = "Loading..."
+        self._set_wf_norm_controls_busy(True, text=text)
+        self._ensure_wf_norm_status_timer().start()
+
+    def _stop_wf_norm_status_animation(self):
+        timer = self._wf_norm_status_timer
+        if timer is not None:
+            timer.stop()
+        self._wf_norm_status_method = ""
+
+    def _on_select_wf_button_clicked(self):
+        self._select_wf_images_for_norm(checked_request=False)
+
+    def _on_wf_norm_checkbox_toggled(self, enabled):
+        checked = bool(enabled)
+        if not checked:
+            self._set_wf_norm_visual_state("idle")
+            if self._last_source_image is not None:
+                self._set_image_item_data(np.asarray(self._last_source_image))
+                self._apply_robust_normalization(self._last_source_image)
+            self._reset_histogram_view()
+            return
+        if self._wf_norm_array is not None:
+            self._set_wf_norm_visual_state("ready")
+            if self._last_source_image is not None:
+                self._apply_robust_normalization(self._last_source_image)
+            self._reset_histogram_view()
+            return
+        self._select_wf_images_for_norm(checked_request=True)
+
+    def _select_wf_images_for_norm(self, checked_request=False):
+        if self._wf_norm_busy:
+            return
+        start_dir = self._wf_norm_last_dir or ""
+        files, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self,
+            "Select White-Field Images",
+            start_dir,
+            "Image Files (*.tif *.tiff *.png *.jpg *.jpeg *.bmp *.npy);;All Files (*.*)",
+        )
+        paths = [str(path) for path in files if str(path).strip()]
+        if not paths:
+            if checked_request:
+                self._set_wf_norm_checked(False)
+            return
+        self._wf_norm_last_dir = os.path.dirname(paths[0])
+        self._submit_wf_norm_build(paths)
+
+    def _submit_wf_norm_build(self, paths):
+        if build_wf_norm_array_worker is None:
+            self._clear_wf_norm_reference(disable_checkbox=True)
+            self._set_wf_norm_visual_state("error")
+            if self.wf_norm_select_button is not None:
+                self.wf_norm_select_button.setToolTip("WF build failed: worker module import failed.")
+            return
+        path_list = tuple(str(p) for p in paths if str(p).strip())
+        if not path_list:
+            self._clear_wf_norm_reference(disable_checkbox=True)
+            self._set_wf_norm_visual_state("error")
+            if self.wf_norm_select_button is not None:
+                self.wf_norm_select_button.setToolTip("WF build failed: no source files.")
+            return
+        self._load_wf_norm_filter_method_from_settings()
+        selected_method = self._wf_norm_filter_method
+        if selected_method == WF_NORM_FILTER_OUTLIER and not self._wf_norm_has_tomopy():
+            selected_method = WF_NORM_FILTER_MEDIAN
+            self._set_wf_norm_filter_method(selected_method, persist=True)
+        self._wf_norm_requested_method = selected_method
+        try:
+            worker = self._ensure_wf_norm_worker()
+            future = worker.submit(
+                build_wf_norm_array_worker,
+                path_list,
+                selected_method,
+                int(self._wf_norm_outlier_size),
+                int(self._wf_norm_median_size),
+            )
+        except Exception as ex:
+            self._stop_wf_norm_status_animation()
+            self._clear_wf_norm_reference(disable_checkbox=True)
+            self._set_wf_norm_visual_state("error")
+            if self.wf_norm_select_button is not None:
+                self.wf_norm_select_button.setToolTip(f"WF build failed: {ex}")
+            return
+
+        with self._wf_norm_worker_lock:
+            self._wf_norm_future = future
+        self._start_wf_norm_status_animation(method=selected_method)
+        future.add_done_callback(self._on_wf_norm_future_done)
+
+    def _on_wf_norm_future_done(self, future):
+        with self._wf_norm_worker_lock:
+            if future is not self._wf_norm_future:
+                return
+            self._wf_norm_future = None
+        try:
+            payload = future.result()
+        except Exception as ex:
+            payload = {"ok": False, "error": str(ex)}
+        try:
+            self.wf_norm_ready.emit(payload)
+        except Exception:
+            pass
+
+    def _on_wf_norm_ready(self, payload):
+        self._stop_wf_norm_status_animation()
+        self._set_wf_norm_controls_busy(False)
+        if not isinstance(payload, dict) or not payload.get("ok", False):
+            error = ""
+            if isinstance(payload, dict):
+                error = str(payload.get("error", "WF build failed."))
+            self._clear_wf_norm_reference(disable_checkbox=True)
+            self._set_wf_norm_visual_state("error")
+            if self.wf_norm_select_button is not None:
+                self.wf_norm_select_button.setToolTip(error)
+            return
+
+        method_used = str(payload.get("filter_used", "")).strip().lower()
+        method_requested = str(payload.get("filter_requested", "")).strip().lower()
+        note = str(payload.get("filter_note", "")).strip()
+        method_label = method_used or method_requested or self._wf_norm_requested_method or self._wf_norm_filter_method
+        if method_used and method_requested and method_used != method_requested:
+            method_label = f"{method_used} (requested {method_requested})"
+        norm_array = np.asarray(payload.get("norm_array"))
+        norm_array = np.squeeze(norm_array)
+        if norm_array.size == 0 or norm_array.ndim != 2:
+            self._clear_wf_norm_reference(disable_checkbox=True)
+            self._set_wf_norm_visual_state("error")
+            if self.wf_norm_select_button is not None:
+                self.wf_norm_select_button.setToolTip(
+                    f"WF build failed: output is not a 2D array (filter={method_label})."
+                )
+            return
+
+        norm_array = np.asarray(norm_array, dtype=np.float32)
+        reciprocal = np.full(norm_array.shape, np.nan, dtype=np.float32)
+        finite_mask = np.isfinite(norm_array)
+        valid = finite_mask & (np.abs(norm_array) > self._wf_norm_eps)
+        if not np.any(valid):
+            self._clear_wf_norm_reference(disable_checkbox=True)
+            self._set_wf_norm_visual_state("error")
+            if self.wf_norm_select_button is not None:
+                finite_vals = norm_array[finite_mask]
+                finite_count = int(finite_vals.size)
+                nonzero_count = int(np.count_nonzero(finite_mask & (norm_array != 0)))
+                if finite_count > 0:
+                    arr_min = float(np.nanmin(finite_vals))
+                    arr_max = float(np.nanmax(finite_vals))
+                    msg = (
+                        "WF build failed: no finite nonzero pixels "
+                        f"(filter={method_label}, shape={tuple(norm_array.shape)}, finite={finite_count}, "
+                        f"nonzero={nonzero_count}, min={arr_min:.6g}, max={arr_max:.6g})."
+                    )
+                else:
+                    msg = (
+                        "WF build failed: no finite nonzero pixels "
+                        f"(filter={method_label}, shape={tuple(norm_array.shape)}, finite=0)."
+                    )
+                self.wf_norm_select_button.setToolTip(msg)
+            return
+        reciprocal[valid] = 1.0 / norm_array[valid]
+        self._wf_norm_array = norm_array
+        self._wf_norm_reciprocal = reciprocal
+        self._wf_norm_reciprocal_t = np.asarray(reciprocal.T, dtype=np.float32)
+        self._wf_norm_mismatch_count = 0
+        if self.wf_norm_select_button is not None:
+            tip = f"Loaded {int(payload.get('count', 0))} WF file(s), shape={tuple(norm_array.shape)}, filter={method_label}."
+            if note:
+                tip = f"{tip} {note}"
+            self.wf_norm_select_button.setToolTip(tip)
+        self._set_wf_norm_visual_state("ready")
+        if self.wf_norm_checkbox is not None and self.wf_norm_checkbox.isChecked():
+            self._apply_robust_normalization()
+            self._reset_histogram_view()
+
+    def _normalize_image_with_wf(self, image):
+        if self._wf_norm_reciprocal is None:
+            return None
+        data = np.asarray(image)
+        data = np.squeeze(data)
+        if data.ndim != 2:
+            return None
+        data_f = np.asarray(data, dtype=np.float32)
+        rec = self._wf_norm_reciprocal
+        if data_f.shape == rec.shape:
+            self._wf_norm_mismatch_count = 0
+            self._set_wf_norm_visual_state("ready")
+            return data_f * rec
+        rec_t = self._wf_norm_reciprocal_t
+        if rec_t is not None and data_f.shape == rec_t.shape:
+            self._wf_norm_mismatch_count = 0
+            self._set_wf_norm_visual_state("ready")
+            return data_f * rec_t
+        self._wf_norm_mismatch_count += 1
+        self._set_wf_norm_visual_state("warning")
+        if self.wf_norm_select_button is not None:
+            self.wf_norm_select_button.setToolTip(
+                f"WF/image shape mismatch {data_f.shape} vs {rec.shape}; "
+                f"waiting ({self._wf_norm_mismatch_count}/{self._wf_norm_mismatch_limit})."
+            )
+        if self._wf_norm_mismatch_count >= self._wf_norm_mismatch_limit:
+            self._clear_wf_norm_reference(disable_checkbox=True)
+            self._set_wf_norm_visual_state("error")
+            if self.wf_norm_select_button is not None:
+                self.wf_norm_select_button.setToolTip(
+                    f"WF disabled: shape mismatch {data_f.shape} vs {rec.shape}."
+                )
+        return None
+
+    def _set_image_item_data(self, image_data):
+        image_view = self.ui.cameraImage
+        try:
+            image_item = image_view.getImageItem()
+            if image_item is None or not hasattr(image_item, "setImage"):
+                return
+            self._wf_norm_image_update_in_progress = True
+            image_item.setImage(image_data, autoLevels=False)
+        except Exception:
+            pass
+        finally:
+            self._wf_norm_image_update_in_progress = False
+
     def _cancel_profile_requests(self):
         with self._profile_worker_lock:
             self._profile_pending_request = None
@@ -513,6 +944,7 @@ class MainScreen(display.MITRDisplay):
         if self._profile_curve is None or self._profile_plot_widget is None:
             return
         plot_item = self._profile_plot_widget.getPlotItem()
+        plot_item.setLabel("left", "Mean intensity")
         plot_item.setLabel("bottom", axis_label)
         self._profile_curve.setData(coord, profile)
         plot_item.enableAutoRange(axis="xy", enable=True)
@@ -731,11 +1163,11 @@ class MainScreen(display.MITRDisplay):
         mode = str(request.get("mode", "vertical")).strip().lower()
 
         if mode.startswith("h"):
-            profile = np.nansum(roi_data, axis=1)
+            profile = np.nanmean(roi_data, axis=1)
             coord = np.arange(y0, y1, dtype=float)
             axis_label = "Y pixel"
         else:
-            profile = np.nansum(roi_data, axis=0)
+            profile = np.nanmean(roi_data, axis=0)
             coord = np.arange(x0, x1, dtype=float)
             axis_label = "X pixel"
 
@@ -763,6 +1195,24 @@ class MainScreen(display.MITRDisplay):
             if self.profile_checkbox is not None and self.profile_checkbox.isChecked():
                 self.profile_checkbox.setChecked(False)
             return super().eventFilter(watched, event)
+
+        if watched is self._histogram_viewport:
+            event_type = event.type()
+            if event_type == QtCore.QEvent.MouseButtonDblClick:
+                self._reset_histogram_view()
+                event.accept()
+                return True
+            if event_type in (QtCore.QEvent.Wheel, QtCore.QEvent.MouseButtonPress):
+                self._histogram_user_view_active = True
+            elif event_type == QtCore.QEvent.MouseMove:
+                buttons = QtCore.Qt.NoButton
+                try:
+                    buttons = event.buttons()
+                except Exception:
+                    buttons = QtCore.Qt.NoButton
+                if buttons != QtCore.Qt.NoButton:
+                    self._histogram_user_view_active = True
+            return False
 
         if watched is self._measure_scene and self._measure_enabled:
             event_type = event.type()
@@ -1202,6 +1652,22 @@ class MainScreen(display.MITRDisplay):
                 self.colormap_combo.setCurrentIndex(i)
                 break
 
+        self.wf_norm_checkbox = QtWidgets.QCheckBox("Norm")
+        self.wf_norm_checkbox.setChecked(False)
+        self.wf_norm_checkbox.toggled.connect(self._on_wf_norm_checkbox_toggled)
+        self.wf_norm_select_button = QtWidgets.QPushButton("Select WF")
+        self.wf_norm_select_button.clicked.connect(self._on_select_wf_button_clicked)
+        self._set_wf_norm_visual_state("idle")
+        self._load_wf_norm_filter_method_from_settings()
+        wf_norm_block = QtWidgets.QWidget()
+        wf_norm_layout = QtWidgets.QVBoxLayout(wf_norm_block)
+        wf_norm_layout.setContentsMargins(0, 0, 0, 0)
+        wf_norm_layout.setSpacing(2)
+        wf_norm_layout.addWidget(self.wf_norm_checkbox)
+        wf_norm_layout.addWidget(self.wf_norm_select_button)
+        wf_norm_block.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
+        controls_layout.addWidget(wf_norm_block)
+
         controls_layout.addWidget(measure_block)
 
         histogram_block = self._create_histogram_block()
@@ -1217,6 +1683,9 @@ class MainScreen(display.MITRDisplay):
         if idx >= 0:
             controls_layout.setStretch(idx, 0)
         idx = controls_layout.indexOf(color_map_block)
+        if idx >= 0:
+            controls_layout.setStretch(idx, 0)
+        idx = controls_layout.indexOf(wf_norm_block)
         if idx >= 0:
             controls_layout.setStretch(idx, 0)
         idx = controls_layout.indexOf(measure_block)
@@ -1256,25 +1725,33 @@ class MainScreen(display.MITRDisplay):
             return None
 
         block = QtWidgets.QWidget()
-        block.setMinimumWidth(145)
+        block.setMinimumWidth(190)
         block.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
         layout = QtWidgets.QVBoxLayout(block)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
 
         histogram_plot = pg.PlotWidget()
-        histogram_plot.setMinimumWidth(145)
+        histogram_plot.setMinimumWidth(190)
         histogram_plot.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed)
         histogram_plot.setMinimumHeight(56)
         histogram_plot.setMaximumHeight(56)
         histogram_plot.setMenuEnabled(False)
-        histogram_plot.setMouseEnabled(x=False, y=False)
+        histogram_plot.setMouseEnabled(x=True, y=False)
         histogram_plot.hideButtons()
 
         plot_item = histogram_plot.getPlotItem()
         plot_item.hideAxis("left")
         plot_item.showAxis("bottom")
-        plot_item.getAxis("bottom").setStyle(showValues=False)
+        axis = plot_item.getAxis("bottom")
+        axis.setStyle(showValues=True)
+        tick_font = axis.style.get("tickFont")
+        if tick_font is None:
+            tick_font = QtGui.QFont()
+        tick_font.setPointSize(max(7, tick_font.pointSize() if tick_font.pointSize() > 0 else 8))
+        axis.setTickFont(tick_font)
+        axis.setStyle(tickTextOffset=2)
+        self._histogram_axis = axis
 
         self._histogram_curve = plot_item.plot(
             pen=pg.mkPen(40, 100, 215, width=1.5),
@@ -1285,12 +1762,150 @@ class MainScreen(display.MITRDisplay):
         self._histogram_high_line = pg.InfiniteLine(pos=0.0, angle=90, movable=False, pen=pg.mkPen(20, 140, 60, width=1))
         plot_item.addItem(self._histogram_low_line)
         plot_item.addItem(self._histogram_high_line)
+        view_box = plot_item.getViewBox()
+        if view_box is not None and hasattr(view_box, "setMouseMode"):
+            pan_mode = getattr(view_box, "PanMode", None)
+            if pan_mode is not None:
+                view_box.setMouseMode(pan_mode)
+            if hasattr(view_box, "setMouseEnabled"):
+                view_box.setMouseEnabled(x=True, y=False)
+            try:
+                if hasattr(view_box, "sigXRangeChanged"):
+                    view_box.sigXRangeChanged.connect(self._on_histogram_xrange_changed)
+                elif hasattr(view_box, "sigRangeChanged"):
+                    view_box.sigRangeChanged.connect(self._on_histogram_xrange_changed)
+            except Exception:
+                pass
+        self._histogram_plot_widget = histogram_plot
         self._histogram_plot_item = plot_item
+        self._histogram_viewport = histogram_plot.viewport()
+        if self._histogram_viewport is not None:
+            try:
+                self._histogram_viewport.installEventFilter(self)
+            except Exception:
+                self._histogram_viewport = None
 
         layout.addWidget(histogram_plot)
 
         self._update_histogram_markers()
         return block
+
+    def _is_wf_norm_active(self):
+        return (
+            self.wf_norm_checkbox is not None
+            and self.wf_norm_checkbox.isChecked()
+            and self._wf_norm_reciprocal is not None
+        )
+
+    def _histogram_x_range(self, finite, data):
+        if finite.size == 0:
+            return 0.0, 1.0
+        if self._is_wf_norm_active():
+            lo, hi = np.percentile(finite, [0.1, 99.9])
+            lo = float(lo)
+            hi = float(hi)
+            lo = min(0.0, lo)
+            if not np.isfinite(hi) or hi <= lo:
+                hi = lo + 1.0
+            span = hi - lo
+            if span <= 0:
+                span = 1.0
+            return lo, hi + 0.02 * span
+        bit_max = float(self._infer_bit_max_from_image_data(data))
+        return 0.0, max(1.0, bit_max)
+
+    def _format_histogram_tick(self, value, normalized):
+        v = float(value)
+        if normalized:
+            av = abs(v)
+            if av >= 100:
+                return f"{v:.0f}"
+            if av >= 10:
+                return f"{v:.1f}"
+            if av >= 1:
+                return f"{v:.2f}"
+            return f"{v:.3f}"
+        av = abs(v)
+        if av >= 1000:
+            k = v / 1000.0
+            if abs(k) >= 100:
+                return f"{k:.0f}k"
+            if abs(k) >= 10:
+                return f"{k:.1f}k"
+            return f"{k:.2f}k"
+        return f"{v:.0f}"
+
+    def _set_histogram_axis_ticks(self, x_min, x_max):
+        if self._histogram_axis is None:
+            return
+        span = float(x_max) - float(x_min)
+        if not np.isfinite(span) or span <= 0:
+            return
+        plot_width = 280.0
+        if self._histogram_plot_widget is not None:
+            try:
+                plot_width = max(120.0, float(self._histogram_plot_widget.width()))
+            except Exception:
+                pass
+        target_count = int(max(4, min(13, round(plot_width / 65.0))))
+        raw_step = span / float(max(1, target_count))
+        if not np.isfinite(raw_step) or raw_step <= 0:
+            return
+        step_exp = np.floor(np.log10(raw_step))
+        step_base = 10.0 ** step_exp
+        step_frac = raw_step / step_base
+        if step_frac <= 1.0:
+            nice_frac = 1.0
+        elif step_frac <= 2.0:
+            nice_frac = 2.0
+        elif step_frac <= 5.0:
+            nice_frac = 5.0
+        else:
+            nice_frac = 10.0
+        nice_step = nice_frac * step_base
+        start = np.floor(float(x_min) / nice_step) * nice_step
+        end = float(x_max) + (0.5 * nice_step)
+        values = []
+        v = float(start)
+        for _ in range(1024):
+            if v > end:
+                break
+            if v >= (float(x_min) - (0.5 * nice_step)):
+                values.append(v)
+            v += nice_step
+        if not values:
+            values = [float(x_min), float(x_max)]
+        normalized = self._is_wf_norm_active()
+        ticks = [(v, self._format_histogram_tick(v, normalized)) for v in values]
+        self._histogram_axis.setTicks([ticks, []])
+
+    def _on_histogram_xrange_changed(self, *args):
+        x_min = None
+        x_max = None
+        for arg in reversed(args):
+            if isinstance(arg, (list, tuple, np.ndarray)) and len(arg) == 2:
+                try:
+                    x_min = float(arg[0])
+                    x_max = float(arg[1])
+                    break
+                except Exception:
+                    pass
+        if x_min is None or x_max is None:
+            if self._histogram_plot_item is None:
+                return
+            try:
+                xr = self._histogram_plot_item.viewRange()[0]
+                x_min = float(xr[0])
+                x_max = float(xr[1])
+            except Exception:
+                return
+        if not (np.isfinite(x_min) and np.isfinite(x_max) and x_max > x_min):
+            return
+        self._set_histogram_axis_ticks(x_min, x_max)
+
+    def _reset_histogram_view(self):
+        self._histogram_user_view_active = False
+        self._update_histogram_plot()
 
     def _discover_colormap_options(self, image_view):
         options = []
@@ -1675,9 +2290,8 @@ class MainScreen(display.MITRDisplay):
         if sample.size == 0:
             return
 
-        bit_max = float(self._infer_bit_max_from_image_data(data))
-
-        hist, edges = np.histogram(sample, bins=self._histogram_bins, range=(0.0, bit_max))
+        x_min, x_max = self._histogram_x_range(finite, data)
+        hist, edges = np.histogram(sample, bins=self._histogram_bins, range=(x_min, x_max))
         centers = 0.5 * (edges[:-1] + edges[1:])
         self._histogram_curve.setData(centers, hist.astype(float))
 
@@ -1685,8 +2299,23 @@ class MainScreen(display.MITRDisplay):
             ymax = float(np.max(hist)) if hist.size else 1.0
             if ymax <= 0:
                 ymax = 1.0
-            self._histogram_plot_item.setXRange(0.0, bit_max, padding=0.0)
             self._histogram_plot_item.setYRange(0.0, ymax * 1.05, padding=0.0)
+            if not self._histogram_user_view_active:
+                self._histogram_plot_item.setXRange(float(x_min), float(x_max), padding=0.0)
+                self._set_histogram_axis_ticks(x_min, x_max)
+            else:
+                try:
+                    xr = self._histogram_plot_item.viewRange()[0]
+                    vx0 = float(xr[0])
+                    vx1 = float(xr[1])
+                    if np.isfinite(vx0) and np.isfinite(vx1) and vx1 > vx0:
+                        self._set_histogram_axis_ticks(vx0, vx1)
+                    else:
+                        self._set_histogram_axis_ticks(x_min, x_max)
+                except Exception:
+                    self._set_histogram_axis_ticks(x_min, x_max)
+        else:
+            self._set_histogram_axis_ticks(x_min, x_max)
 
         self._update_histogram_markers()
 
@@ -1702,11 +2331,15 @@ class MainScreen(display.MITRDisplay):
             self._startup_autoscale_timer.stop()
 
     def _apply_robust_normalization(self, *args):
+        if self._wf_norm_image_update_in_progress:
+            return
+        has_candidate = False
         image = None
         if args:
             candidate = args[0]
             if candidate is not None:
                 image = candidate
+                has_candidate = True
 
         if image is None:
             image_view = self.ui.cameraImage
@@ -1718,13 +2351,32 @@ class MainScreen(display.MITRDisplay):
         if image is None:
             return
 
+        norm_active = (
+            self.wf_norm_checkbox is not None
+            and self.wf_norm_checkbox.isChecked()
+            and self._wf_norm_reciprocal is not None
+        )
+        source_image = np.asarray(image)
+        if norm_active and (not has_candidate) and self._last_source_image is not None:
+            # While normalized display is active, fallback reads from ImageItem can be
+            # the already-normalized frame. Keep the last known raw source frame.
+            source_image = np.asarray(self._last_source_image)
+        else:
+            self._last_source_image = source_image
+        display_image = source_image
+        if norm_active:
+            normalized = self._normalize_image_with_wf(source_image)
+            if normalized is not None:
+                display_image = normalized
+                self._set_image_item_data(display_image)
+
         # Some backends reset interaction mode when first frame is rendered.
         if self._measure_enabled:
             self._set_measure_interaction_enabled(True)
         else:
             self._enforce_pan_interaction()
 
-        self._last_image = image
+        self._last_image = display_image
         self._schedule_histogram_update()
         if self._profile_enabled and not self._profile_roi_dragging:
             self._update_profile_plot()
@@ -1734,7 +2386,7 @@ class MainScreen(display.MITRDisplay):
                 self._manual_levels_initialized = True
             return
 
-        data = np.asarray(image)
+        data = np.asarray(display_image)
         if data.size == 0:
             return
         self._update_level_slider_scale_from_image(data)
