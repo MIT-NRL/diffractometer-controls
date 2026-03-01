@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import csv
+import inspect
 import math
 import os
 import re
@@ -386,6 +387,130 @@ def preprocess_image(image: np.ndarray, median_size: int = 6) -> np.ndarray:
     if scipy_ndimage is not None:
         if median_size > 1:
             arr = scipy_ndimage.median_filter(arr, size=median_size)
+
+    finite = np.isfinite(arr)
+    if finite.any():
+        low, high = np.nanpercentile(arr[finite], [0.5, 99.5])
+        if np.isfinite(low) and np.isfinite(high) and high > low:
+            arr = np.clip(arr, low, high)
+    return arr
+
+
+_TOMOPY_REMOVE_OUTLIER_FN = None
+_TOMOPY_REMOVE_OUTLIER_RESOLVED = False
+
+
+def _resolve_tomopy_remove_outlier():
+    global _TOMOPY_REMOVE_OUTLIER_FN, _TOMOPY_REMOVE_OUTLIER_RESOLVED
+    if _TOMOPY_REMOVE_OUTLIER_RESOLVED:
+        return _TOMOPY_REMOVE_OUTLIER_FN
+    _TOMOPY_REMOVE_OUTLIER_RESOLVED = True
+    fn = None
+    try:
+        import tomopy
+
+        fn = getattr(tomopy, "remove_outlier", None)
+        if fn is None:
+            from tomopy.misc.corr import remove_outlier as _remove_outlier
+
+            fn = _remove_outlier
+    except Exception:
+        fn = None
+    _TOMOPY_REMOVE_OUTLIER_FN = fn
+    return _TOMOPY_REMOVE_OUTLIER_FN
+
+
+def _normalize_preprocess_mode(mode: str) -> str:
+    text = str(mode or "median").strip().lower()
+    if text in {"tomopy", "tomopy_outlier", "outlier"}:
+        return "tomopy_outlier"
+    return "median"
+
+
+def _tomopy_dual_outlier_filter(image: np.ndarray, size: int = 7) -> Optional[np.ndarray]:
+    fn = _resolve_tomopy_remove_outlier()
+    if fn is None:
+        return None
+    k = int(max(1, size))
+    arr = np.asarray(image, dtype=np.float32)
+    squeeze_leading_image_axis = False
+    if arr.ndim == 2:
+        # tomopy.remove_outlier expects stack-like data and chunks along "axis".
+        # Promote single images to (image, y, x) so median filtering happens over y/x.
+        work = arr[np.newaxis, ...]
+        squeeze_leading_image_axis = True
+    else:
+        work = arr
+
+    try:
+        sig = inspect.signature(fn)
+        params = sig.parameters
+    except Exception:
+        params = {}
+
+    def _call_once(x):
+        kwargs = {}
+        if "size" in params:
+            kwargs["size"] = k
+        if "axis" in params:
+            kwargs["axis"] = 0
+        if "ncore" in params:
+            kwargs["ncore"] = 1
+        if "dif" in params:
+            # Match beamline remove_gammas convention:
+            #   tp.remove_outlier(image, dif=-1, size=size, axis=0)
+            # then mirrored for dark outliers via negative image pass.
+            dif = -1.0
+            try:
+                return fn(x, dif=dif, **kwargs)
+            except TypeError:
+                if ("axis" in kwargs) and ("ncore" in kwargs):
+                    try:
+                        return fn(x, dif, k, kwargs["axis"], kwargs["ncore"])
+                    except TypeError:
+                        pass
+                if "axis" in kwargs:
+                    try:
+                        return fn(x, dif, k, kwargs["axis"])
+                    except TypeError:
+                        pass
+                return fn(x, dif, k)
+        try:
+            return fn(x, **kwargs)
+        except TypeError:
+            return fn(x, k)
+
+    try:
+        out = _call_once(work)
+        out = -_call_once(-np.asarray(out))
+    except Exception:
+        return None
+    out = np.asarray(out, dtype=np.float64)
+    if squeeze_leading_image_axis and out.ndim >= 3:
+        out = out[0]
+    return out
+
+
+def preprocess_image_with_mode(
+    image: np.ndarray,
+    *,
+    filter_mode: str = "median",
+    filter_size: int = 7,
+) -> np.ndarray:
+    arr = np.asarray(image, dtype=np.float64)
+    mode = _normalize_preprocess_mode(filter_mode)
+    k = int(max(1, filter_size))
+
+    if mode == "tomopy_outlier":
+        outlier = _tomopy_dual_outlier_filter(arr, size=k)
+        if outlier is not None:
+            arr = outlier
+        elif scipy_ndimage is not None and k > 1:
+            # Fallback if tomopy is unavailable in this process.
+            arr = scipy_ndimage.median_filter(arr, size=k)
+    else:
+        if scipy_ndimage is not None and k > 1:
+            arr = scipy_ndimage.median_filter(arr, size=k)
 
     finite = np.isfinite(arr)
     if finite.any():
@@ -808,11 +933,19 @@ class _TaskRunner(QtCore.QRunnable):
             self.signals.done.emit(self.kind, self.token, self.frame_index, None, ex)
 
 
-def _load_and_filter_worker(path: Path) -> np.ndarray:
-    return preprocess_image(_read_image(path))
+def _load_and_filter_worker(
+    path: Path, filter_mode: str = "median", filter_size: int = 7
+) -> np.ndarray:
+    return preprocess_image_with_mode(
+        _read_image(path), filter_mode=filter_mode, filter_size=filter_size
+    )
 
 
-def _load_and_quick_filter_worker(path: Path) -> np.ndarray:
+def _load_and_quick_filter_worker(
+    path: Path, filter_mode: str = "median", filter_size: int = 7
+) -> np.ndarray:
+    _ = filter_mode
+    _ = filter_size
     return preprocess_image_quick(_read_image(path))
 
 
@@ -842,8 +975,12 @@ def _bulk_reprocess_worker(
     path: Path,
     roi_rect: Tuple[float, float, float, float],
     fixed_edge_line: Optional[Tuple[float, float]],
+    filter_mode: str = "median",
+    filter_size: int = 7,
 ) -> Tuple[np.ndarray, FitResult]:
-    filtered = preprocess_image(_read_image(path))
+    filtered = preprocess_image_with_mode(
+        _read_image(path), filter_mode=filter_mode, filter_size=filter_size
+    )
     bounds = _bounds_from_roi_rect(filtered.shape, roi_rect)
     fit = _analyze_filtered_worker(filtered, bounds, fixed_edge_line=fixed_edge_line)
     return filtered, fit
@@ -891,6 +1028,8 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         bulk_workers: Optional[int] = None,
         full_workers: Optional[int] = None,
         full_cache_gb: float = 10.0,
+        preprocess_mode: str = "tomopy_outlier",
+        preprocess_size: int = 7,
         allow_file_open: bool = True,
         parent=None,
     ):
@@ -909,6 +1048,12 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._last_open_dir = (
             str(frames[0].path.parent) if frames else str(Path.cwd())
         )
+        self._tomopy_outlier_available = _resolve_tomopy_remove_outlier() is not None
+        self._preprocess_mode = _normalize_preprocess_mode(preprocess_mode)
+        self._preprocess_size = int(max(1, preprocess_size))
+        self._preprocess_token = 0
+        if (self._preprocess_mode == "tomopy_outlier") and (not self._tomopy_outlier_available):
+            self._preprocess_mode = "median"
 
         self._quick_filtered_cache: OrderedDict[int, np.ndarray] = OrderedDict()
         self._max_quick_cache_bytes = int(2 * (1024**3))
@@ -976,7 +1121,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._full_active_indices: Set[int] = set()
         self._full_refresh_active_indices: Set[int] = set()
         self._full_prepared_indices: Set[int] = set()
-        self._full_future_to_index: Dict[object, int] = {}
+        self._full_future_to_index: Dict[object, Tuple[int, int]] = {}
         self._full_process_pool = concurrent.futures.ProcessPoolExecutor(
             max_workers=self._full_worker_count
         )
@@ -1021,6 +1166,13 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             f"task=1, bulk={self._bulk_worker_count}, full={self._full_worker_count} (processes)"
         )
         self._log(
+            f"Prefilter: mode={self._preprocess_mode}, size={self._preprocess_size}"
+        )
+        if not self._tomopy_outlier_available:
+            self._log(
+                "Tomopy outlier filter unavailable in this environment; Tomopy option disabled."
+            )
+        self._log(
             "Math thread caps: "
             f"OMP={os.environ.get('OMP_NUM_THREADS')}, "
             f"MKL={os.environ.get('MKL_NUM_THREADS')}, "
@@ -1060,12 +1212,43 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.local_fit_points_spin.setRange(3, 31)
         self.local_fit_points_spin.setSingleStep(2)
         self.local_fit_points_spin.setValue(self._local_fit_points)
+        self.preprocess_mode_combo = QtWidgets.QComboBox()
+        self.preprocess_mode_combo.addItem("Median", "median")
+        self.preprocess_mode_combo.addItem("Tomopy Outlier", "tomopy_outlier")
+        if not self._tomopy_outlier_available:
+            try:
+                model = self.preprocess_mode_combo.model()
+                idx_tomopy = self.preprocess_mode_combo.findData("tomopy_outlier")
+                if idx_tomopy >= 0 and model is not None and hasattr(model, "item"):
+                    item = model.item(idx_tomopy)
+                    if item is not None:
+                        item.setEnabled(False)
+            except Exception:
+                pass
+        self.preprocess_mode_combo.setCurrentIndex(
+            max(0, self.preprocess_mode_combo.findData(self._preprocess_mode))
+        )
+        self.preprocess_mode_combo.setToolTip(
+            "Image prefilter mode used for quick/full processing."
+        )
+        self.preprocess_size_spin = QtWidgets.QSpinBox()
+        self.preprocess_size_spin.setRange(1, 63)
+        self.preprocess_size_spin.setSingleStep(2)
+        self.preprocess_size_spin.setValue(int(self._preprocess_size))
+        self.preprocess_size_spin.setKeyboardTracking(False)
+        self.preprocess_size_spin.setToolTip(
+            "Kernel size used by Median or Tomopy outlier filtering."
+        )
 
         control_row.addWidget(self.btn_prev)
         control_row.addWidget(self.btn_next)
         if self.btn_open_files is not None:
             control_row.addWidget(self.btn_open_files)
         control_row.addWidget(self.btn_recompute)
+        control_row.addWidget(QtWidgets.QLabel("Filter:"))
+        control_row.addWidget(self.preprocess_mode_combo)
+        control_row.addWidget(QtWidgets.QLabel("Size:"))
+        control_row.addWidget(self.preprocess_size_spin)
         control_row.addWidget(QtWidgets.QLabel("Local fit pts:"))
         control_row.addWidget(self.local_fit_points_spin)
         self.optimal_focus_label = QtWidgets.QLabel("Optimal motor position: --")
@@ -1298,6 +1481,8 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.btn_play.toggled.connect(self._toggle_play)
         self.btn_recompute.clicked.connect(self._recompute_current)
         self.local_fit_points_spin.valueChanged.connect(self._on_local_fit_points_changed)
+        self.preprocess_mode_combo.currentIndexChanged.connect(self._on_preprocess_mode_ui_changed)
+        self.preprocess_size_spin.valueChanged.connect(self._on_preprocess_mode_ui_changed)
         self.timer.timeout.connect(self._tick)
         self._roi_analysis_timer.timeout.connect(self._recompute_current)
         self._full_future_timer.timeout.connect(self._drain_full_prepare_futures)
@@ -1305,6 +1490,89 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.roi.sigRegionChangeFinished.connect(self._on_roi_region_change_finished)
         self._full_future_timer.start()
         self._update_filter_queue_indicator()
+
+    def _on_preprocess_mode_ui_changed(self, *_args):
+        mode = _normalize_preprocess_mode(self.preprocess_mode_combo.currentData())
+        size = int(max(1, self.preprocess_size_spin.value()))
+        self._set_preprocess_mode(mode=mode, size=size)
+
+    def _set_preprocess_mode(self, *, mode: str, size: int):
+        mode_n = _normalize_preprocess_mode(mode)
+        size_n = int(max(1, size))
+        if (mode_n == "tomopy_outlier") and (not self._tomopy_outlier_available):
+            mode_n = "median"
+            prev_block = self.preprocess_mode_combo.blockSignals(True)
+            try:
+                idx_median = self.preprocess_mode_combo.findData("median")
+                if idx_median >= 0:
+                    self.preprocess_mode_combo.setCurrentIndex(idx_median)
+            finally:
+                self.preprocess_mode_combo.blockSignals(prev_block)
+        if mode_n == self._preprocess_mode and size_n == self._preprocess_size:
+            return
+        prev_mode = self._preprocess_mode
+        prev_size = self._preprocess_size
+        self._preprocess_mode = mode_n
+        self._preprocess_size = size_n
+        self._preprocess_token += 1
+        if (
+            self._preprocess_mode == "tomopy_outlier"
+            and _resolve_tomopy_remove_outlier() is None
+        ):
+            self._log(
+                "Tomopy outlier selected, but tomopy.remove_outlier is unavailable in this process; "
+                "workers will fall back to median filtering."
+            )
+
+        if self._analysis_cancel_event is not None:
+            self._analysis_cancel_event.set()
+        self._analysis_inflight = False
+        self._pending_analysis_request = None
+        self._analysis_token += 1
+        self._load_generation += 1
+        self._roi_generation += 1
+        self._bulk_reprocess_token += 1
+        self._pending_bulk_reprocess = None
+        self._roi_reprocess_after_scan = False
+        self._pause_full_prepare = False
+        self._bulk_reprocess_active = False
+        self._bulk_reprocess_total = 0
+        self._bulk_reprocess_done = 0
+        self._bulk_reprocess_uses_disk = False
+        self._bulk_reprocess_all_frames = False
+        self._current_bulk_used_fixed = False
+        self._full_dynamic_results_ready = False
+        self._full_dynamic_pass_requested = False
+        self._full_prepare_refresh_requested = False
+        self._last_full_prepare_logged_count = -1
+        self._full_edge_refined = False
+        self._fixed_edge_line = None
+        self._fixed_edge_reference_index = None
+        self._clear_task_queue()
+        self._clear_full_queue()
+        self._quick_filtered_cache.clear()
+        self._quick_cache_bytes = 0
+        self._full_filtered_cache.clear()
+        self._full_cache_bytes = 0
+        self._full_prepared_indices.clear()
+        self._results.clear()
+        self._result_is_full.clear()
+        self._current_filtered = None
+        self.edge_line_item.hide()
+        self._update_metric_plot()
+        # Changing prefilter mode invalidates the entire filtered dataset.
+        # Re-queue all currently loaded frames, not only frames already viewed.
+        for idx in range(len(self.frames)):
+            self._enqueue_full_prepare(idx)
+        self._log(
+            f"Prefilter updated: mode={self._preprocess_mode}, size={self._preprocess_size} "
+            f"(previous: mode={prev_mode}, size={prev_size}). Reprocessing all frames."
+        )
+        self.statusBar().showMessage(
+            f"Prefilter set to {self._preprocess_mode} (size={self._preprocess_size}); reprocessing..."
+        )
+        if self.frames:
+            self._load_frame(int(self.current_index))
 
     def _apply_pyqtgraph_theme_from_palette(self):
         pal = self.palette()
@@ -1739,6 +2007,8 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                     frame.path,
                     roi_rect,
                     self._fixed_edge_line,
+                    self._preprocess_mode,
+                    int(self._preprocess_size),
                 )
                 if ok:
                     disk_jobs += 1
@@ -1896,20 +2166,30 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             self._full_queued_indices.discard(idx)
             self._full_running_count += 1
             self._full_active_indices.add(idx)
+            pp_token = int(self._preprocess_token)
             try:
-                fut = self._full_process_pool.submit(_load_and_filter_worker, self.frames[idx].path)
+                fut = self._full_process_pool.submit(
+                    _load_and_filter_worker,
+                    self.frames[idx].path,
+                    self._preprocess_mode,
+                    int(self._preprocess_size),
+                )
             except Exception as ex:
                 self._full_running_count = max(0, int(self._full_running_count) - 1)
                 self._full_active_indices.discard(idx)
                 self._log(f"Full prepare submit failed for frame {idx + 1}: {ex}")
                 break
-            self._full_future_to_index[fut] = idx
+            self._full_future_to_index[fut] = (idx, pp_token)
         self._update_filter_queue_indicator()
 
-    def _handle_full_prepare_result(self, frame_index: int, result, error):
+    def _handle_full_prepare_result(self, frame_index: int, preprocess_token: int, result, error):
         self._full_running_count = max(0, int(self._full_running_count) - 1)
         self._full_queued_indices.discard(frame_index)
         self._full_active_indices.discard(frame_index)
+        if int(preprocess_token) != int(self._preprocess_token):
+            self._pump_full_queue()
+            self._update_filter_queue_indicator()
+            return
         if error is not None:
             self._log(f"Full prepare failed for frame {frame_index + 1}: {error}")
         elif result is not None:
@@ -1981,14 +2261,16 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         if not done_futures:
             return
         for fut in done_futures:
-            idx = int(self._full_future_to_index.pop(fut))
+            idx, pp_token = self._full_future_to_index.pop(fut)
+            idx = int(idx)
+            pp_token = int(pp_token)
             err = None
             result = None
             try:
                 result = fut.result()
             except Exception as ex:
                 err = ex
-            self._handle_full_prepare_result(idx, result, err)
+            self._handle_full_prepare_result(idx, pp_token, result, err)
         self._update_filter_queue_indicator()
 
     def _pump_task_queue(self):
@@ -2504,6 +2786,8 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             idx,
             _load_and_quick_filter_worker,
             frame.path,
+            self._preprocess_mode,
+            int(self._preprocess_size),
             priority=0,
         )
         if ok:
@@ -3243,6 +3527,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "Aliases: --max-ram-gb, --mem"
         ),
     )
+    p.add_argument(
+        "--preprocess-mode",
+        type=str,
+        choices=["median", "tomopy_outlier"],
+        default="tomopy_outlier",
+        help="Prefilter mode for full processing.",
+    )
+    p.add_argument(
+        "--preprocess-size",
+        type=int,
+        default=7,
+        help="Kernel size for selected prefilter mode.",
+    )
     return p
 
 
@@ -3287,6 +3584,8 @@ def main(argv=None) -> int:
         bulk_workers=requested_bulk_workers,
         full_workers=requested_full_workers,
         full_cache_gb=args.full_cache_gb,
+        preprocess_mode=args.preprocess_mode,
+        preprocess_size=args.preprocess_size,
     )
     w.show()
     return int(app.exec_())
