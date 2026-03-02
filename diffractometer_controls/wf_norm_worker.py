@@ -41,24 +41,109 @@ def _load_wf_image(path):
     return np.asarray(arr, dtype=np.float32), exposure_s
 
 
-_EXPOSURE_KEY_HINTS = (
+_EXPOSURE_TIME_KEY_STRONG_HINTS = (
     "acquiretime",
     "exposuretime",
+)
+_EXPOSURE_TIME_KEY_WEAK_HINTS = (
     "exposure",
 )
 _EXPOSURE_PAIR_RE = re.compile(
-    r"([A-Za-z0-9_:. -]{0,96})\s*[:=]\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)"
+    r"([A-Za-z0-9_:. /()-]{1,96})\s*[:=]\s*([^\n\r;|,]+)"
 )
 _FLOAT_RE = re.compile(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
+_RATIO_RE = re.compile(
+    r"^\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*/\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*([A-Za-z\u00b5\u03bc]*)\s*$"
+)
+_VALUE_WITH_UNIT_RE = re.compile(
+    r"^\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*([A-Za-z\u00b5\u03bc]*)\s*$"
+)
+_KEY_NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _normalize_key_text(key) -> str:
+    text = str(key).strip().lower()
+    return _KEY_NORMALIZE_RE.sub("", text)
+
+
+def _exposure_key_score(key) -> int:
+    text = _normalize_key_text(key)
+    if not text:
+        return 0
+    if any(h in text for h in _EXPOSURE_TIME_KEY_STRONG_HINTS):
+        return 2
+    if text in _EXPOSURE_TIME_KEY_WEAK_HINTS:
+        return 1
+    return 0
+
+
+def _unit_to_seconds(unit: str):
+    u = str(unit or "").strip().lower()
+    u = u.replace("\u03bc", "u").replace("\u00b5", "u")
+    if not u:
+        return 1.0
+    unit_map = {
+        "s": 1.0,
+        "sec": 1.0,
+        "secs": 1.0,
+        "second": 1.0,
+        "seconds": 1.0,
+        "ms": 1e-3,
+        "msec": 1e-3,
+        "msecs": 1e-3,
+        "millisecond": 1e-3,
+        "milliseconds": 1e-3,
+        "us": 1e-6,
+        "usec": 1e-6,
+        "usecs": 1e-6,
+        "microsecond": 1e-6,
+        "microseconds": 1e-6,
+        "ns": 1e-9,
+        "nsec": 1e-9,
+        "nsecs": 1e-9,
+        "nanosecond": 1e-9,
+        "nanoseconds": 1e-9,
+    }
+    return unit_map.get(u, None)
+
+
+def _parse_time_value_text(text: str):
+    s = str(text).strip()
+    if not s:
+        return None
+
+    m = _RATIO_RE.match(s)
+    if m is not None:
+        try:
+            num = float(m.group(1))
+            den = float(m.group(2))
+        except Exception:
+            return None
+        if not np.isfinite(num) or not np.isfinite(den) or den == 0:
+            return None
+        ratio = num / den
+        factor = _unit_to_seconds(m.group(3))
+        if factor is None:
+            return None
+        return _to_finite_positive_float(ratio * factor)
+
+    m = _VALUE_WITH_UNIT_RE.match(s)
+    if m is None:
+        return None
+    try:
+        val = float(m.group(1))
+    except Exception:
+        return None
+    if not np.isfinite(val):
+        return None
+    factor = _unit_to_seconds(m.group(2))
+    if factor is None:
+        return None
+    return _to_finite_positive_float(val * factor)
 
 
 def _looks_like_exposure_key(key) -> bool:
-    if key is None:
-        return False
-    text = str(key).strip().lower()
-    if not text:
-        return False
-    return any(h in text for h in _EXPOSURE_KEY_HINTS)
+    return _exposure_key_score(key) > 0
 
 
 def _to_finite_positive_float(value):
@@ -75,14 +160,19 @@ def _parse_exposure_from_text(text: str):
     s = str(text).strip()
     if not s:
         return None
+    best_score = -1
+    best_value = None
     for m in _EXPOSURE_PAIR_RE.finditer(s):
-        key = m.group(1).strip().lower()
-        if not _looks_like_exposure_key(key):
+        key = m.group(1).strip()
+        score = _exposure_key_score(key)
+        if score <= 0:
             continue
-        out = _to_finite_positive_float(m.group(2))
+        out = _parse_time_value_text(m.group(2))
         if out is not None:
-            return out
-    return None
+            if score > best_score:
+                best_score = score
+                best_value = out
+    return best_value
 
 
 def _parse_exposure_from_tag_value(value, *, allow_plain_numeric=False):
@@ -130,6 +220,9 @@ def _parse_exposure_from_tag_value(value, *, allow_plain_numeric=False):
     if out is not None:
         return out
     if allow_plain_numeric:
+        out = _parse_time_value_text(text)
+        if out is not None:
+            return out
         float_match = _FLOAT_RE.search(text)
         if float_match is not None:
             return _to_finite_positive_float(float_match.group(0))

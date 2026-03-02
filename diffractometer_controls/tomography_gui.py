@@ -147,6 +147,7 @@ class MainScreen(display.MITRDisplay):
         self._wf_norm_image_update_in_progress = False
         self._wf_norm_ignore_next_image_changed = False
         self._last_source_image = None
+        self._last_source_exposure_s = None
         self.wf_norm_checkbox = None
         self.wf_norm_select_button = None
         self.measure_line_checkbox = None
@@ -197,7 +198,7 @@ class MainScreen(display.MITRDisplay):
         image_signal_connected = False
         if hasattr(image_view, "newImageSignal"):
             try:
-                image_view.newImageSignal.connect(self._apply_robust_normalization)
+                image_view.newImageSignal.connect(self._on_new_image_event)
                 image_signal_connected = True
             except Exception:
                 image_signal_connected = False
@@ -214,7 +215,7 @@ class MainScreen(display.MITRDisplay):
                     except Exception:
                         same_signal = False
                 if (not image_signal_connected) or (not same_signal):
-                    image_item.sigImageChanged.connect(self._apply_robust_normalization)
+                    image_item.sigImageChanged.connect(self._on_new_image_event)
         except Exception:
             pass
 
@@ -415,7 +416,10 @@ class MainScreen(display.MITRDisplay):
             # For profile analysis, explicitly derive from the latest raw frame
             # when possible so ROI statistics track normalized display values.
             raw_candidate = self._last_source_image if self._last_source_image is not None else self._last_image
-            normalized = self._normalize_image_with_wf_for_analysis(raw_candidate)
+            normalized = self._normalize_image_with_wf_for_analysis(
+                raw_candidate,
+                source_exposure_s=self._last_source_exposure_s,
+            )
             if normalized is not None:
                 data_source = normalized
 
@@ -437,7 +441,7 @@ class MainScreen(display.MITRDisplay):
             return squeezed
         return None
 
-    def _normalize_image_with_wf_for_analysis(self, image):
+    def _normalize_image_with_wf_for_analysis(self, image, source_exposure_s=None):
         if image is None or self._wf_norm_reciprocal is None:
             return None
         data = np.asarray(image)
@@ -445,7 +449,7 @@ class MainScreen(display.MITRDisplay):
         if data.ndim != 2:
             return None
         data_f = np.asarray(data, dtype=np.float32)
-        scale = np.float32(self._wf_norm_exposure_scale())
+        scale = np.float32(self._wf_norm_exposure_scale(source_exposure_s=source_exposure_s))
         rec = self._wf_norm_reciprocal
         if data_f.shape == rec.shape:
             return np.asarray(data_f * rec * scale, dtype=np.float32)
@@ -841,14 +845,20 @@ class MainScreen(display.MITRDisplay):
             self._set_wf_norm_visual_state("idle")
             if self._last_source_image is not None:
                 self._set_image_item_data(np.asarray(self._last_source_image))
-                self._apply_robust_normalization(self._last_source_image)
+                self._apply_robust_normalization(
+                    self._last_source_image,
+                    source_exposure_s=self._last_source_exposure_s,
+                )
             self._reset_histogram_view()
             self._apply_profile_popup_theme_from_palette()
             return
         if self._wf_norm_array is not None:
             self._set_wf_norm_visual_state("ready")
             if self._last_source_image is not None:
-                self._apply_robust_normalization(self._last_source_image)
+                self._apply_robust_normalization(
+                    self._last_source_image,
+                    source_exposure_s=self._last_source_exposure_s,
+                )
             self._reset_histogram_view()
             self._apply_profile_popup_theme_from_palette()
             return
@@ -999,17 +1009,30 @@ class MainScreen(display.MITRDisplay):
             tip = f"Loaded {int(payload.get('count', 0))} WF file(s), shape={tuple(norm_array.shape)}, filter={method_label}."
             exp_count = int(payload.get("wf_exposure_count", 0) or 0)
             if exp_count > 0:
-                tip = f"{tip} Exposure tags detected in {exp_count} WF TIFF(s)"
+                wf_exp_min = self._to_float(payload.get("wf_exposure_min_s", np.nan), default=np.nan)
+                wf_exp_max = self._to_float(payload.get("wf_exposure_max_s", np.nan), default=np.nan)
+                if np.isfinite(wf_exposure_s) and wf_exposure_s > 0:
+                    tip = f"{tip} Exposure tags detected in {exp_count} WF TIFF(s), mean={float(wf_exposure_s):.6g}s"
+                    if np.isfinite(wf_exp_min) and np.isfinite(wf_exp_max):
+                        tip = f"{tip}, range=[{float(wf_exp_min):.6g}, {float(wf_exp_max):.6g}]s"
+                else:
+                    tip = f"{tip} Exposure tags detected in {exp_count} WF TIFF(s)"
             if note:
                 tip = f"{tip} {note}"
             self._update_wf_norm_exposure_tooltip(prefix=tip)
         self._set_wf_norm_visual_state("ready")
         if self.wf_norm_checkbox is not None and self.wf_norm_checkbox.isChecked():
-            self._apply_robust_normalization()
+            if self._last_source_image is not None:
+                self._apply_robust_normalization(
+                    self._last_source_image,
+                    source_exposure_s=self._last_source_exposure_s,
+                )
+            else:
+                self._apply_robust_normalization()
             self._reset_histogram_view()
         self._apply_profile_popup_theme_from_palette()
 
-    def _normalize_image_with_wf(self, image):
+    def _normalize_image_with_wf(self, image, source_exposure_s=None):
         if self._wf_norm_reciprocal is None:
             return None
         data = np.asarray(image)
@@ -1017,7 +1040,7 @@ class MainScreen(display.MITRDisplay):
         if data.ndim != 2:
             return None
         data_f = np.asarray(data, dtype=np.float32)
-        scale = np.float32(self._wf_norm_exposure_scale())
+        scale = np.float32(self._wf_norm_exposure_scale(source_exposure_s=source_exposure_s))
         rec = self._wf_norm_reciprocal
         if data_f.shape == rec.shape:
             self._wf_norm_mismatch_count = 0
@@ -1497,9 +1520,17 @@ class MainScreen(display.MITRDisplay):
                         return float(exp)
         return None
 
-    def _wf_norm_exposure_scale(self):
+    def _normalize_positive_exposure(self, value):
+        exp = self._to_float(value, default=np.nan)
+        if np.isfinite(exp) and exp > 0:
+            return float(exp)
+        return None
+
+    def _wf_norm_exposure_scale(self, source_exposure_s=None):
         wf_exp = self._to_float(self._wf_norm_reference_exposure_s, default=np.nan)
-        cur_exp = self._get_current_exposure_time_s()
+        cur_exp = self._normalize_positive_exposure(source_exposure_s)
+        if cur_exp is None:
+            cur_exp = self._get_current_exposure_time_s()
         if (
             cur_exp is None
             or (not np.isfinite(cur_exp))
@@ -2662,7 +2693,15 @@ class MainScreen(display.MITRDisplay):
         if self._startup_autoscale_attempts >= self._startup_autoscale_max_attempts:
             self._startup_autoscale_timer.stop()
 
-    def _apply_robust_normalization(self, *args):
+    def _on_new_image_event(self, *args):
+        frame_exposure_s = self._get_current_exposure_time_s()
+        self._apply_robust_normalization(
+            *args,
+            source_exposure_s=frame_exposure_s,
+            source_is_new_frame=True,
+        )
+
+    def _apply_robust_normalization(self, *args, source_exposure_s=None, source_is_new_frame=False):
         if self._wf_norm_image_update_in_progress:
             return
         if (not args) and self._wf_norm_ignore_next_image_changed:
@@ -2690,11 +2729,28 @@ class MainScreen(display.MITRDisplay):
             and self._wf_norm_reciprocal is not None
         )
         source_image = np.asarray(image)
-        # Track the most recent source frame so disable/ROI logic uses current data.
-        self._last_source_image = source_image
+        source_exposure_s = self._normalize_positive_exposure(source_exposure_s)
+        if source_is_new_frame:
+            # Bind the exposure to the frame as it arrives so later toggles
+            # use the acquisition-time exposure, not a live PV value.
+            self._last_source_image = source_image
+            self._last_source_exposure_s = source_exposure_s
+        elif self._last_source_image is None:
+            self._last_source_image = source_image
+            if source_exposure_s is not None:
+                self._last_source_exposure_s = source_exposure_s
+            else:
+                self._last_source_exposure_s = self._get_current_exposure_time_s()
+
+        effective_source_exposure_s = source_exposure_s
+        if effective_source_exposure_s is None:
+            effective_source_exposure_s = self._last_source_exposure_s
         display_image = source_image
         if norm_active:
-            normalized = self._normalize_image_with_wf(source_image)
+            normalized = self._normalize_image_with_wf(
+                source_image,
+                source_exposure_s=effective_source_exposure_s,
+            )
             if normalized is not None:
                 display_image = normalized
                 self._set_image_item_data(display_image)
