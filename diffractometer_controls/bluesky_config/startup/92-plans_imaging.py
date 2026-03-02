@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 import bluesky.preprocessors
 import bluesky.preprocessors as bpp
 import numpy as np
-from ophyd import (Device, Component as Cpt,
+from ophyd import (Component as Cpt,
                    EpicsSignal, EpicsSignalRO, EpicsSignalWithRBV, 
                    EpicsMotor, Signal)
 from ophyd.positioner import PositionerBase
@@ -29,53 +29,6 @@ from functools import partial
 
 transfer_time_per_bytes = 4.1203007518796994e-08 # transfer speed in seconds per byte testing on the ASI294MM Pro
 
-
-def _collect_movable_names():
-    """Collect motor variable names from module globals.
-
-    The returned names are used with `convert_device_names=True`, so they
-    must be resolvable in the namespace (variable names, not device.name).
-    """
-    names = []
-    g = globals()
-    for var, obj in list(g.items()):
-        if var.startswith("_"):
-            continue
-        try:
-            # Prefer actual positioners/motors
-            if isinstance(obj, PositionerBase):
-                names.append(var)
-                continue
-            # If the global is a Device, inspect its public attributes
-            # and collect any subdevices that are PositionerBase instances
-            if isinstance(obj, Device):
-                # Prefer using ophyd component introspection to capture nested subdevices
-                try:
-                    for comp_name, comp in obj.walk_components():
-                        try:
-                            comp_cls = getattr(comp, "cls", None)
-                            if comp_cls and issubclass(comp_cls, PositionerBase):
-                                names.append(f"{var}.{comp_name}")
-                        except Exception:
-                            continue
-                except Exception:
-                    for attr in getattr(obj, "component_names", ()):
-                        try:
-                            sub = getattr(obj, attr)
-                            if isinstance(sub, PositionerBase):
-                                names.append(f"{var}.{attr}")
-                        except Exception:
-                            continue
-        except Exception:
-            continue
-    # Deduplicate while preserving order
-    seen = set()
-    out = []
-    for n in names:
-        if n not in seen:
-            seen.add(n)
-            out.append(n)
-    return out
 
 def _collect_tomo_motor_names():
     """Collect only tomography motors for the tomo_scan dropdown.

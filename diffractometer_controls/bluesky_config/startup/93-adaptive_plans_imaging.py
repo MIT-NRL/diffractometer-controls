@@ -12,7 +12,7 @@ import uuid
 
 
 def _collect_focus_motor_names():
-    # Reuse the motor collection helper from 91-plans_imaging when available.
+    # Reuse the shared motor collection helper from startup globals.
     fn = globals().get("_collect_movable_names", None)
     if callable(fn):
         try:

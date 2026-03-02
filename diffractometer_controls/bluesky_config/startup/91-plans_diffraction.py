@@ -577,13 +577,3 @@ def scan2D_he3(
         yield from bps.mov(detectors[0].acquire_time, old_acquire_time)
 
     return(yield from main_plan())
-
-def move_motor(
-        motor,
-        position:float,
-):
-    '''
-    Move a motor to a specified position.
-    '''
-    yield from bps.stage(motor)
-    yield from bps.mv(motor,position)
