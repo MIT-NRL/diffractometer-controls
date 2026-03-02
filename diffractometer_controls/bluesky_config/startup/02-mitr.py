@@ -1,4 +1,5 @@
 import numpy as np
+import logging
 from ophyd import (Device, Component as Cpt,
                    EpicsSignal, EpicsSignalRO, EpicsSignalWithRBV, 
                    EpicsMotor, Signal)
@@ -9,6 +10,8 @@ from bluesky.suspenders import SuspendFloor, SuspendBoolLow
 
 sd: SupplementalData
 RE: RunEngine
+
+logger = logging.getLogger(__name__)
 
 reactor_power_6 = EpicsSignalRO("mitr:Power6",name="reactor_power_6")
 reactor_power_4 = EpicsSignalRO("mitr:Power4",name="reactor_power_4")
@@ -78,12 +81,39 @@ def _set_reactor_power_suspender_enabled(enable):
     enable = bool(enable)
     installed_suspenders = _get_reactor_power_suspenders()
     installed = len(installed_suspenders) > 0
-    if enable and not installed:
-        RE.install_suspender(reactor_power_suspender)
-    elif (not enable) and installed:
-        for susp in installed_suspenders:
-            RE.remove_suspender(susp)
+    action = "enable" if enable else "disable"
+    try:
+        if enable and not installed:
+            RE.install_suspender(reactor_power_suspender)
+            msg = "Reactor power suspender installed."
+            print(msg)
+            logger.info(msg)
+        elif (not enable) and installed:
+            removed = 0
+            for susp in installed_suspenders:
+                RE.remove_suspender(susp)
+                removed += 1
+            msg = f"Reactor power suspender disabled (removed={removed})."
+            print(msg)
+            logger.info(msg)
+        else:
+            msg = (
+                "Reactor power suspender already enabled."
+                if enable
+                else "Reactor power suspender already disabled."
+            )
+            print(msg)
+            logger.info(msg)
+    except Exception:
+        msg = f"Failed to {action} reactor power suspender."
+        print(msg)
+        logger.exception(msg)
+        raise
     _publish_reactor_power_suspender_state()
+    final_installed = int(_is_reactor_power_suspender_installed())
+    final_msg = f"Reactor power suspender state confirmed: installed={final_installed}."
+    print(final_msg)
+    logger.info(final_msg)
 
 
 def _queue_set_reactor_power_suspender(enable):
@@ -118,6 +148,12 @@ def _on_reactor_power_suspender_enable_changed(value=None, **kwargs):
     enable = _coerce_enable_value(value)
     if enable is None:
         return
+    # Ignore no-op feedback/monitor updates to avoid callback churn.
+    try:
+        if bool(enable) == bool(_is_reactor_power_suspender_installed()):
+            return
+    except Exception:
+        pass
     _queue_set_reactor_power_suspender(enable)
 
 
