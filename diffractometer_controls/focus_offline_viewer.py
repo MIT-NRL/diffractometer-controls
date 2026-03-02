@@ -3493,7 +3493,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help=(
             "Maximum total concurrent workers across task, bulk, and full pools "
             "(minimum effective value is 3). "
-            "Auto-raised if needed to satisfy requested --full-workers/--c."
+            "Requested --bulk-workers/--full-workers values are capped to fit this limit."
         ),
     )
     p.add_argument(
@@ -3567,12 +3567,9 @@ def main(argv=None) -> int:
 
     requested_full_workers = int(max(1, int(args.full_workers)))
     requested_bulk_workers = int(max(1, int(args.bulk_workers)))
-    effective_max_workers_total = int(
-        max(
-            int(args.max_workers_total),
-            1 + requested_bulk_workers + requested_full_workers,
-        )
-    )
+    # Honor user total-worker limit strictly; FocusOfflineWindow will cap
+    # requested bulk/full pools to fit this budget.
+    effective_max_workers_total = int(max(3, int(args.max_workers_total)))
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     pg.setConfigOption("imageAxisOrder", "row-major")

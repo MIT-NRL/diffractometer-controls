@@ -4,6 +4,7 @@ import subprocess
 import time
 import math
 import sys
+import os
 import threading
 from pathlib import Path
 
@@ -83,6 +84,8 @@ class MITRMainWindow(PyDMMainWindow):
         self._focus_online_proc = None
         self._focus_online_session_id = None
         self._focus_online_run_uid = None
+        self._focus_online_file_name = ""
+        self._focus_online_file_dir = ""
         self._focus_doc_dispatcher = None
         self._focus_doc_thread = None
         self._focus_data_addr = None
@@ -668,7 +671,10 @@ class MITRMainWindow(PyDMMainWindow):
             self._focus_qs_info_addr = str(info_addr)
             host = self._parse_tcp_host(info_addr, default_host=self._parse_tcp_host(control_addr))
             self._focus_data_addr = f"{host}:5568"
-            from bluesky.callbacks.zmq import RemoteDispatcher
+            try:
+                from bluesky.callbacks.zmq import RemoteDispatcher
+            except Exception:
+                from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher
 
             dispatcher = RemoteDispatcher(self._focus_data_addr)
             dispatcher.subscribe(self._on_focus_bluesky_doc)
@@ -709,6 +715,8 @@ class MITRMainWindow(PyDMMainWindow):
         focus_md = (doc or {}).get("focus_adaptive", {}) or {}
         session_id = str(focus_md.get("session_id", "")).strip()
         run_uid = str((doc or {}).get("uid", "")).strip()
+        self._focus_online_file_name = str((doc or {}).get("file_name", "")).strip()
+        self._focus_online_file_dir = str((doc or {}).get("file_dir", "")).strip()
         if not session_id:
             return
         self.adaptive_focus_plan_started.emit(session_id, run_uid)
@@ -740,6 +748,12 @@ class MITRMainWindow(PyDMMainWindow):
     def _launch_focus_online_viewer(self, *, session_id: str, run_uid: str):
         if not session_id:
             return
+        try:
+            # Ensure Queue Server picks up the latest user group permissions
+            # before the adaptive viewer starts submitting function_execute calls.
+            self.re_manager_api.permissions_reload()
+        except Exception:
+            pass
         current = self._focus_online_proc
         if (
             current is not None
@@ -752,8 +766,29 @@ class MITRMainWindow(PyDMMainWindow):
         if not viewer_script.exists():
             log.warning("Focus online viewer script not found: %s", viewer_script)
             return
+        viewer_python = Path(sys.executable)
+        conda_prefix = str(os.environ.get("CONDA_PREFIX", "")).strip()
+        if conda_prefix:
+            candidate = Path(conda_prefix) / "bin" / "python"
+            if candidate.exists():
+                viewer_python = candidate
+        def _env_int(name: str, default: int, min_val: int = 1) -> int:
+            try:
+                return max(min_val, int(str(os.environ.get(name, default)).strip()))
+            except Exception:
+                return int(default)
+        max_workers_total = _env_int("FOCUS_VIEWER_MAX_WORKERS_TOTAL", 8, min_val=3)
+        bulk_workers = _env_int("FOCUS_VIEWER_BULK_WORKERS", 1, min_val=1)
+        full_workers = _env_int("FOCUS_VIEWER_FULL_WORKERS", 6, min_val=1)
+        def _env_float(name: str, default: float, min_val: float = 0.0) -> float:
+            try:
+                return max(min_val, float(str(os.environ.get(name, default)).strip()))
+            except Exception:
+                return float(default)
+        file_wait_timeout_s = _env_float("FOCUS_VIEWER_FILE_WAIT_TIMEOUT_S", 30.0, min_val=1.0)
+        file_wait_interval_ms = _env_int("FOCUS_VIEWER_FILE_WAIT_INTERVAL_MS", 250, min_val=50)
         cmd = [
-            sys.executable,
+            str(viewer_python),
             str(viewer_script),
             "--zmq-address",
             str(self._focus_data_addr or "localhost:5568"),
@@ -767,17 +802,57 @@ class MITRMainWindow(PyDMMainWindow):
             str(self._focus_qs_control_addr),
             "--qserver-info-addr",
             str(self._focus_qs_info_addr),
+            "--parent-pid",
+            str(os.getpid()),
+            "--startup-timeout-s",
+            "90",
+            "--max-workers-total",
+            str(max_workers_total),
+            "--bulk-workers",
+            str(bulk_workers),
+            "--full-workers",
+            str(full_workers),
+            "--file-wait-timeout-s",
+            str(file_wait_timeout_s),
+            "--file-wait-interval-ms",
+            str(file_wait_interval_ms),
         ]
+        if self._focus_online_file_name:
+            cmd.extend(["--run-file-name", str(self._focus_online_file_name)])
+        if self._focus_online_file_dir:
+            cmd.extend(["--run-file-dir", str(self._focus_online_file_dir)])
         try:
-            proc = subprocess.Popen(cmd)
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(viewer_script.parent),
+                env=dict(os.environ),
+            )
             self._focus_online_proc = proc
             self._focus_online_session_id = str(session_id)
             self._focus_online_run_uid = str(run_uid or "")
             log.info(
-                "Launched focus_online_viewer for adaptive session=%s run_uid=%s",
+                "Launched focus_online_viewer pid=%s python=%s workers(total=%s,bulk=%s,full=%s) session=%s run_uid=%s",
+                proc.pid,
+                str(viewer_python),
+                max_workers_total,
+                bulk_workers,
+                full_workers,
                 session_id,
                 run_uid,
             )
+            def _check_started():
+                p = self._focus_online_proc
+                if p is None:
+                    return
+                rc = p.poll()
+                if rc is not None:
+                    log.error(
+                        "focus_online_viewer exited early rc=%s session=%s run_uid=%s",
+                        rc,
+                        session_id,
+                        run_uid,
+                    )
+            QtCore.QTimer.singleShot(2500, _check_started)
         except Exception:
             log.exception(
                 "Failed to launch focus_online_viewer for session=%s run_uid=%s",

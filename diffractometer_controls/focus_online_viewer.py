@@ -4,11 +4,25 @@
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import math
+import os
+import re
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+
+# Keep per-task CPU usage predictable in the online viewer process and any
+# process-pool workers (across Linux/macOS/Windows).
+for _env_var in (
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+):
+    os.environ.setdefault(_env_var, "1")
 
 from qtpy import QtCore, QtWidgets
 import pyqtgraph as pg
@@ -67,12 +81,39 @@ class QueueServerAdaptiveClient:
             str(command),
             dict(payload or {}),
         )
-        return self._api.function_execute(
-            item,
-            run_in_background=True,
-            user=self._user,
-            user_group=self._user_group,
-        )
+        def _exec():
+            return self._api.function_execute(
+                item,
+                run_in_background=True,
+                user=self._user,
+                user_group=self._user_group,
+            )
+
+        try:
+            return _exec()
+        except Exception as ex:
+            msg = str(ex)
+            # Queue Server may keep stale permissions in memory until reloaded.
+            if ("not allowed" in msg.lower()) or ("permission" in msg.lower()):
+                try:
+                    self._api.permissions_reload()
+                except Exception:
+                    pass
+                try:
+                    return _exec()
+                except Exception as ex2:
+                    return {
+                        "success": False,
+                        "ok": False,
+                        "error": str(ex2),
+                        "command": str(command),
+                    }
+            return {
+                "success": False,
+                "ok": False,
+                "error": msg,
+                "command": str(command),
+            }
 
 
 class FocusOnlineBridge(QtCore.QObject):
@@ -111,13 +152,18 @@ class FocusOnlineBridge(QtCore.QObject):
         full_cache_gb: float = 10.0,
         preprocess_mode: str = "tomopy_outlier",
         preprocess_size: int = 7,
+        file_wait_timeout_s: float = 30.0,
+        file_wait_interval_ms: int = 250,
+        run_file_name: Optional[str] = None,
+        run_file_dir: Optional[str] = None,
+        run_data_root: str = "/home/mitr_4dh4/Data",
         parent=None,
     ):
         super().__init__(parent=parent)
         self.image_key = image_key
         self.motor_key = motor_key
         self.stream_name = str(stream_name)
-        self.run_uid_filter = run_uid
+        self.run_uid_filter = str(run_uid).strip() if run_uid else None
         self.follow_latest = bool(follow_latest)
         self.reset_viewer_on_new_run = bool(reset_viewer_on_new_run)
         self.on_go_to_focus = on_go_to_focus
@@ -135,12 +181,26 @@ class FocusOnlineBridge(QtCore.QObject):
         self.full_cache_gb = float(max(0.25, full_cache_gb))
         self.preprocess_mode = str(preprocess_mode or "median")
         self.preprocess_size = int(max(1, preprocess_size))
+        self.file_wait_timeout_s = float(max(1.0, file_wait_timeout_s))
+        self.file_wait_interval_ms = int(max(50, file_wait_interval_ms))
+        self.run_file_name = str(run_file_name or "").strip()
+        self.run_file_dir = str(run_file_dir or "").strip()
+        self.run_data_root = Path(str(run_data_root)).expanduser()
 
         self.window: Optional[FocusOfflineWindow] = None
 
         self._descriptor_stream: Dict[str, str] = {}
-        self._active_run_uid: Optional[str] = None
+        self._descriptor_run_start: Dict[str, str] = {}
+        self._resource_docs: Dict[str, Dict] = {}
+        self._datum_docs: Dict[str, Dict] = {}
+        # The viewer is spawned from the plan's start document callback, so it may
+        # miss that start doc and must still accept subsequent descriptors/events.
+        self._active_run_uid: Optional[str] = self.run_uid_filter
         self._seen_paths = set()
+        self._path_retry_count: Dict[str, int] = {}
+        self._path_first_seen_ts: Dict[str, float] = {}
+        self._warned_unresolved_datums = set()
+        self._warned_no_image_key = False
         self._fallback_position = 0.0
         self._focus_metric_combo: Optional[QtWidgets.QComboBox] = None
         self._scan_step_spin: Optional[QtWidgets.QDoubleSpinBox] = None
@@ -160,6 +220,27 @@ class FocusOnlineBridge(QtCore.QObject):
         self._extend_left_requested.connect(self._on_extend_left_requested)
         self._extend_right_requested.connect(self._on_extend_right_requested)
         self._mark_complete_requested.connect(self._on_mark_complete_requested)
+
+    def _ensure_window(self):
+        if self.window is not None:
+            return
+        self.window = FocusOfflineWindow(
+            frames=[],
+            interval_ms=self.interval_ms,
+            max_workers_total=self.max_workers_total,
+            bulk_workers=self.bulk_workers,
+            full_workers=self.full_workers,
+            full_cache_gb=self.full_cache_gb,
+            preprocess_mode=self.preprocess_mode,
+            preprocess_size=self.preprocess_size,
+            allow_file_open=False,
+        )
+        self.window.installEventFilter(self)
+        self.window.setWindowTitle("Online Focus Scan Viewer")
+        self.window.show()
+        self._bring_window_to_front(self.window)
+        self._install_focus_controls()
+        self.window._log("Online stream connected; waiting for frames...")
 
     @staticmethod
     def _bring_window_to_front(window: QtWidgets.QWidget):
@@ -376,27 +457,354 @@ class FocusOnlineBridge(QtCore.QObject):
     def _detect_image_key(self, data: Dict) -> Optional[str]:
         if self.image_key and self.image_key in data:
             return self.image_key
+
+        # Prefer keys that look like image/file metadata and resolve to path or datum.
         for k, v in data.items():
             lk = str(k).lower()
-            if ("image" in lk and "path" in lk) and isinstance(v, str):
+            if not any(t in lk for t in ("image", "file", "path", "tiff", "hdf")):
+                continue
+            if self._resolve_image_path(v) is not None:
                 return str(k)
+
+        # Fallback: any resolvable string-like payload.
+        for k, v in data.items():
+            if self._resolve_image_path(v) is not None:
+                return str(k)
+        return None
+
+    @staticmethod
+    def _coerce_text(value) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, (bytes, bytearray)):
+            try:
+                return value.decode("utf-8", errors="ignore").strip()
+            except Exception:
+                return ""
+        return str(value).strip()
+
+    @staticmethod
+    def _looks_like_path(text: str) -> bool:
+        t = str(text or "").strip()
+        if not t:
+            return False
+        if t.startswith(("file://", "/", "./", "../", "~")):
+            return True
+        if "\\" in t or "/" in t:
+            # Avoid treating datum-like ids (e.g. "<uuid>/0") as file paths.
+            if Path(t).suffix:
+                return True
+            if t.startswith((".", "~")):
+                return True
+            return False
+        if len(t) >= 3 and t[1:3] in (":\\", ":/"):
+            return True
+        return Path(t).suffix.lower() in {".tif", ".tiff", ".h5", ".hdf5", ".png", ".jpg", ".jpeg"}
+
+    @staticmethod
+    def _looks_like_datum_id(text: str) -> bool:
+        t = str(text or "").strip()
+        if not t:
+            return False
+        if t in {"0", "1"}:
+            return False
+        if "/" in t and (Path(t).suffix == ""):
+            return True
+        if re.fullmatch(r"[0-9a-fA-F-]{8,}", t):
+            return True
+        return False
+
+    @staticmethod
+    def _trim_map_size(mapping: Dict, max_items: int = 20000):
+        while len(mapping) > max_items:
+            try:
+                mapping.pop(next(iter(mapping)))
+            except Exception:
+                break
+
+    def _resolve_path_from_datum_id(self, datum_id: str) -> Optional[str]:
+        rec = self._datum_docs.get(str(datum_id), None)
+        if rec is None:
+            return None
+        resource_uid = str(rec.get("resource", "")).strip()
+        resource_doc = self._resource_docs.get(resource_uid, None)
+        if resource_doc is None:
+            return None
+
+        resource_path = self._coerce_text(resource_doc.get("resource_path", ""))
+        if not resource_path:
+            return None
+        root = self._coerce_text(resource_doc.get("root", ""))
+        resource_kwargs = dict(resource_doc.get("resource_kwargs", {}) or {})
+        datum_kwargs = dict(rec.get("datum_kwargs", {}) or {})
+        template = self._coerce_text(resource_kwargs.get("template", ""))
+        filename = self._coerce_text(resource_kwargs.get("filename", ""))
+
+        def _join_root(path_text: str) -> Path:
+            p = Path(path_text).expanduser()
+            if p.is_absolute():
+                return p
+            if root:
+                return (Path(root).expanduser() / p)
+            return (Path.cwd() / p)
+
+        point_number = datum_kwargs.get("point_number", datum_kwargs.get("index", None))
+        try:
+            pn = int(point_number)
+        except Exception:
+            pn = None
+        point_indices = []
+        if pn is not None:
+            for n in (pn, pn + 1, pn - 1):
+                if int(n) >= 0 and int(n) not in point_indices:
+                    point_indices.append(int(n))
+
+        base = _join_root(resource_path)
+        dir_candidates = []
+        if base.suffix:
+            dir_candidates.append(base.parent)
+        else:
+            dir_candidates.append(base)
+        if base.parent not in dir_candidates:
+            dir_candidates.append(base.parent)
+
+        candidates = []
+
+        # Prefer resource template+filename (AD_TIFF style) when available.
+        if template and filename:
+            for d in dir_candidates:
+                dir_text = str(d)
+                if dir_text and (not dir_text.endswith(("/", "\\"))):
+                    dir_text = dir_text + "/"
+                for idx in (point_indices or [0]):
+                    for fmt in (
+                        (dir_text, filename, int(idx)),
+                        {
+                            "path": dir_text,
+                            "directory": dir_text,
+                            "filename": filename,
+                            "point_number": int(idx),
+                            "index": int(idx),
+                        },
+                    ):
+                        try:
+                            out = template % fmt
+                        except Exception:
+                            continue
+                        if isinstance(out, str) and out.strip():
+                            candidates.append(Path(out).expanduser())
+                            break
+
+        # Fallback: resource_path itself may be a template containing index tokens.
+        if (not candidates) and ("%" in resource_path):
+            for idx in (point_indices or [0]):
+                for fmt in (
+                    int(idx),
+                    (int(idx),),
+                    {"point_number": int(idx), "index": int(idx)},
+                ):
+                    try:
+                        out = resource_path % fmt
+                    except Exception:
+                        continue
+                    if isinstance(out, str) and out.strip():
+                        candidates.append(_join_root(out))
+                        break
+
+        # Last fallback: synthesize common TIFF/HDF names from directory + filename.
+        if (not candidates) and filename:
+            for d in dir_candidates:
+                for idx in (point_indices or [0]):
+                    candidates.append(d / f"{filename}_{int(idx):04d}.tif")
+                    candidates.append(d / f"{filename}_{int(idx):04d}.tiff")
+                    candidates.append(d / f"{filename}_{int(idx):06d}.tif")
+                    candidates.append(d / f"{filename}_{int(idx):06d}.tiff")
+                    candidates.append(d / f"{filename}_{int(idx):06d}.h5")
+                    candidates.append(d / f"{filename}_{int(idx):06d}.hdf5")
+
+        if not candidates:
+            # Do not return directory-only paths; caller expects image file path.
+            if base.suffix:
+                candidates.append(base)
+            else:
+                return None
+
+        first_missing_file = None
+        for p in candidates:
+            try:
+                if p.exists() and p.is_file():
+                    return str(p.resolve())
+            except Exception:
+                pass
+            if first_missing_file is None and p.suffix:
+                try:
+                    first_missing_file = str(p.resolve())
+                except Exception:
+                    first_missing_file = str(p)
+
+        return first_missing_file
+
+    def _resolve_image_path(self, value) -> Optional[str]:
+        text = self._coerce_text(value)
+        if not text:
+            return None
+        # Prefer datum resolution when value looks like a datum id token.
+        if self._looks_like_datum_id(text) or (text in self._datum_docs):
+            out = self._resolve_path_from_datum_id(text)
+            if out:
+                return out
+            out = self._resolve_from_run_metadata(text)
+            if out:
+                return out
+        if self._looks_like_path(text):
+            return text
+        out = self._resolve_path_from_datum_id(text)
+        if out:
+            return out
+        out = self._resolve_from_run_metadata(text)
+        if out:
+            return out
+        return self._resolve_path_from_datum_id(text)
+
+    def _resolve_from_run_metadata(self, token: str) -> Optional[str]:
+        if (not self.run_file_name) or (not self.run_file_dir):
+            return None
+        text = self._coerce_text(token)
+        if not text:
+            return None
+        m = re.search(r"/(\d+)$", text)
+        idx = int(m.group(1)) if m else None
+        year_now = int(_dt.datetime.now().year)
+        candidate_dirs = []
+        for y in (year_now - 1, year_now, year_now + 1):
+            p = self.run_data_root / f"{y}" / self.run_file_dir
+            if p not in candidate_dirs:
+                candidate_dirs.append(p)
+        try:
+            for p in sorted(self.run_data_root.glob(f"*/{self.run_file_dir}")):
+                if p not in candidate_dirs:
+                    candidate_dirs.append(p)
+        except Exception:
+            pass
+
+        patterns = []
+        if idx is not None:
+            for n in (idx + 1, idx, idx + 2):
+                if n < 0:
+                    continue
+                patterns.extend(
+                    [
+                        f"{self.run_file_name}_*_{int(n):04d}.tif",
+                        f"{self.run_file_name}_*_{int(n):04d}.tiff",
+                        f"{self.run_file_name}_*_{int(n):06d}.tif",
+                        f"{self.run_file_name}_*_{int(n):06d}.tiff",
+                    ]
+                )
+        else:
+            patterns.extend(
+                [
+                    f"{self.run_file_name}_*.tif",
+                    f"{self.run_file_name}_*.tiff",
+                ]
+            )
+
+        for d in candidate_dirs:
+            if not d.exists():
+                continue
+            for pat in patterns:
+                try:
+                    matches = sorted(
+                        [p for p in d.glob(pat) if p.is_file()],
+                        key=lambda p: p.stat().st_mtime,
+                        reverse=True,
+                    )
+                except Exception:
+                    matches = []
+                if matches:
+                    try:
+                        return str(matches[0].resolve())
+                    except Exception:
+                        return str(matches[0])
         return None
 
     def _detect_motor_key(self, data: Dict) -> Optional[str]:
         if self.motor_key and self.motor_key in data:
             return self.motor_key
         candidates = []
+        fallback_numeric = []
         for k, v in data.items():
             lk = str(k).lower()
             if "setpoint" in lk:
                 continue
             if ("motor" in lk or "position" in lk) and _is_number(v):
                 candidates.append(str(k))
+            elif _is_number(v):
+                if any(t in lk for t in ("count", "sum", "total", "mean", "sigma", "mtf", "psf", "lsf")):
+                    continue
+                fallback_numeric.append(str(k))
         if not candidates:
-            return None
+            # Common focus motor keys are often plain names like "cam_focus".
+            for k in fallback_numeric:
+                if "focus" in str(k).lower():
+                    return str(k)
+            return fallback_numeric[0] if fallback_numeric else None
         if "focus_sim_motor" in candidates:
             return "focus_sim_motor"
+        for k in candidates:
+            if "focus" in str(k).lower():
+                return str(k)
         return candidates[0]
+
+    def _accept_descriptor_for_run_stream(self, descriptor_uid: str) -> bool:
+        stream = self._descriptor_stream.get(str(descriptor_uid), "")
+        run_start_uid = self._descriptor_run_start.get(str(descriptor_uid), "")
+        if self.run_uid_filter:
+            if run_start_uid:
+                if run_start_uid != self.run_uid_filter:
+                    return False
+            elif self._active_run_uid != self.run_uid_filter:
+                return False
+        if self.stream_name and stream and stream != self.stream_name:
+            return False
+        return True
+
+    def _process_event_data(self, *, descriptor_uid: str, data: Dict):
+        if not self._accept_descriptor_for_run_stream(descriptor_uid):
+            return
+        data = dict(data or {})
+        image_key = self._detect_image_key(data)
+        if image_key is None:
+            if not self._warned_no_image_key:
+                self._warned_no_image_key = True
+                try:
+                    keys = ", ".join(sorted(str(k) for k in data.keys()))
+                except Exception:
+                    keys = str(list(data.keys()))
+                self._log_received.emit(
+                    f"No image file key found in event data. keys=[{keys}]"
+                )
+            return
+
+        motor_key = self._detect_motor_key(data)
+        raw_image_value = data.get(image_key, "")
+        image_path = self._resolve_image_path(raw_image_value)
+        if not image_path:
+            datum_id = self._coerce_text(raw_image_value)
+            if datum_id and datum_id not in self._warned_unresolved_datums:
+                self._warned_unresolved_datums.add(datum_id)
+                self._log_received.emit(
+                    "Could not resolve image datum/path "
+                    f"(key='{image_key}', token='{datum_id}', "
+                    f"file_name='{self.run_file_name}', file_dir='{self.run_file_dir}')"
+                )
+            return
+        if motor_key is not None and _is_number(data.get(motor_key)):
+            position = float(data.get(motor_key))
+            self._fallback_position = position
+        else:
+            position = float(self._fallback_position)
+
+        self._frame_received.emit(image_path, float(position))
 
     def on_document(self, name: str, doc: Dict):
         """Bluesky callback entry point: subscribe this to RE/dispatcher."""
@@ -404,55 +812,135 @@ class FocusOnlineBridge(QtCore.QObject):
             uid = str(doc.get("uid", ""))
             self._active_run_uid = uid
             self._descriptor_stream.clear()
+            self._descriptor_run_start.clear()
+            self._resource_docs.clear()
+            self._datum_docs.clear()
+            self._path_retry_count.clear()
+            self._path_first_seen_ts.clear()
+            self._warned_unresolved_datums.clear()
+            self._warned_no_image_key = False
             if self.run_uid_filter and uid != self.run_uid_filter:
                 return
             if self.reset_viewer_on_new_run:
-                if self.window is not None:
-                    self._suppress_close_complete = True
-                    try:
-                        self.window.close()
-                    except Exception:
-                        pass
-                    finally:
-                        self._suppress_close_complete = False
-                self.window = None
-                self._seen_paths.clear()
-                self._fallback_position = 0.0
+                # Keep the pre-created placeholder window for the same run.
+                # This avoids a close/reopen flicker when start arrives after launch.
+                keep_placeholder = bool(
+                    (self.window is not None)
+                    and (len(getattr(self.window, "frames", [])) == 0)
+                    and (not self._seen_paths)
+                    and (self.run_uid_filter is not None)
+                    and (uid == self.run_uid_filter)
+                )
+                if not keep_placeholder:
+                    if self.window is not None:
+                        self._suppress_close_complete = True
+                        try:
+                            self.window.close()
+                        except Exception:
+                            pass
+                        finally:
+                            self._suppress_close_complete = False
+                    self.window = None
+                    self._seen_paths.clear()
+                    self._fallback_position = 0.0
             self._complete_sent = False
             self._log_received.emit(f"Run started: {uid}")
             return
 
-        if self.run_uid_filter and self._active_run_uid != self.run_uid_filter:
+        if name == "resource":
+            uid = str(doc.get("uid", "")).strip()
+            if uid:
+                self._resource_docs[uid] = dict(doc or {})
+                self._trim_map_size(self._resource_docs)
+            return
+
+        if name == "datum":
+            datum_id = str(doc.get("datum_id", "")).strip()
+            if datum_id:
+                self._datum_docs[datum_id] = {
+                    "resource": str(doc.get("resource", "")).strip(),
+                    "datum_kwargs": dict(doc.get("datum_kwargs", {}) or {}),
+                }
+                self._trim_map_size(self._datum_docs)
+            return
+
+        if name == "datum_page":
+            resource_uid = str(doc.get("resource", "")).strip()
+            datum_ids = list(doc.get("datum_id", []) or [])
+            datum_kwargs = doc.get("datum_kwargs", {}) or {}
+            for i, datum_id in enumerate(datum_ids):
+                did = str(datum_id).strip()
+                if not did:
+                    continue
+                if isinstance(datum_kwargs, dict):
+                    kw = {}
+                    for k, vals in datum_kwargs.items():
+                        try:
+                            kw[str(k)] = vals[i]
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        kw = dict(datum_kwargs[i] or {})
+                    except Exception:
+                        kw = {}
+                self._datum_docs[did] = {
+                    "resource": resource_uid,
+                    "datum_kwargs": kw,
+                }
+            self._trim_map_size(self._datum_docs)
             return
 
         if name == "descriptor":
-            self._descriptor_stream[str(doc.get("uid", ""))] = str(doc.get("name", ""))
+            descriptor_uid = str(doc.get("uid", ""))
+            stream_name = str(doc.get("name", ""))
+            run_start_uid = str(doc.get("run_start", "")).strip()
+            self._descriptor_stream[descriptor_uid] = stream_name
+            self._descriptor_run_start[descriptor_uid] = run_start_uid
+            if (
+                self.run_uid_filter
+                and run_start_uid == self.run_uid_filter
+                and self._active_run_uid != self.run_uid_filter
+            ):
+                self._active_run_uid = self.run_uid_filter
             return
 
         if name == "event":
             descriptor_uid = str(doc.get("descriptor", ""))
-            stream = self._descriptor_stream.get(descriptor_uid, "")
-            if self.stream_name and stream != self.stream_name:
-                return
-            data = doc.get("data", {}) or {}
-            image_key = self._detect_image_key(data)
-            if image_key is None:
-                return
+            data = dict(doc.get("data", {}) or {})
+            self._process_event_data(descriptor_uid=descriptor_uid, data=data)
+            return
 
-            motor_key = self._detect_motor_key(data)
-            image_path = str(data.get(image_key, "")).strip()
-            if not image_path:
-                return
-            if motor_key is not None and _is_number(data.get(motor_key)):
-                position = float(data.get(motor_key))
-                self._fallback_position = position
-            else:
-                position = float(self._fallback_position)
-
-            self._frame_received.emit(image_path, float(position))
+        if name == "event_page":
+            descriptor_uid = str(doc.get("descriptor", ""))
+            page_data = dict(doc.get("data", {}) or {})
+            keys = list(page_data.keys())
+            n_items = 0
+            for k in keys:
+                v = page_data.get(k, [])
+                try:
+                    n_items = max(n_items, len(v))
+                except Exception:
+                    n_items = max(n_items, 1)
+            for i in range(int(max(0, n_items))):
+                row = {}
+                for k in keys:
+                    vals = page_data.get(k, [])
+                    try:
+                        row[k] = vals[i]
+                    except Exception:
+                        pass
+                self._process_event_data(descriptor_uid=descriptor_uid, data=row)
             return
 
         if name == "stop":
+            if self.run_uid_filter:
+                run_start_uid = str(doc.get("run_start", "")).strip()
+                if run_start_uid:
+                    if run_start_uid != self.run_uid_filter:
+                        return
+                elif self._active_run_uid != self.run_uid_filter:
+                    return
             exit_status = str(doc.get("exit_status", ""))
             self._log_received.emit(f"Run stopped: {exit_status or 'unknown'}")
             self._run_stopped.emit()
@@ -465,18 +953,33 @@ class FocusOnlineBridge(QtCore.QObject):
         total = int(len(self.window.frames))
         if total <= 0:
             return
+        # Mark all streamed frames as seen so the window can treat the run as complete.
         try:
-            # Mark all streamed frames as seen so the window can treat the run as complete.
             self.window._seen_frame_indices.update(range(total))
-            # Queue any missing full-filter jobs without requiring manual frame cycling.
-            for idx in range(total):
-                self.window._enqueue_full_prepare(idx)
-            self.window._update_filter_queue_indicator()
-            self.window._log(
-                f"Run stop sync: queued full filtering for all streamed frames ({total})."
-            )
-        except Exception as ex:
-            self._log_received.emit(f"Run stop sync failed: {ex}")
+        except Exception:
+            pass
+
+        # Queue in batches to keep the UI responsive on large runs.
+        batch_size = 200
+
+        def _queue_batch(i0: int):
+            if self.window is None:
+                return
+            try:
+                i1 = int(min(total, i0 + batch_size))
+                for idx in range(i0, i1):
+                    self.window._enqueue_full_prepare(idx)
+                self.window._update_filter_queue_indicator()
+                if i1 < total:
+                    QtCore.QTimer.singleShot(0, lambda next_i=i1: _queue_batch(next_i))
+                else:
+                    self.window._log(
+                        f"Run stop sync: queued full filtering for all streamed frames ({total})."
+                    )
+            except Exception as ex:
+                self._log_received.emit(f"Run stop sync failed: {ex}")
+
+        QtCore.QTimer.singleShot(0, lambda: _queue_batch(0))
 
     @QtCore.Slot(str)
     def _on_log_received(self, message: str):
@@ -496,32 +999,43 @@ class FocusOnlineBridge(QtCore.QObject):
             return
         self._seen_paths.add(norm)
 
+        if not path.exists():
+            now = float(time.monotonic())
+            first_seen = float(self._path_first_seen_ts.get(norm, now))
+            if norm not in self._path_first_seen_ts:
+                self._path_first_seen_ts[norm] = now
+                first_seen = now
+            elapsed = max(0.0, now - first_seen)
+            retries = int(self._path_retry_count.get(norm, 0)) + 1
+            self._path_retry_count[norm] = retries
+            if elapsed < self.file_wait_timeout_s:
+                if retries in {1, 10, 25, 50, 100}:
+                    self._log_received.emit(
+                        f"Waiting for file to appear ({elapsed:.1f}s): {path.name}"
+                    )
+                self._seen_paths.discard(norm)
+                QtCore.QTimer.singleShot(
+                    int(self.file_wait_interval_ms),
+                    lambda p=path_text, pos=float(position): self._frame_received.emit(p, pos),
+                )
+                return
+            self._log_received.emit(
+                f"Image file did not appear within {self.file_wait_timeout_s:.1f}s: {path}"
+            )
+            self._path_first_seen_ts.pop(norm, None)
+        self._path_retry_count.pop(norm, None)
+        self._path_first_seen_ts.pop(norm, None)
+
+        self._ensure_window()
         if self.window is None:
-            frames = [FrameInfo(index=0, path=path, position=float(position))]
-            self.window = FocusOfflineWindow(
-                frames=frames,
-                interval_ms=self.interval_ms,
-                max_workers_total=self.max_workers_total,
-                bulk_workers=self.bulk_workers,
-                full_workers=self.full_workers,
-                full_cache_gb=self.full_cache_gb,
-                preprocess_mode=self.preprocess_mode,
-                preprocess_size=self.preprocess_size,
-                allow_file_open=False,
-            )
-            self.window.installEventFilter(self)
-            self.window.setWindowTitle("Online Focus Scan Viewer")
-            self.window.show()
-            self._bring_window_to_front(self.window)
-            self._install_focus_controls()
-            self.window._log("Online stream connected; waiting for frames...")
-            self.window._log(
-                f"First streamed frame: {path.name} @ motor={float(position):.5f}"
-            )
             return
 
         idx = int(len(self.window.frames))
         self.window.frames.append(FrameInfo(index=idx, path=path, position=float(position)))
+        if idx == 0:
+            self.window._log(
+                f"First streamed frame: {path.name} @ motor={float(position):.5f}"
+            )
         self.window._update_filter_queue_indicator()
         self.window._log(
             f"Streamed frame {idx + 1}/{len(self.window.frames)}: {path.name} @ motor={float(position):.5f}"
@@ -554,6 +1068,11 @@ def attach_to_run_engine(
     full_cache_gb: float = 10.0,
     preprocess_mode: str = "tomopy_outlier",
     preprocess_size: int = 7,
+    file_wait_timeout_s: float = 30.0,
+    file_wait_interval_ms: int = 250,
+    run_file_name: Optional[str] = None,
+    run_file_dir: Optional[str] = None,
+    run_data_root: str = "/home/mitr_4dh4/Data",
 ) -> Tuple[FocusOnlineBridge, int]:
     """Attach online viewer to a local RunEngine stream."""
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -581,6 +1100,11 @@ def attach_to_run_engine(
         full_cache_gb=full_cache_gb,
         preprocess_mode=preprocess_mode,
         preprocess_size=preprocess_size,
+        file_wait_timeout_s=file_wait_timeout_s,
+        file_wait_interval_ms=file_wait_interval_ms,
+        run_file_name=run_file_name,
+        run_file_dir=run_file_dir,
+        run_data_root=run_data_root,
     )
     token = int(re.subscribe(bridge.on_document))
     return bridge, token
@@ -617,6 +1141,36 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=7,
         help="Kernel size for selected prefilter mode.",
     )
+    p.add_argument(
+        "--file-wait-timeout-s",
+        type=float,
+        default=30.0,
+        help="Max time to wait for a just-triggered file to appear on disk.",
+    )
+    p.add_argument(
+        "--file-wait-interval-ms",
+        type=int,
+        default=250,
+        help="Retry interval while waiting for delayed file writes.",
+    )
+    p.add_argument(
+        "--run-file-name",
+        type=str,
+        default="",
+        help="Run metadata file_name (used as fallback for datum-id to file mapping).",
+    )
+    p.add_argument(
+        "--run-file-dir",
+        type=str,
+        default="",
+        help="Run metadata file_dir (used as fallback for datum-id to file mapping).",
+    )
+    p.add_argument(
+        "--run-data-root",
+        type=str,
+        default="/home/mitr_4dh4/Data",
+        help="Root directory for run file fallback mapping.",
+    )
     p.add_argument("--session-id", type=str, default=None, help="Adaptive focus session id from plan metadata")
     p.add_argument(
         "--qserver-control-addr",
@@ -632,6 +1186,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--qserver-user", type=str, default="focus_online_viewer", help="Queue Server API user name")
     p.add_argument("--qserver-user-group", type=str, default="primary", help="Queue Server API user group")
+    p.add_argument(
+        "--parent-pid",
+        type=int,
+        default=0,
+        help="Optional launcher PID; viewer exits if this process is gone.",
+    )
+    p.add_argument(
+        "--startup-timeout-s",
+        type=float,
+        default=90.0,
+        help="Exit if no viewer window is created within this timeout.",
+    )
     return p
 
 
@@ -654,7 +1220,13 @@ def main(argv=None) -> int:
         full_cache_gb=args.full_cache_gb,
         preprocess_mode=args.preprocess_mode,
         preprocess_size=args.preprocess_size,
+        file_wait_timeout_s=args.file_wait_timeout_s,
+        file_wait_interval_ms=args.file_wait_interval_ms,
+        run_file_name=args.run_file_name,
+        run_file_dir=args.run_file_dir,
+        run_data_root=args.run_data_root,
     )
+    bridge._ensure_window()
 
     if args.session_id:
         try:
@@ -667,16 +1239,28 @@ def main(argv=None) -> int:
             )
 
             def _submit(command: str, payload: Optional[Dict] = None):
-                resp = cmd_client.submit(command, payload=payload)
-                ok = bool(resp.get("success", resp.get("ok", False)))
-                if ok:
-                    bridge._on_log_received(
-                        f"Adaptive command submitted: {command}"
-                    )
-                else:
-                    bridge._on_log_received(
-                        f"Adaptive command failed: {command} :: {resp}"
-                    )
+                def _worker():
+                    try:
+                        resp = cmd_client.submit(command, payload=payload)
+                        ok = bool(resp.get("success", resp.get("ok", False)))
+                        if ok:
+                            bridge._log_received.emit(
+                                f"Adaptive command submitted: {command}"
+                            )
+                        else:
+                            bridge._log_received.emit(
+                                f"Adaptive command failed: {command} :: {resp}"
+                            )
+                    except Exception as ex:
+                        bridge._log_received.emit(
+                            f"Adaptive command failed: {command} :: {ex}"
+                        )
+
+                threading.Thread(
+                    target=_worker,
+                    daemon=True,
+                    name=f"focus-cmd-{str(command)}",
+                ).start()
 
             def _on_go_to_focus(metric: str):
                 target = bridge.get_focus_target(metric)
@@ -714,13 +1298,48 @@ def main(argv=None) -> int:
         except Exception as ex:
             print(f"Adaptive command client init failed: {ex}")
 
-    from bluesky.callbacks.zmq import RemoteDispatcher
+    try:
+        from bluesky.callbacks.zmq import RemoteDispatcher
+    except Exception:
+        from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher
 
     dispatcher = RemoteDispatcher(args.zmq_address)
     dispatcher.subscribe(bridge.on_document)
 
     dispatch_thread = threading.Thread(target=dispatcher.start, daemon=True)
     dispatch_thread.start()
+
+    # Guard 1: don't leave detached viewers if launcher is gone.
+    parent_pid = int(max(0, int(args.parent_pid or 0)))
+    if parent_pid > 0:
+        parent_timer = QtCore.QTimer()
+        parent_timer.setInterval(2000)
+
+        def _parent_alive(pid: int) -> bool:
+            try:
+                os.kill(pid, 0)
+                return True
+            except Exception:
+                return False
+
+        def _check_parent():
+            if not _parent_alive(parent_pid):
+                print(f"Parent process {parent_pid} is gone; exiting focus viewer.")
+                app.quit()
+
+        parent_timer.timeout.connect(_check_parent)
+        parent_timer.start()
+
+    # Guard 2: if nothing was received, auto-exit so no unseen process lingers.
+    startup_timeout_s = float(max(0.0, float(args.startup_timeout_s or 0.0)))
+    if startup_timeout_s > 0:
+        def _check_startup_timeout():
+            if bridge.window is None:
+                print(
+                    f"No frames received within {startup_timeout_s:.1f}s; exiting focus viewer."
+                )
+                app.quit()
+        QtCore.QTimer.singleShot(int(startup_timeout_s * 1000), _check_startup_timeout)
 
     try:
         return int(app.exec_())

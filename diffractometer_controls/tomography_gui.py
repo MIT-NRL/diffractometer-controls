@@ -450,7 +450,7 @@ class MainScreen(display.MITRDisplay):
         if self._profile_popup is not None:
             return
 
-        popup = QtWidgets.QWidget(None)
+        popup = QtWidgets.QWidget(self)
         popup.setWindowTitle("ROI Profile")
         popup.setWindowFlag(QtCore.Qt.Window, True)
         popup.setWindowFlag(QtCore.Qt.Tool, True)
@@ -495,8 +495,9 @@ class MainScreen(display.MITRDisplay):
         plot_widget = pg.PlotWidget()
         plot_widget.showGrid(x=True, y=True, alpha=0.2)
         plot_item = plot_widget.getPlotItem()
-        plot_item.setLabel("left", "Mean intensity")
-        plot_item.setLabel("bottom", "X pixel")
+        label_style = self._profile_axis_label_style()
+        plot_item.setLabel("left", self._profile_left_axis_label(), **label_style)
+        plot_item.setLabel("bottom", "X pixel", **label_style)
         curve = plot_item.plot(pen=pg.mkPen(0, 120, 230, width=2))
         layout.addWidget(plot_widget, 1)
 
@@ -512,6 +513,52 @@ class MainScreen(display.MITRDisplay):
         self._profile_filter_method_combo = filter_method_combo
         self._profile_plot_widget = plot_widget
         self._profile_curve = curve
+        self._apply_profile_popup_theme_from_palette()
+
+    def _apply_profile_popup_theme_from_palette(self):
+        if self._profile_popup is None:
+            return
+
+        pal = self.palette()
+        self._profile_popup.setPalette(pal)
+        self._profile_popup.setAutoFillBackground(True)
+
+        if pg is None or self._profile_plot_widget is None:
+            return
+
+        bg = pal.color(QtGui.QPalette.Base)
+        fg = pal.color(QtGui.QPalette.Text)
+        axis = pal.color(QtGui.QPalette.Mid)
+        self._profile_plot_widget.setBackground((int(bg.red()), int(bg.green()), int(bg.blue())))
+        plot_item = self._profile_plot_widget.getPlotItem()
+        if plot_item is not None:
+            bottom_label = "X pixel"
+            try:
+                bottom_axis = plot_item.getAxis("bottom")
+                current_label = getattr(bottom_axis, "labelText", None)
+                if isinstance(current_label, str) and current_label.strip():
+                    bottom_label = current_label
+            except Exception:
+                pass
+            label_style = self._profile_axis_label_style()
+            plot_item.setLabel("left", self._profile_left_axis_label(), **label_style)
+            plot_item.setLabel("bottom", bottom_label, **label_style)
+            for axis_name in ("left", "bottom"):
+                try:
+                    axis_item = plot_item.getAxis(axis_name)
+                    axis_item.setTextPen(pg.mkPen(fg.red(), fg.green(), fg.blue(), width=1))
+                    axis_item.setPen(pg.mkPen(axis.red(), axis.green(), axis.blue(), width=1))
+                except Exception:
+                    pass
+        if self._profile_curve is not None:
+            self._profile_curve.setPen(pg.mkPen(0, 120, 230, width=2))
+
+    def _profile_axis_label_style(self):
+        fg = self.palette().color(QtGui.QPalette.Text)
+        return {"color": fg.name()}
+
+    def _profile_left_axis_label(self):
+        return "Mean transmission" if self._is_wf_norm_active() else "Mean intensity"
 
     def _on_profile_toggled(self, enabled):
         self._profile_enabled = bool(enabled)
@@ -734,13 +781,16 @@ class MainScreen(display.MITRDisplay):
                 self._set_image_item_data(np.asarray(self._last_source_image))
                 self._apply_robust_normalization(self._last_source_image)
             self._reset_histogram_view()
+            self._apply_profile_popup_theme_from_palette()
             return
         if self._wf_norm_array is not None:
             self._set_wf_norm_visual_state("ready")
             if self._last_source_image is not None:
                 self._apply_robust_normalization(self._last_source_image)
             self._reset_histogram_view()
+            self._apply_profile_popup_theme_from_palette()
             return
+        self._apply_profile_popup_theme_from_palette()
         self._select_wf_images_for_norm(checked_request=True)
 
     def _select_wf_images_for_norm(self, checked_request=False):
@@ -887,6 +937,7 @@ class MainScreen(display.MITRDisplay):
         if self.wf_norm_checkbox is not None and self.wf_norm_checkbox.isChecked():
             self._apply_robust_normalization()
             self._reset_histogram_view()
+        self._apply_profile_popup_theme_from_palette()
 
     def _normalize_image_with_wf(self, image):
         if self._wf_norm_reciprocal is None:
@@ -944,8 +995,9 @@ class MainScreen(display.MITRDisplay):
         if self._profile_curve is None or self._profile_plot_widget is None:
             return
         plot_item = self._profile_plot_widget.getPlotItem()
-        plot_item.setLabel("left", "Mean intensity")
-        plot_item.setLabel("bottom", axis_label)
+        label_style = self._profile_axis_label_style()
+        plot_item.setLabel("left", self._profile_left_axis_label(), **label_style)
+        plot_item.setLabel("bottom", axis_label, **label_style)
         self._profile_curve.setData(coord, profile)
         plot_item.enableAutoRange(axis="xy", enable=True)
 
@@ -1257,6 +1309,18 @@ class MainScreen(display.MITRDisplay):
                     return True
 
         return super().eventFilter(watched, event)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event is None:
+            return
+        if event.type() in (
+            QtCore.QEvent.PaletteChange,
+            QtCore.QEvent.ApplicationPaletteChange,
+            QtCore.QEvent.StyleChange,
+        ):
+            self._apply_histogram_theme_from_palette()
+            self._apply_profile_popup_theme_from_palette()
 
     def _setup_time_remaining_progress(self):
         old_widget = self.ui.PyDMLabel_6
@@ -1787,8 +1851,45 @@ class MainScreen(display.MITRDisplay):
 
         layout.addWidget(histogram_plot)
 
+        self._apply_histogram_theme_from_palette()
         self._update_histogram_markers()
         return block
+
+    def _palette_is_dark(self):
+        color = self.palette().color(QtGui.QPalette.Window)
+        luminance = (
+            0.2126 * float(color.red())
+            + 0.7152 * float(color.green())
+            + 0.0722 * float(color.blue())
+        )
+        return luminance < 128.0
+
+    def _apply_histogram_theme_from_palette(self):
+        if pg is None:
+            return
+        if self._histogram_plot_widget is None:
+            return
+
+        pal = self.palette()
+        bg = pal.color(QtGui.QPalette.Base)
+        fg = pal.color(QtGui.QPalette.Text)
+        axis = pal.color(QtGui.QPalette.Mid)
+        highlight = pal.color(QtGui.QPalette.Highlight)
+        bg_tuple = (int(bg.red()), int(bg.green()), int(bg.blue()))
+        self._histogram_plot_widget.setBackground(bg_tuple)
+
+        if self._histogram_axis is not None:
+            self._histogram_axis.setTextPen(pg.mkPen(fg.red(), fg.green(), fg.blue(), width=1))
+            self._histogram_axis.setPen(pg.mkPen(axis.red(), axis.green(), axis.blue(), width=1))
+
+        if self._histogram_curve is not None:
+            fill_alpha = 110 if self._palette_is_dark() else 70
+            self._histogram_curve.setPen(
+                pg.mkPen(highlight.red(), highlight.green(), highlight.blue(), width=1.5)
+            )
+            self._histogram_curve.setBrush(
+                pg.mkBrush(highlight.red(), highlight.green(), highlight.blue(), fill_alpha)
+            )
 
     def _is_wf_norm_active(self):
         return (

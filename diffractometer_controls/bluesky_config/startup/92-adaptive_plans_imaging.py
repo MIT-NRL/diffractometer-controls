@@ -469,8 +469,8 @@ def adaptive_imaging_focus_scan(
                     )
                     _focus_adaptive_session_update(session_id, status="awaiting_command")
                     continue
-                yield from bps.checkpoint()
-                yield from bps.mv(motor, float(target))
+                _set_total_units_runtime(int(total_units_runtime + 1))
+                yield from _acquire_positions([float(target)], source="go_to_focus")
                 _focus_adaptive_session_update(
                     session_id,
                     status="awaiting_command",
