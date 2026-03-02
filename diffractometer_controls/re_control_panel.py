@@ -15,8 +15,15 @@ from bluesky_widgets.qt.run_engine_client import (
 import display
 
 class REControlPanel(display.MITRDisplay):
+    _running_plan_font_px = 15
+    _running_plan_font_min_px = 11
+    _running_plan_font_max_px = 28
+
     def __init__(self, parent=None, args=None, macros=None, ui_filename='re_control_panel.ui'):
         super().__init__(parent, args, macros, ui_filename)
+        self._running_plan_font_px = 15
+        self._running_plan_font_min_px = 11
+        self._running_plan_font_max_px = 28
         # print("REControlPanel here")
         # self.customize_ui()
 
@@ -52,6 +59,11 @@ class REControlPanel(display.MITRDisplay):
 
     def _style_re_running_plan_widget(self):
         """Improve readability of the Running Plan panel."""
+        body_font_px = getattr(self, "_running_plan_font_px", 15)
+        min_font_px = getattr(self, "_running_plan_font_min_px", 11)
+        section_font_px = body_font_px
+        sub_hdr_font_px = max(body_font_px - 1, min_font_px)
+
         for layout in self._re_running_plan.findChildren(QHBoxLayout):
             layout.setSpacing(4)
             layout.setContentsMargins(2, 2, 2, 2)
@@ -68,6 +80,10 @@ class REControlPanel(display.MITRDisplay):
                 break
 
         for text_edit in self._re_running_plan.findChildren(QTextEdit):
+            if not text_edit.property("_dc_ctrl_wheel_zoom_enabled"):
+                text_edit.installEventFilter(self)
+                text_edit.setProperty("_dc_ctrl_wheel_zoom_enabled", True)
+                text_edit.setToolTip("Use Ctrl+mouse wheel to change text size.")
             palette = text_edit.palette()
             base_color = palette.color(QPalette.Base).name()
             text_color = palette.color(QPalette.Text).name()
@@ -75,7 +91,7 @@ class REControlPanel(display.MITRDisplay):
             muted_color = palette.color(QPalette.Mid).name()
             text_edit.setStyleSheet(
                 "QTextEdit {"
-                "font-size: 13px; "
+                f"font-size: {body_font_px}px; "
                 "padding: 4px; "
                 f"border: 1px solid {border_color}; "
                 "border-radius: 6px; "
@@ -90,11 +106,11 @@ class REControlPanel(display.MITRDisplay):
                 "display: inline-block; "
                 "margin-top: 8px; "
                 "margin-bottom: 3px; "
-                "font-size: 13px; "
+                f"font-size: {section_font_px}px; "
                 f"color: {text_color}; "
                 "} "
                 "b.dc-sub-hdr { "
-                "font-size: 12px; "
+                f"font-size: {sub_hdr_font_px}px; "
                 f"color: {muted_color}; "
                 "font-weight: 600; "
                 "}"
@@ -149,6 +165,35 @@ class REControlPanel(display.MITRDisplay):
             updated,
         )
         return updated
+
+    def eventFilter(self, watched, event):
+        if (
+            event.type() == QtCore.QEvent.Wheel
+            and isinstance(watched, QTextEdit)
+            and getattr(self, "_re_running_plan", None) is not None
+            and self._re_running_plan.isAncestorOf(watched)
+            and bool(event.modifiers() & QtCore.Qt.ControlModifier)
+        ):
+            delta = event.angleDelta().y() or event.pixelDelta().y()
+            if delta > 0:
+                step = 1
+            elif delta < 0:
+                step = -1
+            else:
+                step = 0
+            if step:
+                min_font_px = getattr(self, "_running_plan_font_min_px", 11)
+                max_font_px = getattr(self, "_running_plan_font_max_px", 28)
+                current_font_px = getattr(self, "_running_plan_font_px", 15)
+                new_size = max(
+                    min_font_px,
+                    min(max_font_px, current_font_px + step),
+                )
+                if new_size != current_font_px:
+                    self._running_plan_font_px = new_size
+                    self._style_re_running_plan_widget()
+            return True
+        return super().eventFilter(watched, event)
 
     def _style_re_status_labels(self):
         """Style RE status rows with state-dependent backgrounds."""
