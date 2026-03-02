@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import threading
 import multiprocessing as mp
@@ -98,6 +99,9 @@ class MainScreen(display.MITRDisplay):
         self._startup_autoscale_max_attempts = 30
         self._level_slider_low_bound = 0.0
         self._level_slider_high_bound = 65535.0
+        self._level_slider_ui_min = 0
+        self._level_slider_ui_max = 1000
+        self._level_slider_mode = "raw"
         self._base_lut = None
         self._acquire_channel = None
         self._time_remaining_channel = None
@@ -118,6 +122,7 @@ class MainScreen(display.MITRDisplay):
         self._wf_norm_array = None
         self._wf_norm_reciprocal = None
         self._wf_norm_reciprocal_t = None
+        self._wf_norm_reference_exposure_s = None
         # Treat very small finite values as valid denominators; avoid rejecting
         # normalized/float-scaled WF images that are << 1.0.
         self._wf_norm_eps = float(np.finfo(np.float32).tiny)
@@ -136,8 +141,10 @@ class MainScreen(display.MITRDisplay):
         self._wf_norm_status_index = 0
         self._wf_norm_status_method = ""
         self._wf_norm_requested_method = ""
+        self._wf_norm_tooltip_prefix = ""
         self._wf_norm_tomopy_available = None
         self._wf_norm_image_update_in_progress = False
+        self._wf_norm_ignore_next_image_changed = False
         self._last_source_image = None
         self.wf_norm_checkbox = None
         self.wf_norm_select_button = None
@@ -185,15 +192,27 @@ class MainScreen(display.MITRDisplay):
         else:
             image_view.setProperty("normalizeData", False)
 
+        image_signal_connected = False
         if hasattr(image_view, "newImageSignal"):
-            image_view.newImageSignal.connect(self._apply_robust_normalization)
+            try:
+                image_view.newImageSignal.connect(self._apply_robust_normalization)
+                image_signal_connected = True
+            except Exception:
+                image_signal_connected = False
 
         # Also listen to the underlying ImageItem change signal to catch
         # first-image timing when PV data/shape channels connect in sequence.
         try:
             image_item = image_view.getImageItem()
             if image_item is not None and hasattr(image_item, "sigImageChanged"):
-                image_item.sigImageChanged.connect(self._apply_robust_normalization)
+                same_signal = False
+                if hasattr(image_view, "newImageSignal"):
+                    try:
+                        same_signal = image_view.newImageSignal is image_item.sigImageChanged
+                    except Exception:
+                        same_signal = False
+                if (not image_signal_connected) or (not same_signal):
+                    image_item.sigImageChanged.connect(self._apply_robust_normalization)
         except Exception:
             pass
 
@@ -387,12 +406,13 @@ class MainScreen(display.MITRDisplay):
         if data.ndim != 2:
             return None
         data_f = np.asarray(data, dtype=np.float32)
+        scale = np.float32(self._wf_norm_exposure_scale())
         rec = self._wf_norm_reciprocal
         if data_f.shape == rec.shape:
-            return data_f * rec
+            return np.asarray(data_f * rec * scale, dtype=np.float32)
         rec_t = self._wf_norm_reciprocal_t
         if rec_t is not None and data_f.shape == rec_t.shape:
-            return data_f * rec_t
+            return np.asarray(data_f * rec_t * scale, dtype=np.float32)
         return None
 
     def _default_profile_roi_geometry(self):
@@ -720,6 +740,9 @@ class MainScreen(display.MITRDisplay):
         self._wf_norm_array = None
         self._wf_norm_reciprocal = None
         self._wf_norm_reciprocal_t = None
+        self._wf_norm_reference_exposure_s = None
+        self._wf_norm_tooltip_prefix = ""
+        self._wf_norm_ignore_next_image_changed = False
         self._wf_norm_mismatch_count = 0
         if disable_checkbox:
             self._set_wf_norm_checked(False)
@@ -886,6 +909,11 @@ class MainScreen(display.MITRDisplay):
         method_label = method_used or method_requested or self._wf_norm_requested_method or self._wf_norm_filter_method
         if method_used and method_requested and method_used != method_requested:
             method_label = f"{method_used} (requested {method_requested})"
+        wf_exposure_s = self._to_float(payload.get("wf_exposure_s", np.nan), default=np.nan)
+        if np.isfinite(wf_exposure_s) and wf_exposure_s > 0:
+            self._wf_norm_reference_exposure_s = float(wf_exposure_s)
+        else:
+            self._wf_norm_reference_exposure_s = None
         norm_array = np.asarray(payload.get("norm_array"))
         norm_array = np.squeeze(norm_array)
         if norm_array.size == 0 or norm_array.ndim != 2:
@@ -930,9 +958,12 @@ class MainScreen(display.MITRDisplay):
         self._wf_norm_mismatch_count = 0
         if self.wf_norm_select_button is not None:
             tip = f"Loaded {int(payload.get('count', 0))} WF file(s), shape={tuple(norm_array.shape)}, filter={method_label}."
+            exp_count = int(payload.get("wf_exposure_count", 0) or 0)
+            if exp_count > 0:
+                tip = f"{tip} Exposure tags detected in {exp_count} WF TIFF(s)"
             if note:
                 tip = f"{tip} {note}"
-            self.wf_norm_select_button.setToolTip(tip)
+            self._update_wf_norm_exposure_tooltip(prefix=tip)
         self._set_wf_norm_visual_state("ready")
         if self.wf_norm_checkbox is not None and self.wf_norm_checkbox.isChecked():
             self._apply_robust_normalization()
@@ -947,16 +978,17 @@ class MainScreen(display.MITRDisplay):
         if data.ndim != 2:
             return None
         data_f = np.asarray(data, dtype=np.float32)
+        scale = np.float32(self._wf_norm_exposure_scale())
         rec = self._wf_norm_reciprocal
         if data_f.shape == rec.shape:
             self._wf_norm_mismatch_count = 0
             self._set_wf_norm_visual_state("ready")
-            return data_f * rec
+            return np.asarray(data_f * rec * scale, dtype=np.float32)
         rec_t = self._wf_norm_reciprocal_t
         if rec_t is not None and data_f.shape == rec_t.shape:
             self._wf_norm_mismatch_count = 0
             self._set_wf_norm_visual_state("ready")
-            return data_f * rec_t
+            return np.asarray(data_f * rec_t * scale, dtype=np.float32)
         self._wf_norm_mismatch_count += 1
         self._set_wf_norm_visual_state("warning")
         if self.wf_norm_select_button is not None:
@@ -980,9 +1012,10 @@ class MainScreen(display.MITRDisplay):
             if image_item is None or not hasattr(image_item, "setImage"):
                 return
             self._wf_norm_image_update_in_progress = True
+            self._wf_norm_ignore_next_image_changed = True
             image_item.setImage(image_data, autoLevels=False)
         except Exception:
-            pass
+            self._wf_norm_ignore_next_image_changed = False
         finally:
             self._wf_norm_image_update_in_progress = False
 
@@ -1390,6 +1423,7 @@ class MainScreen(display.MITRDisplay):
     def _on_acquire_time_changed(self, value):
         self._acquire_time_total = self._to_float(value, default=0.0)
         self._update_time_remaining_progress()
+        self._update_wf_norm_exposure_tooltip()
 
     def _to_float(self, value, default=0.0):
         try:
@@ -1398,6 +1432,65 @@ class MainScreen(display.MITRDisplay):
             return float(value)
         except Exception:
             return float(default)
+
+    def _get_current_exposure_time_s(self):
+        exp = self._to_float(self._acquire_time_total, default=np.nan)
+        if np.isfinite(exp) and exp > 0:
+            return float(exp)
+        line_edit = getattr(self.ui, "PyDMLineEdit_2", None)
+        if line_edit is not None:
+            try:
+                text = str(line_edit.text()).strip()
+            except Exception:
+                text = ""
+            if text:
+                m = re.search(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", text)
+                if m is not None:
+                    exp = self._to_float(m.group(0), default=np.nan)
+                    if np.isfinite(exp) and exp > 0:
+                        return float(exp)
+        return None
+
+    def _wf_norm_exposure_scale(self):
+        wf_exp = self._to_float(self._wf_norm_reference_exposure_s, default=np.nan)
+        cur_exp = self._get_current_exposure_time_s()
+        if (
+            cur_exp is None
+            or (not np.isfinite(cur_exp))
+            or cur_exp <= 0
+            or (not np.isfinite(wf_exp))
+            or wf_exp <= 0
+        ):
+            return 1.0
+        # Normalize against exposure-adjusted white-field:
+        # image / (wf * (current / wf_ref)) == image / wf * (wf_ref / current)
+        return float(wf_exp / cur_exp)
+
+    def _update_wf_norm_exposure_tooltip(self, prefix=None):
+        if self.wf_norm_select_button is None:
+            return
+        if prefix is not None:
+            self._wf_norm_tooltip_prefix = str(prefix).strip()
+        base = str(self._wf_norm_tooltip_prefix or "").strip()
+        if not base:
+            return
+        cur_exp = self._get_current_exposure_time_s()
+        wf_exp = self._to_float(self._wf_norm_reference_exposure_s, default=np.nan)
+        parts = [base.rstrip(".")]
+        if np.isfinite(wf_exp) and wf_exp > 0:
+            parts.append(f"WF exposure mean={float(wf_exp):.6g}s")
+            if cur_exp is not None and np.isfinite(cur_exp) and cur_exp > 0:
+                parts.append(f"Current exposure={float(cur_exp):.6g}s")
+                parts.append(f"Scale (wf/current)={self._wf_norm_exposure_scale():.6g}")
+            else:
+                parts.append("Current exposure unavailable")
+                parts.append("Scale (wf/current)=1")
+        else:
+            parts.append("WF exposure tags not found")
+            if cur_exp is not None and np.isfinite(cur_exp) and cur_exp > 0:
+                parts.append(f"Current exposure={float(cur_exp):.6g}s")
+            parts.append("Scale (wf/current)=1")
+        self.wf_norm_select_button.setToolTip(". ".join(parts) + ".")
 
     def _update_time_remaining_progress(self):
         if not hasattr(self, "time_remaining_progress"):
@@ -2122,23 +2215,72 @@ class MainScreen(display.MITRDisplay):
         self._auto_levels_from_current_image()
 
     def _value_to_level_slider(self, value):
-        return int(round(max(self._level_slider_low_bound, min(self._level_slider_high_bound, value))))
+        lo = float(self._level_slider_low_bound)
+        hi = float(self._level_slider_high_bound)
+        if not (np.isfinite(lo) and np.isfinite(hi) and hi > lo):
+            return int(self._level_slider_ui_min)
+        v = float(max(lo, min(hi, value)))
+        ui_lo = int(self._level_slider_ui_min)
+        ui_hi = int(self._level_slider_ui_max)
+        ratio = (v - lo) / (hi - lo)
+        return int(round(ui_lo + ratio * float(ui_hi - ui_lo)))
 
     def _slider_to_level_value(self, slider_value):
-        return float(max(self._level_slider_low_bound, min(self._level_slider_high_bound, slider_value)))
+        lo = float(self._level_slider_low_bound)
+        hi = float(self._level_slider_high_bound)
+        if not (np.isfinite(lo) and np.isfinite(hi) and hi > lo):
+            return float(lo)
+        ui_lo = int(self._level_slider_ui_min)
+        ui_hi = int(self._level_slider_ui_max)
+        sv = int(max(ui_lo, min(ui_hi, slider_value)))
+        ratio = float(sv - ui_lo) / float(max(1, ui_hi - ui_lo))
+        return float(lo + ratio * (hi - lo))
 
     def _set_level_slider_scale(self, bit_max):
-        bit_max = int(max(1, bit_max))
-        self._level_slider_low_bound = 0.0
-        self._level_slider_high_bound = float(bit_max)
+        bit_max = float(max(1, bit_max))
+        self._set_level_slider_bounds(0.0, bit_max)
+
+    def _set_level_slider_bounds(self, low_bound, high_bound):
+        lo = float(low_bound)
+        hi = float(high_bound)
+        if not np.isfinite(lo):
+            lo = 0.0
+        if not np.isfinite(hi):
+            hi = lo + 1.0
+        if hi <= lo:
+            hi = lo + 1.0
+        self._level_slider_low_bound = float(lo)
+        self._level_slider_high_bound = float(hi)
+        ui_lo = int(self._level_slider_ui_min)
+        ui_hi = int(self._level_slider_ui_max)
         self.min_slider.blockSignals(True)
         self.max_slider.blockSignals(True)
-        self.min_slider.setRange(0, bit_max)
-        self.max_slider.setRange(0, bit_max)
+        self.min_slider.setRange(ui_lo, ui_hi)
+        self.max_slider.setRange(ui_lo, ui_hi)
         self.min_slider.blockSignals(False)
         self.max_slider.blockSignals(False)
-        self.min_spinbox.setRange(0.0, float(bit_max))
-        self.max_spinbox.setRange(0.0, float(bit_max))
+        span = float(hi - lo)
+        if self._level_slider_mode == "norm":
+            if span < 0.01:
+                decimals = 6
+            elif span < 0.1:
+                decimals = 5
+            elif span < 1.0:
+                decimals = 4
+            else:
+                decimals = 3
+            min_step = 10.0 ** (-decimals)
+            step = max(min_step, span / 500.0)
+        else:
+            decimals = 0
+            step = 1.0
+        self.min_spinbox.setDecimals(int(decimals))
+        self.max_spinbox.setDecimals(int(decimals))
+        self.min_spinbox.setSingleStep(float(step))
+        self.max_spinbox.setSingleStep(float(step))
+        self.min_spinbox.setRange(float(lo), float(hi))
+        self.max_spinbox.setRange(float(lo), float(hi))
+        self._sync_level_sliders_from_spinboxes()
 
     def _infer_bit_max_from_image_data(self, data):
         dtype = data.dtype
@@ -2154,10 +2296,53 @@ class MainScreen(display.MITRDisplay):
             return 255
         return 65535
 
+    def _infer_level_bounds_from_image_data(self, data):
+        if self._is_wf_norm_active():
+            finite = data[np.isfinite(data)]
+            if finite.size == 0:
+                return None
+            lo, hi = np.percentile(finite, [0.1, 99.9])
+            lo = float(lo)
+            hi = float(hi)
+            if not np.isfinite(lo):
+                lo = 0.0
+            if not np.isfinite(hi):
+                hi = lo + 1.0
+            lo = min(0.0, lo)
+            if hi <= lo:
+                hi = lo + 1.0
+            span = hi - lo
+            pad = max(1e-6, 0.02 * span)
+            return float(lo), float(hi + pad)
+        bit_max = float(self._infer_bit_max_from_image_data(data))
+        return 0.0, max(1.0, bit_max)
+
     def _update_level_slider_scale_from_image(self, data):
-        bit_max = self._infer_bit_max_from_image_data(data)
-        if int(self._level_slider_high_bound) != bit_max:
-            self._set_level_slider_scale(bit_max)
+        mode = "norm" if self._is_wf_norm_active() else "raw"
+        force_update = (mode != self._level_slider_mode)
+        self._level_slider_mode = mode
+        if (
+            (not force_update)
+            and (mode == "norm")
+            and hasattr(self, "auto_levels_checkbox")
+            and (not self.auto_levels_checkbox.isChecked())
+        ):
+            return
+        bounds = self._infer_level_bounds_from_image_data(data)
+        if bounds is None:
+            return
+        lo_new, hi_new = bounds
+        lo_old = float(self._level_slider_low_bound)
+        hi_old = float(self._level_slider_high_bound)
+        if (
+            (not force_update)
+            and np.isfinite(lo_old)
+            and np.isfinite(hi_old)
+            and abs(lo_new - lo_old) <= max(1e-6, 1e-3 * max(abs(lo_old), abs(lo_new), 1.0))
+            and abs(hi_new - hi_old) <= max(1e-6, 1e-3 * max(abs(hi_old), abs(hi_new), 1.0))
+        ):
+            return
+        self._set_level_slider_bounds(lo_new, hi_new)
 
     def _sync_level_sliders_from_spinboxes(self):
         min_sv = self._value_to_level_slider(self.min_spinbox.value())
@@ -2434,13 +2619,14 @@ class MainScreen(display.MITRDisplay):
     def _apply_robust_normalization(self, *args):
         if self._wf_norm_image_update_in_progress:
             return
-        has_candidate = False
+        if (not args) and self._wf_norm_ignore_next_image_changed:
+            self._wf_norm_ignore_next_image_changed = False
+            return
         image = None
         if args:
             candidate = args[0]
             if candidate is not None:
                 image = candidate
-                has_candidate = True
 
         if image is None:
             image_view = self.ui.cameraImage
@@ -2458,12 +2644,8 @@ class MainScreen(display.MITRDisplay):
             and self._wf_norm_reciprocal is not None
         )
         source_image = np.asarray(image)
-        if norm_active and (not has_candidate) and self._last_source_image is not None:
-            # While normalized display is active, fallback reads from ImageItem can be
-            # the already-normalized frame. Keep the last known raw source frame.
-            source_image = np.asarray(self._last_source_image)
-        else:
-            self._last_source_image = source_image
+        # Track the most recent source frame so disable/ROI logic uses current data.
+        self._last_source_image = source_image
         display_image = source_image
         if norm_active:
             normalized = self._normalize_image_with_wf(source_image)
