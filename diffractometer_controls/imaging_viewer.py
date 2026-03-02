@@ -65,6 +65,7 @@ class MainScreen(display.MITRDisplay):
         self._startup_autoscale_max_attempts = 30
         self._level_slider_low_bound = 0.0
         self._level_slider_high_bound = 65535.0
+        self._image_viewport = None
         self._base_lut = None
         self._acquire_channel = None
         self._time_remaining_channel = None
@@ -77,6 +78,7 @@ class MainScreen(display.MITRDisplay):
         self._setup_time_remaining_progress()
         self._configure_acquire_indicators()
         self._enforce_pan_interaction()
+        self._install_image_double_click_reset()
 
         # Disable built-in full-range normalization; we set levels manually.
         if hasattr(image_view, "setNormalizeData"):
@@ -129,6 +131,62 @@ class MainScreen(display.MITRDisplay):
                 view_box.setMouseEnabled(x=True, y=True)
         except Exception:
             pass
+
+    def _reset_image_view_all(self):
+        view_box = self._get_image_viewbox()
+        if view_box is None:
+            return
+        try:
+            if hasattr(view_box, "autoRange"):
+                view_box.autoRange(padding=0.0)
+            elif hasattr(view_box, "enableAutoRange"):
+                view_box.enableAutoRange(axis="xy", enable=True)
+        except Exception:
+            pass
+
+    def _on_image_plot_mouse_clicked(self, event):
+        try:
+            if hasattr(event, "double") and event.double():
+                if (not hasattr(event, "button")) or event.button() == QtCore.Qt.LeftButton:
+                    self._reset_image_view_all()
+                    if hasattr(event, "accept"):
+                        event.accept()
+        except Exception:
+            pass
+
+    def _install_image_double_click_reset(self):
+        image_view = self.ui.cameraImage
+        self._image_viewport = None
+        scene = None
+        try:
+            if hasattr(image_view, "getView"):
+                view = image_view.getView()
+                if view is not None and hasattr(view, "scene"):
+                    scene = view.scene()
+            if scene is None and hasattr(image_view, "getImageItem"):
+                image_item = image_view.getImageItem()
+                if image_item is not None and hasattr(image_item, "scene"):
+                    scene = image_item.scene()
+            if scene is not None and hasattr(scene, "sigMouseClicked"):
+                scene.sigMouseClicked.connect(self._on_image_plot_mouse_clicked)
+            if scene is not None and hasattr(scene, "views"):
+                views = list(scene.views() or [])
+                if views:
+                    view_widget = views[0]
+                    if hasattr(view_widget, "viewport"):
+                        self._image_viewport = view_widget.viewport()
+            if self._image_viewport is not None:
+                self._image_viewport.installEventFilter(self)
+        except Exception:
+            pass
+
+    def eventFilter(self, watched, event):
+        if watched is self._image_viewport:
+            if event.type() == QtCore.QEvent.MouseButtonDblClick:
+                self._reset_image_view_all()
+                event.accept()
+                return True
+        return super().eventFilter(watched, event)
 
     def _setup_time_remaining_progress(self):
         old_widget = self.ui.PyDMLabel_5

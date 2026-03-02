@@ -113,6 +113,7 @@ class MainScreen(display.MITRDisplay):
         self._histogram_plot_item = None
         self._histogram_axis = None
         self._histogram_viewport = None
+        self._image_viewport = None
         self._histogram_user_view_active = False
         self._histogram_low_line = None
         self._histogram_high_line = None
@@ -184,6 +185,7 @@ class MainScreen(display.MITRDisplay):
         self._setup_time_remaining_progress()
         self._configure_acquire_indicators()
         self._enforce_pan_interaction()
+        self._install_image_double_click_reset()
         self._ensure_measure_overlay_ready()
 
         # Disable built-in full-range normalization; we set levels manually.
@@ -258,6 +260,43 @@ class MainScreen(display.MITRDisplay):
                 view_box.setMouseEnabled(x=True, y=True)
         except Exception:
             pass
+
+    def _reset_image_view_all(self):
+        view_box = self._get_image_viewbox()
+        if view_box is None:
+            return
+        try:
+            if hasattr(view_box, "autoRange"):
+                view_box.autoRange(padding=0.0)
+            elif hasattr(view_box, "enableAutoRange"):
+                view_box.enableAutoRange(axis="xy", enable=True)
+        except Exception:
+            pass
+
+    def _install_image_double_click_reset(self):
+        self._image_viewport = None
+        view_box = self._get_image_viewbox()
+        if view_box is None:
+            return
+        scene = None
+        try:
+            if hasattr(view_box, "scene"):
+                scene = view_box.scene()
+        except Exception:
+            scene = None
+        if scene is None:
+            return
+        try:
+            if hasattr(scene, "views"):
+                views = list(scene.views() or [])
+                if views:
+                    view_widget = views[0]
+                    if hasattr(view_widget, "viewport"):
+                        self._image_viewport = view_widget.viewport()
+            if self._image_viewport is not None:
+                self._image_viewport.installEventFilter(self)
+        except Exception:
+            self._image_viewport = None
 
     def _set_measure_readout(self, length_px):
         if self.measure_readout_label is None:
@@ -1280,6 +1319,13 @@ class MainScreen(display.MITRDisplay):
             if self.profile_checkbox is not None and self.profile_checkbox.isChecked():
                 self.profile_checkbox.setChecked(False)
             return super().eventFilter(watched, event)
+
+        if watched is self._image_viewport:
+            if event.type() == QtCore.QEvent.MouseButtonDblClick:
+                self._reset_image_view_all()
+                event.accept()
+                return True
+            return False
 
         if watched is self._histogram_viewport:
             event_type = event.type()
