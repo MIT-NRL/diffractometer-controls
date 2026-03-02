@@ -43,6 +43,7 @@ class URLCamDisplay(Display):
         image_view.view.setMenuEnabled(False)
         image_view.getImageItem().setOpts(axisOrder="row-major")
         image_view.view.scene().sigMouseClicked.connect(self._on_plot_mouse_clicked)
+        self._set_image_background_black(image_view)
 
         self._image_view = image_view
 
@@ -50,6 +51,28 @@ class URLCamDisplay(Display):
         layout.removeWidget(old_widget)
         old_widget.hide()
         old_widget.deleteLater()
+
+    def _set_image_background_black(self, image_view):
+        # Keep URL-camera backdrop consistent with legacy cam_ui behavior.
+        try:
+            image_view.setStyleSheet("background-color: rgb(0, 0, 0);")
+        except Exception:
+            pass
+        try:
+            if hasattr(image_view, "ui") and hasattr(image_view.ui, "graphicsView"):
+                image_view.ui.graphicsView.setBackground((0, 0, 0))
+        except Exception:
+            pass
+        try:
+            view = image_view.getView()
+            if view is not None and hasattr(view, "setBackgroundColor"):
+                view.setBackgroundColor((0, 0, 0))
+            elif view is not None and hasattr(view, "getViewBox"):
+                vb = view.getViewBox()
+                if vb is not None and hasattr(vb, "setBackgroundColor"):
+                    vb.setBackgroundColor((0, 0, 0))
+        except Exception:
+            pass
 
     def _macro_dict(self):
         macros = self.macros
