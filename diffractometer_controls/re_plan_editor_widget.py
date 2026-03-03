@@ -199,6 +199,14 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         app = QtCore.QCoreApplication.instance()
         return getattr(app, "re_manager_api", None)
 
+    @staticmethod
+    def _get_api_control_addr(api):
+        control_addr = str(getattr(api, "_zmq_control_addr", "") or "").strip()
+        if control_addr:
+            return control_addr
+        client = getattr(api, "_client", None)
+        return str(getattr(client, "_zmq_server_address", "") or "").strip()
+
     def _get_file_dir_api(self):
         # Isolate file-dir requests from the shared API object used by other
         # bluesky_widgets components to avoid connection churn/reloads.
@@ -211,8 +219,8 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         if REManagerAPI is None:
             return shared_api
 
-        control_addr = getattr(shared_api, "_zmq_control_addr", None)
-        info_addr = getattr(shared_api, "_zmq_info_addr", None)
+        control_addr = self._get_api_control_addr(shared_api)
+        info_addr = str(getattr(shared_api, "_zmq_info_addr", "") or "").strip()
         if not control_addr or not info_addr:
             return shared_api
 
@@ -231,7 +239,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         api = self._get_re_manager_api()
         if api is None:
             return "tcp://localhost:5569"
-        control_addr = str(getattr(api, "_zmq_control_addr", "") or "").strip()
+        control_addr = self._get_api_control_addr(api)
         m = re.match(r"^tcp://([^:]+):\d+$", control_addr)
         host = m.group(1) if m else "localhost"
         if host in ("*", "0.0.0.0", "::"):
