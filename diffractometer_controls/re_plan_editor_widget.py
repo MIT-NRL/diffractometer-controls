@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from qtpy import QtCore
 from qtpy import QtGui
-from qtpy.QtWidgets import QComboBox, QTableWidgetItem
+from qtpy.QtWidgets import QComboBox, QShortcut, QTableWidgetItem
 
 import bluesky_widgets.qt.run_engine_client as rec
 
@@ -588,6 +588,84 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         except Exception:
             pass
 
+    @staticmethod
+    def _set_combo_implicit_style(combo, is_implicit_default):
+        """
+        Gray only the displayed value for implicit/default state while keeping
+        popup items readable at normal color.
+        """
+        line_edit = combo.lineEdit()
+        if is_implicit_default:
+            if line_edit is not None:
+                line_edit.setStyleSheet("color: #777;")
+                combo.setStyleSheet("")
+            else:
+                combo.setStyleSheet(
+                    "QComboBox { color: #777; } "
+                    "QComboBox QAbstractItemView { color: palette(text); }"
+                )
+        else:
+            if line_edit is not None:
+                line_edit.setStyleSheet("")
+            combo.setStyleSheet("")
+
+    @staticmethod
+    def _set_combo_invalid_style(combo):
+        """Show invalid combo value in red without tinting popup entries."""
+        line_edit = combo.lineEdit()
+        if line_edit is not None:
+            line_edit.setStyleSheet("color: #b00020;")
+            combo.setStyleSheet("")
+        else:
+            combo.setStyleSheet(
+                "QComboBox { color: #b00020; } "
+                "QComboBox QAbstractItemView { color: palette(text); }"
+            )
+
+    @staticmethod
+    def _get_combo_base_tooltip(combo, fallback_tooltip=""):
+        base = combo.property("dc_base_tooltip")
+        if base is None:
+            base = fallback_tooltip if fallback_tooltip is not None else combo.toolTip()
+        return str(base or "")
+
+    @staticmethod
+    def _get_file_dir_max_depth():
+        raw = str(os.environ.get("MITR_FILE_DIR_MAX_DEPTH", "3")).strip()
+        try:
+            depth = int(raw)
+        except Exception:
+            depth = 3
+        return max(1, depth)
+
+    @staticmethod
+    def _file_dir_depth(value):
+        txt = str(value or "").strip().replace("\\", "/")
+        parts = [part for part in txt.split("/") if part and part != "."]
+        return len(parts)
+
+    def _is_valid_file_dir_value(self, value):
+        return self._file_dir_depth(value) <= self._get_file_dir_max_depth()
+
+    def _set_file_dir_combo_validation(
+        self, combo, *, is_valid, is_implicit_default=False, value=None, fallback_tooltip=""
+    ):
+        base_tooltip = self._get_combo_base_tooltip(combo, fallback_tooltip)
+        if is_valid:
+            self._set_combo_implicit_style(combo, is_implicit_default)
+            combo.setToolTip(base_tooltip)
+            return
+
+        self._set_combo_invalid_style(combo)
+        txt = combo.currentText() if value is None else value
+        cur_depth = self._file_dir_depth(txt)
+        max_depth = self._get_file_dir_max_depth()
+        helper = (
+            f"file_dir helper: max {max_depth} subdirectories. "
+            f"Current depth: {cur_depth}."
+        )
+        combo.setToolTip(f"{base_tooltip}\n\n{helper}" if base_tooltip else helper)
+
     def _populate_dynamic_combo_choices(self, combo, choices, *, current_text=None):
         if current_text is None:
             current_text = combo.currentText()
@@ -648,6 +726,18 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
 
         v = value if is_value_set else default_value
         s_value = "" if v == inspect.Parameter.empty else print_value(v)
+        is_required_param = (
+            default_value == inspect.Parameter.empty
+            and not is_var_positional
+            and not is_var_keyword
+        )
+
+        def _emit_modified_deferred():
+            def _emit():
+                if self._enable_signal_cell_modified:
+                    self.signal_cell_modified.emit()
+
+            QtCore.QTimer.singleShot(0, _emit)
 
         # Set checkable item in column 1
         check_item = QTableWidgetItem()
@@ -820,8 +910,15 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             combo.setInsertPolicy(QComboBox.NoInsert)
             combo.setEnabled(True)
             combo.setToolTip(description)
+            combo.setProperty("dc_base_tooltip", description)
             if not is_value_set:
-                combo.setStyleSheet("color: #777;")
+                self._set_file_dir_combo_validation(
+                    combo,
+                    is_valid=True,
+                    is_implicit_default=True,
+                    value="",
+                    fallback_tooltip=description,
+                )
 
             cur_text = ""
             if is_value_set and (value != inspect.Parameter.empty):
@@ -837,6 +934,15 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             self._file_dir_combos.add(combo)
 
             def _on_popup_open():
+                txt = str(combo.currentText() or "")
+                is_valid = self._is_valid_file_dir_value(txt) if txt.strip() else True
+                self._set_file_dir_combo_validation(
+                    combo,
+                    is_valid=is_valid,
+                    is_implicit_default=False,
+                    value=txt,
+                    fallback_tooltip=description,
+                )
                 self._request_file_dir_choices(force=True)
 
             def _on_combo_change(*_args, _row=row, _combo=combo):
@@ -849,25 +955,48 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                         self._params[p_index]["value"] = inspect.Parameter.empty
                         self._params[p_index]["is_value_set"] = False
                         self._params[p_index]["is_user_modified"] = True
-                        _combo.setStyleSheet("color: #777;")
-                        self.signal_cell_modified.emit()
+                        self._set_file_dir_combo_validation(
+                            _combo,
+                            is_valid=True,
+                            is_implicit_default=True,
+                            value=txt,
+                            fallback_tooltip=description,
+                        )
+                        _emit_modified_deferred()
                         return
                     # Keep directory tokens as plain strings (do not literal-eval).
                     val = str(txt)
                     self._params[p_index]["value"] = val
                     self._params[p_index]["is_value_set"] = True
                     self._params[p_index]["is_user_modified"] = True
-                    _combo.setStyleSheet("")
-                    self.signal_cell_modified.emit()
+                    self._set_file_dir_combo_validation(
+                        _combo,
+                        is_valid=self._is_valid_file_dir_value(val),
+                        is_implicit_default=False,
+                        value=val,
+                        fallback_tooltip=description,
+                    )
+                    _emit_modified_deferred()
                 except Exception:
                     pass
 
-            def _on_combo_commit(*_args, _combo=combo):
-                _on_combo_change()
+            def _finalize_combo_commit(*_args, _combo=combo):
+                try:
+                    _combo.hidePopup()
+                except Exception:
+                    pass
+                try:
+                    view = _combo.view()
+                    if view is not None:
+                        view.clearSelection()
+                except Exception:
+                    pass
                 le = _combo.lineEdit()
                 if le is not None:
                     try:
                         le.deselect()
+                        le.setSelection(0, 0)
+                        le.setCursorPosition(len(str(le.text() or "")))
                         le.clearFocus()
                     except Exception:
                         pass
@@ -877,9 +1006,21 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                 except Exception:
                     pass
 
+            def _on_combo_commit(*_args, _combo=combo):
+                _on_combo_change()
+                _finalize_combo_commit(_combo=_combo)
+
             combo.signal_popup_about_to_show.connect(_on_popup_open)
             combo.currentIndexChanged.connect(lambda *_: self._set_dynamic_combo_edit_state(combo))
             combo.currentIndexChanged.connect(_on_combo_change)
+            # "activated" fires when user confirms an item from popup (including Enter).
+            combo.activated.connect(_finalize_combo_commit)
+            # Ensure Enter commits even when popup is closed and focus is on combo.
+            _commit_shortcut_return = QShortcut(QtGui.QKeySequence("Return"), combo)
+            _commit_shortcut_enter = QShortcut(QtGui.QKeySequence("Enter"), combo)
+            _commit_shortcut_return.activated.connect(_on_combo_commit)
+            _commit_shortcut_enter.activated.connect(_on_combo_commit)
+            combo._dc_commit_shortcuts = (_commit_shortcut_return, _commit_shortcut_enter)
             if combo.lineEdit() is not None:
                 combo.lineEdit().editingFinished.connect(_on_combo_change)
                 combo.lineEdit().returnPressed.connect(_on_combo_commit)
@@ -898,7 +1039,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             combo.setEnabled(True)
             combo.setToolTip(description)
             if not is_value_set:
-                combo.setStyleSheet("color: #777;")
+                self._set_combo_implicit_style(combo, True)
 
             def _on_bool_change(*_args, _row=row, _combo=combo):
                 try:
@@ -910,16 +1051,18 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                     self._params[p_index]["value"] = val
                     self._params[p_index]["is_value_set"] = True
                     self._params[p_index]["is_user_modified"] = True
-                    _combo.setStyleSheet("")
-                    self.signal_cell_modified.emit()
+                    self._set_combo_implicit_style(_combo, False)
+                    _emit_modified_deferred()
                 except Exception:
                     pass
 
             combo.currentIndexChanged.connect(_on_bool_change)
             self.setCellWidget(row, 2, combo)
         elif choices:
-            combo = QComboBox()
-            combo.setEditable(True)
+            combo = _DynamicChoicesComboBox()
+            # Keep an explicit empty first option that supports custom typing.
+            allow_custom_entry = True
+            combo.setEditable(allow_custom_entry)
             combo.setInsertPolicy(QComboBox.NoInsert)
             combo.addItem("")
             combo.addItems(choices)
@@ -932,13 +1075,23 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                 if _le is None:
                     return
                 _le.setReadOnly(idx != _custom_index)
+
+            def _on_combo_popup_open(_combo=combo):
+                # Start implicit/default values in gray, but switch to normal style
+                # as soon as the user opens the menu.
+                self._set_combo_implicit_style(_combo, False)
+
             cur_text = None
             if is_value_set and (value != inspect.Parameter.empty):
                 cur_text = str(value)
             elif default_value != inspect.Parameter.empty:
                 cur_text = str(default_value)
-            if cur_text is not None and cur_text in choices:
+            has_cur_text = cur_text is not None and bool(str(cur_text).strip())
+            if has_cur_text and cur_text in choices:
                 combo.setCurrentIndex(choices.index(cur_text) + 1)
+            elif is_required_param and choices:
+                # Required dropdowns should start with a valid value, not blank/red.
+                combo.setCurrentIndex(1)
             else:
                 combo.setCurrentIndex(custom_index)
                 if le is not None:
@@ -950,7 +1103,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             combo.setEnabled(True)
             combo.setToolTip(description)
             if not is_value_set:
-                combo.setStyleSheet("color: #777;")
+                self._set_combo_implicit_style(combo, True)
 
             def _on_combo_change(*_args, _row=row, _combo=combo):
                 try:
@@ -963,8 +1116,8 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                         self._params[p_index]["value"] = inspect.Parameter.empty
                         self._params[p_index]["is_value_set"] = False
                         self._params[p_index]["is_user_modified"] = True
-                        _combo.setStyleSheet("color: #777;")
-                        self.signal_cell_modified.emit()
+                        self._set_combo_implicit_style(_combo, True)
+                        _emit_modified_deferred()
                         return
                     try:
                         val = ast.literal_eval(txt)
@@ -973,16 +1126,17 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                     self._params[p_index]["value"] = val
                     self._params[p_index]["is_value_set"] = True
                     self._params[p_index]["is_user_modified"] = True
-                    _combo.setStyleSheet("")
-                    self.signal_cell_modified.emit()
+                    self._set_combo_implicit_style(_combo, False)
+                    _emit_modified_deferred()
                 except Exception:
                     pass
 
-            combo.currentIndexChanged.connect(_toggle_custom_edit)
+            combo.signal_popup_about_to_show.connect(_on_combo_popup_open)
             combo.currentIndexChanged.connect(_on_combo_change)
+            combo.currentIndexChanged.connect(_toggle_custom_edit)
             if combo.lineEdit() is not None:
                 combo.lineEdit().editingFinished.connect(_on_combo_change)
-            _toggle_custom_edit(combo.currentIndex())
+                _toggle_custom_edit(combo.currentIndex())
             self.setCellWidget(row, 2, combo)
         else:
             # No explicit choices provided by the decorator/model — render
@@ -1023,6 +1177,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                         try:
                             if isinstance(widget, QComboBox):
                                 txt = widget.currentText()
+                                is_file_dir = self._is_file_dir_param(p.get("name", ""))
                                 if not str(txt).strip():
                                     # Empty entry is invalid for required params
                                     is_required = (
@@ -1033,18 +1188,38 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                                     if is_required:
                                         cell_valid = False
                                         data_valid = False
-                                        widget.setStyleSheet("color: #b00020;")
+                                        self._set_combo_invalid_style(widget)
                                     else:
                                         cell_valid = True
-                                        widget.setStyleSheet("color: #777;")
+                                        self._set_combo_implicit_style(widget, True)
                                     # Do not override value when empty
                                     continue
-                                try:
-                                    p["value"] = ast.literal_eval(txt)
-                                except Exception:
-                                    p["value"] = txt
-                                cell_valid = True
-                                widget.setStyleSheet("")
+                                if is_file_dir:
+                                    p["value"] = str(txt)
+                                    if self._is_valid_file_dir_value(txt):
+                                        cell_valid = True
+                                        self._set_file_dir_combo_validation(
+                                            widget,
+                                            is_valid=True,
+                                            is_implicit_default=False,
+                                            value=txt,
+                                        )
+                                    else:
+                                        cell_valid = False
+                                        data_valid = False
+                                        self._set_file_dir_combo_validation(
+                                            widget,
+                                            is_valid=False,
+                                            is_implicit_default=False,
+                                            value=txt,
+                                        )
+                                else:
+                                    try:
+                                        p["value"] = ast.literal_eval(txt)
+                                    except Exception:
+                                        p["value"] = txt
+                                    cell_valid = True
+                                    self._set_combo_implicit_style(widget, False)
                             else:
                                 cell_valid = True
                         except Exception:
