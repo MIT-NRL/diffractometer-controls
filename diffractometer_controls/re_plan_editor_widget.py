@@ -1,16 +1,50 @@
 import ast
 import inspect
+import json
+import logging
+import os
+import re
+import threading
+import time
+import weakref
+from datetime import datetime
+from pathlib import Path
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy.QtWidgets import QComboBox, QTableWidgetItem
 
 import bluesky_widgets.qt.run_engine_client as rec
 
+try:
+    from bluesky_queueserver_api import BFunc
+    from bluesky_queueserver_api.zmq import REManagerAPI
+except Exception:
+    BFunc = None
+    REManagerAPI = None
+try:
+    import zmq
+except Exception:
+    zmq = None
+
+_LOG = logging.getLogger(__name__)
+
+
+class _DynamicChoicesComboBox(QComboBox):
+    """ComboBox that emits a signal before opening the popup list."""
+
+    signal_popup_about_to_show = QtCore.Signal()
+
+    def showPopup(self):
+        self.signal_popup_about_to_show.emit()
+        super().showPopup()
+
 
 class RePlanEditorTable(rec._QtRePlanEditorTable):
     """Table subclass that renders dropdowns for parameters when the
     plan metadata exposes choices via 'values' or 'devices'.
     """
+
+    signal_file_dir_choices_ready = QtCore.Signal(object, object)
 
     def __init__(self, model, parent=None, *, editable=False, detailed=True):
         super().__init__(model, parent, editable=editable, detailed=detailed)
@@ -23,6 +57,31 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         # Cache parameter metadata for the currently displayed item.
         self._cached_item_params_key = None
         self._cached_item_params = {}
+        # Dynamic worker-side choices for `file_dir` parameters.
+        self._file_dir_combos = weakref.WeakSet()
+        self._file_dir_cached_choices = []
+        self._file_dir_cache_ts = 0.0
+        ttl_env = str(os.environ.get("MITR_FILE_DIR_CACHE_TTL_S", "2")).strip()
+        try:
+            self._file_dir_cache_ttl_s = max(2.0, float(ttl_env))
+        except Exception:
+            self._file_dir_cache_ttl_s = 2.0
+        self._file_dir_api = None
+        mode = str(os.environ.get("MITR_FILE_DIR_QUERY_MODE", "stream")).strip().lower()
+        self._file_dir_query_mode = mode if mode in ("local", "worker", "stream") else "stream"
+        self._file_dir_stream_addr = str(os.environ.get("MITR_FILE_DIR_STREAM_ADDR", "")).strip()
+        self._file_dir_stream_topic = str(
+            os.environ.get("MITR_FILE_DIR_STREAM_TOPIC", "file_dir_choices")
+        ).strip() or "file_dir_choices"
+        self._file_dir_stream_stop = threading.Event()
+        self._file_dir_stream_thread = None
+        self.signal_file_dir_choices_ready.connect(self._on_file_dir_choices_ready)
+        self._file_dir_request_event = threading.Event()
+        self._file_dir_query_thread = None
+        if self._file_dir_query_mode == "stream":
+            self._start_file_dir_stream_subscriber()
+        else:
+            self._ensure_file_dir_query_thread()
 
     def _current_item_key(self):
         if not self._queue_item:
@@ -56,6 +115,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
     def show_item(self, *, item, editable=None):
         self._cached_item_params_key = None
         self._cached_item_params = {}
+        self._file_dir_combos = weakref.WeakSet()
         super().show_item(item=item, editable=editable)
 
     def _param_index_from_row(self, row):
@@ -100,6 +160,460 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         if isinstance(params, dict):
             return params.get(p_name, {}) or {}
         return {}
+
+    @staticmethod
+    def _is_file_dir_param(p_name):
+        return str(p_name).strip().lower() == "file_dir"
+
+    @staticmethod
+    def _extract_file_dir_choices(payload):
+        """Best-effort parser for Queue Server function_execute responses."""
+
+        def _as_choices(value):
+            if value is None:
+                return []
+            if isinstance(value, (list, tuple, set)):
+                out = []
+                seen = set()
+                for item in value:
+                    s = str(item).strip()
+                    if not s or s in seen:
+                        continue
+                    seen.add(s)
+                    out.append(s)
+                return out
+            if isinstance(value, dict):
+                for key in ("directories", "file_dirs", "dirs", "choices", "items"):
+                    out = _as_choices(value.get(key))
+                    if out:
+                        return out
+                for key in ("return_value", "result", "data", "payload"):
+                    out = _as_choices(value.get(key))
+                    if out:
+                        return out
+            return []
+
+        return _as_choices(payload)
+
+    def _get_re_manager_api(self):
+        app = QtCore.QCoreApplication.instance()
+        return getattr(app, "re_manager_api", None)
+
+    def _get_file_dir_api(self):
+        # Isolate file-dir requests from the shared API object used by other
+        # bluesky_widgets components to avoid connection churn/reloads.
+        if self._file_dir_api is not None:
+            return self._file_dir_api
+
+        shared_api = self._get_re_manager_api()
+        if shared_api is None:
+            return None
+        if REManagerAPI is None:
+            return shared_api
+
+        control_addr = getattr(shared_api, "_zmq_control_addr", None)
+        info_addr = getattr(shared_api, "_zmq_info_addr", None)
+        if not control_addr or not info_addr:
+            return shared_api
+
+        try:
+            self._file_dir_api = REManagerAPI(
+                zmq_control_addr=str(control_addr),
+                zmq_info_addr=str(info_addr),
+            )
+        except Exception:
+            self._file_dir_api = shared_api
+        return self._file_dir_api
+
+    def _default_file_dir_stream_addr(self):
+        if self._file_dir_stream_addr:
+            return self._file_dir_stream_addr
+        api = self._get_re_manager_api()
+        if api is None:
+            return "tcp://localhost:5569"
+        control_addr = str(getattr(api, "_zmq_control_addr", "") or "").strip()
+        m = re.match(r"^tcp://([^:]+):\d+$", control_addr)
+        host = m.group(1) if m else "localhost"
+        if host in ("*", "0.0.0.0", "::"):
+            host = "localhost"
+        return f"tcp://{host}:5569"
+
+    def _start_file_dir_stream_subscriber(self):
+        if self._file_dir_stream_thread is not None:
+            return
+        if zmq is None:
+            _LOG.warning("file_dir stream mode requested, but pyzmq is unavailable")
+            self._file_dir_query_mode = "worker"
+            self._ensure_file_dir_query_thread()
+            return
+
+        addr = self._default_file_dir_stream_addr()
+        topic_b = self._file_dir_stream_topic.encode("utf-8", errors="ignore")
+
+        def _stream_loop():
+            ctx = None
+            sock = None
+            try:
+                ctx = zmq.Context.instance()
+                sock = ctx.socket(zmq.SUB)
+                sock.setsockopt(zmq.LINGER, 0)
+                sock.setsockopt(zmq.RCVHWM, 10)
+                sock.setsockopt(zmq.SUBSCRIBE, topic_b)
+                sock.connect(addr)
+                poller = zmq.Poller()
+                poller.register(sock, zmq.POLLIN)
+                while not self._file_dir_stream_stop.is_set():
+                    events = dict(poller.poll(500))
+                    if sock not in events:
+                        continue
+                    try:
+                        parts = sock.recv_multipart(flags=zmq.NOBLOCK)
+                    except Exception:
+                        continue
+                    payload = None
+                    try:
+                        if len(parts) >= 2:
+                            payload = json.loads(parts[-1].decode("utf-8", errors="ignore"))
+                        elif len(parts) == 1:
+                            payload = json.loads(parts[0].decode("utf-8", errors="ignore"))
+                    except Exception:
+                        payload = None
+                    if payload is None:
+                        continue
+                    choices = self._extract_file_dir_choices(payload)
+                    if choices:
+                        self.signal_file_dir_choices_ready.emit(choices, None)
+            except Exception as ex:
+                _LOG.warning("file_dir stream subscriber stopped: %s", ex)
+            finally:
+                try:
+                    if sock is not None:
+                        sock.close(0)
+                except Exception:
+                    pass
+
+        self._file_dir_stream_thread = threading.Thread(
+            target=_stream_loop, name="file-dir-stream-subscriber", daemon=True
+        )
+        self._file_dir_stream_thread.start()
+
+    @staticmethod
+    def _build_list_file_dirs_item():
+        kwargs = {"max_depth": 1, "max_items": 512}
+        if BFunc is not None:
+            return BFunc("list_imaging_file_dirs", **kwargs)
+        return {
+            "item_type": "function",
+            "name": "list_imaging_file_dirs",
+            "args": [],
+            "kwargs": kwargs,
+        }
+
+    @staticmethod
+    def _call_function_execute(api, item):
+        variants = (
+            {"run_in_background": False, "user": "plan_editor", "user_group": "primary"},
+            {"run_in_background": False},
+            {"user": "plan_editor", "user_group": "primary"},
+            {},
+        )
+        last_ex = None
+        for kwargs in variants:
+            try:
+                return api.function_execute(item, **kwargs)
+            except Exception as ex:
+                last_ex = ex
+                continue
+        if last_ex is not None:
+            raise last_ex
+        return api.function_execute(item)
+
+    @staticmethod
+    def _extract_task_uid(payload):
+        if not isinstance(payload, dict):
+            return None
+
+        candidates = (
+            payload.get("task_uid", None),
+            payload.get("uid", None),
+        )
+        for uid in candidates:
+            s = str(uid or "").strip()
+            if s:
+                return s
+
+        for key in ("result", "return_value", "payload", "data", "item"):
+            nested = payload.get(key, None)
+            if isinstance(nested, dict):
+                uid = RePlanEditorTable._extract_task_uid(nested)
+                if uid:
+                    return uid
+        return None
+
+    @staticmethod
+    def _extract_function_execute_error(payload):
+        if not isinstance(payload, dict):
+            return None
+
+        success = payload.get("success", None)
+        if success is False:
+            for key in ("msg", "message", "error", "err_msg"):
+                txt = payload.get(key, None)
+                if txt:
+                    return str(txt)
+            return "Function execution failed."
+
+        status = str(payload.get("status", "")).strip().lower()
+        if status in ("failed", "error", "rejected"):
+            for key in ("msg", "message", "error", "err_msg"):
+                txt = payload.get(key, None)
+                if txt:
+                    return str(txt)
+            return f"Function task {status}."
+
+        for key in ("result", "return_value", "payload", "data"):
+            nested = payload.get(key, None)
+            if isinstance(nested, dict):
+                err = RePlanEditorTable._extract_function_execute_error(nested)
+                if err:
+                    return err
+        return None
+
+    @staticmethod
+    def _is_pending_task_state(status):
+        s = str(status or "").strip().lower()
+        return s in ("created", "queued", "submitted", "running", "in_progress", "pending")
+
+    @staticmethod
+    def _is_pending_task_error(message, *, status=None):
+        if RePlanEditorTable._is_pending_task_state(status):
+            return True
+        m = str(message or "").strip().lower()
+        if not m:
+            return False
+        pending_markers = (
+            "not completed",
+            "still running",
+            "in progress",
+            "is running",
+            "pending",
+            "queued",
+            "not available yet",
+        )
+        return any(marker in m for marker in pending_markers)
+
+    @staticmethod
+    def _fallback_local_file_dirs(max_items=256, max_depth=3):
+        now = datetime.now()
+        roots = []
+        env_roots = str(os.environ.get("MITR_IMAGING_DATA_ROOTS", "")).strip()
+        if env_roots:
+            for part in env_roots.split(os.pathsep):
+                part = str(part).strip()
+                if not part:
+                    continue
+                roots.append(Path(now.strftime(part)).expanduser())
+        env_root = str(os.environ.get("MITR_IMAGING_DATA_ROOT", "")).strip()
+        if env_root:
+            roots.append(Path(now.strftime(env_root)).expanduser())
+        roots.append(Path(now.strftime("/home/mitr_4dh4/Data/%Y")).expanduser())
+        roots.append(Path(now.strftime("~/Data/%Y")).expanduser())
+
+        dedup_roots = []
+        seen_roots = set()
+        for root in roots:
+            s = str(root)
+            if s in seen_roots:
+                continue
+            seen_roots.add(s)
+            dedup_roots.append(root)
+
+        names = set()
+        for root in dedup_roots:
+            try:
+                if not root.exists() or (not root.is_dir()):
+                    continue
+            except Exception:
+                continue
+            stack = [(Path(root), 0, "")]
+            while stack:
+                cur_path, depth, rel_prefix = stack.pop()
+                if depth >= int(max_depth):
+                    continue
+                try:
+                    with os.scandir(cur_path) as entries:
+                        children = []
+                        for entry in entries:
+                            try:
+                                if not entry.is_dir(follow_symlinks=False):
+                                    continue
+                                name = str(entry.name).strip()
+                                if (not name) or name.startswith("."):
+                                    continue
+                                rel_path = f"{rel_prefix}/{name}" if rel_prefix else name
+                                names.add(rel_path)
+                                children.append((Path(cur_path) / name, depth + 1, rel_path))
+                            except Exception:
+                                continue
+                except Exception:
+                    continue
+                for child in sorted(children, key=lambda x: x[2], reverse=True):
+                    stack.append(child)
+        return sorted(names, key=str.lower)[: int(max_items)]
+
+    def _query_worker_file_dirs(self):
+        api = self._get_file_dir_api()
+        item = self._build_list_file_dirs_item()
+        if api is None:
+            return self._fallback_local_file_dirs()
+        response = self._call_function_execute(api, item)
+        err = self._extract_function_execute_error(response)
+        if err:
+            raise RuntimeError(err)
+        choices = self._extract_file_dir_choices(response)
+        if choices:
+            return choices
+
+        # Compatibility: some servers still return task UID even when
+        # run_in_background=False; poll briefly for completion.
+        task_uid = self._extract_task_uid(response)
+        if task_uid and hasattr(api, "task_result"):
+            deadline = time.monotonic() + 1.5
+            while time.monotonic() < deadline:
+                task = None
+                for kwargs in (
+                    {"task_uid": task_uid, "user": "plan_editor", "user_group": "primary"},
+                    {"task_uid": task_uid},
+                ):
+                    try:
+                        task = api.task_result(**kwargs)
+                        break
+                    except Exception:
+                        continue
+                if task is None:
+                    try:
+                        task = api.task_result(task_uid)
+                    except Exception:
+                        break
+                status = str((task or {}).get("status", "")).strip().lower() if isinstance(task, dict) else ""
+                if self._is_pending_task_state(status):
+                    time.sleep(0.05)
+                    continue
+                err = self._extract_function_execute_error(task)
+                if err and (not self._is_pending_task_error(err, status=status)):
+                    raise RuntimeError(err)
+                choices = self._extract_file_dir_choices(task)
+                if choices:
+                    return choices
+                time.sleep(0.05)
+
+        # Queue Server is reachable but returned no choices.
+        return []
+
+    def _query_file_dirs(self):
+        # Local mode may be enabled explicitly with MITR_FILE_DIR_QUERY_MODE=local.
+        if self._file_dir_query_mode == "local":
+            return self._fallback_local_file_dirs(max_items=512, max_depth=1)
+        if self._file_dir_query_mode == "stream":
+            return []
+        return self._query_worker_file_dirs()
+
+    def _ensure_file_dir_query_thread(self):
+        if self._file_dir_query_thread is not None:
+            return
+        self._file_dir_query_thread = threading.Thread(
+            target=self._file_dir_query_loop, name="file-dir-query-thread", daemon=True
+        )
+        self._file_dir_query_thread.start()
+
+    def _file_dir_query_loop(self):
+        while True:
+            self._file_dir_request_event.wait()
+            self._file_dir_request_event.clear()
+
+            err = None
+            choices = []
+            try:
+                choices = self._query_file_dirs()
+            except Exception as ex:
+                err = str(ex)
+            self.signal_file_dir_choices_ready.emit(choices, err)
+
+    def _request_file_dir_choices(self, *, force=False):
+        if self._file_dir_query_mode == "stream":
+            self._start_file_dir_stream_subscriber()
+            if self._file_dir_cached_choices:
+                self._apply_file_dir_choices_to_combos(self._file_dir_cached_choices)
+            return
+        if not force and self._file_dir_cached_choices:
+            age = time.monotonic() - float(self._file_dir_cache_ts)
+            if age < self._file_dir_cache_ttl_s:
+                self._apply_file_dir_choices_to_combos(self._file_dir_cached_choices)
+                return
+        self._ensure_file_dir_query_thread()
+        self._file_dir_request_event.set()
+
+    def _on_file_dir_choices_ready(self, choices, error):
+        if error and (not choices):
+            _LOG.warning("file_dir choices update failed: %s", str(error))
+            return
+        if not isinstance(choices, list):
+            return
+        if not choices:
+            return
+        self._file_dir_cached_choices = list(choices)
+        self._file_dir_cache_ts = time.monotonic()
+        self._apply_file_dir_choices_to_combos(self._file_dir_cached_choices)
+
+    @staticmethod
+    def _set_dynamic_combo_edit_state(combo):
+        line_edit = combo.lineEdit()
+        if line_edit is None:
+            return
+        # Keep `file_dir` combos editable even after selecting a suggested value,
+        # so users can append subfolder paths.
+        line_edit.setReadOnly(False)
+        try:
+            txt = str(combo.currentText() or "")
+            line_edit.deselect()
+            line_edit.setCursorPosition(len(txt))
+        except Exception:
+            pass
+
+    def _populate_dynamic_combo_choices(self, combo, choices, *, current_text=None):
+        if current_text is None:
+            current_text = combo.currentText()
+        out = []
+        seen = set()
+        for ch in list(choices or []):
+            txt = str(ch).strip()
+            if (not txt) or (txt in seen):
+                continue
+            seen.add(txt)
+            out.append(txt)
+        blocker = QtCore.QSignalBlocker(combo)
+        try:
+            combo.clear()
+            combo.addItem("")
+            combo.addItems(out)
+            custom_index = 0
+            combo.setProperty("dc_custom_index", custom_index)
+            if str(current_text) in out:
+                combo.setCurrentIndex(out.index(str(current_text)) + 1)
+            else:
+                combo.setCurrentIndex(custom_index)
+                line_edit = combo.lineEdit()
+                if line_edit is not None:
+                    line_edit.setText(str(current_text or ""))
+        finally:
+            del blocker
+        self._set_dynamic_combo_edit_state(combo)
+
+    def _apply_file_dir_choices_to_combos(self, choices):
+        for combo in list(self._file_dir_combos):
+            if combo is None:
+                continue
+            self._populate_dynamic_combo_choices(combo, choices, current_text=combo.currentText())
 
     def _show_row_value(self, *, row):
         # Based on original implementation but uses metadata from the model
@@ -292,7 +806,78 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                 else:
                     choices = None
 
-        if _is_bool_param():
+        if self._is_file_dir_param(p_name):
+            combo = _DynamicChoicesComboBox()
+            combo.setEditable(True)
+            combo.setInsertPolicy(QComboBox.NoInsert)
+            combo.setEnabled(True)
+            combo.setToolTip(description)
+            if not is_value_set:
+                combo.setStyleSheet("color: #777;")
+
+            cur_text = ""
+            if is_value_set and (value != inspect.Parameter.empty):
+                cur_text = str(value)
+            elif default_value != inspect.Parameter.empty:
+                cur_text = str(default_value)
+
+            initial_choices = []
+            if isinstance(choices, list):
+                initial_choices.extend(choices)
+            initial_choices.extend(self._file_dir_cached_choices)
+            self._populate_dynamic_combo_choices(combo, initial_choices, current_text=cur_text)
+            self._file_dir_combos.add(combo)
+
+            def _on_popup_open():
+                self._request_file_dir_choices(force=True)
+
+            def _on_combo_change(*_args, _row=row, _combo=combo):
+                try:
+                    p_index = self._param_index_from_row(_row)
+                    if p_index is None:
+                        return
+                    txt = _combo.currentText()
+                    if not str(txt).strip():
+                        self._params[p_index]["value"] = inspect.Parameter.empty
+                        self._params[p_index]["is_value_set"] = False
+                        self._params[p_index]["is_user_modified"] = True
+                        _combo.setStyleSheet("color: #777;")
+                        self.signal_cell_modified.emit()
+                        return
+                    # Keep directory tokens as plain strings (do not literal-eval).
+                    val = str(txt)
+                    self._params[p_index]["value"] = val
+                    self._params[p_index]["is_value_set"] = True
+                    self._params[p_index]["is_user_modified"] = True
+                    _combo.setStyleSheet("")
+                    self.signal_cell_modified.emit()
+                except Exception:
+                    pass
+
+            def _on_combo_commit(*_args, _combo=combo):
+                _on_combo_change()
+                le = _combo.lineEdit()
+                if le is not None:
+                    try:
+                        le.deselect()
+                        le.clearFocus()
+                    except Exception:
+                        pass
+                try:
+                    _combo.clearFocus()
+                    self.setFocus(QtCore.Qt.OtherFocusReason)
+                except Exception:
+                    pass
+
+            combo.signal_popup_about_to_show.connect(_on_popup_open)
+            combo.currentIndexChanged.connect(lambda *_: self._set_dynamic_combo_edit_state(combo))
+            combo.currentIndexChanged.connect(_on_combo_change)
+            if combo.lineEdit() is not None:
+                combo.lineEdit().editingFinished.connect(_on_combo_change)
+                combo.lineEdit().returnPressed.connect(_on_combo_commit)
+            self.setCellWidget(row, 2, combo)
+            self._request_file_dir_choices(force=(not bool(self._file_dir_cached_choices)))
+        elif _is_bool_param():
             combo = QComboBox()
             combo.addItems(["False", "True"])
             cur_bool = None
@@ -326,11 +911,11 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             self.setCellWidget(row, 2, combo)
         elif choices:
             combo = QComboBox()
-            combo.addItems(choices)
             combo.setEditable(True)
             combo.setInsertPolicy(QComboBox.NoInsert)
             combo.addItem("")
-            custom_index = combo.count() - 1
+            combo.addItems(choices)
+            custom_index = 0
             le = combo.lineEdit()
             if le is not None:
                 le.setReadOnly(True)
@@ -345,9 +930,11 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             elif default_value != inspect.Parameter.empty:
                 cur_text = str(default_value)
             if cur_text is not None and cur_text in choices:
-                combo.setCurrentIndex(choices.index(cur_text))
+                combo.setCurrentIndex(choices.index(cur_text) + 1)
             else:
                 combo.setCurrentIndex(custom_index)
+                if le is not None:
+                    le.setText("" if cur_text is None else str(cur_text))
             # Allow selection even when the parameter value is not yet set
             # so users can choose from the dropdown instead of typing.
             # Allow selection from the dropdown whenever choices exist so
