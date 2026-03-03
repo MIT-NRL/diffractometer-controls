@@ -2,6 +2,7 @@ import json
 import os
 import threading
 import time
+import atexit
 from datetime import datetime
 from pathlib import Path
 
@@ -15,11 +16,14 @@ _FILE_DIR_CACHE = {
 _FILE_DIR_STREAM_STATE = {
     "started": False,
     "thread": None,
+    "stop": threading.Event(),
+    "observer": None,
 }
 
 _FILE_DIR_MONITOR = {
     "last_non_stream_print_ts": 0.0,
     "stream_skip_busy_ts": 0.0,
+    "stream_skip_busy_active": False,
     "non_stream_busy_ts": 0.0,
     "slow_scan_ts": 0.0,
 }
@@ -165,20 +169,22 @@ def list_imaging_file_dirs(
     # By default, avoid expensive forced rescans from the stream thread while
     # RE is actively executing a plan. Publish last known cache instead.
     skip_stream_scan_when_re_busy = str(
-        os.environ.get("MITR_FILE_DIR_SKIP_STREAM_SCAN_WHEN_RE_BUSY", "1")
+        os.environ.get("MITR_FILE_DIR_SKIP_STREAM_SCAN_WHEN_RE_BUSY", "0")
     ).strip().lower() not in ("0", "false", "off", "no")
-    if (
+    blocked_for_active_run = (
         skip_stream_scan_when_re_busy
         and re_busy
         and (cur_thread_name == "file-dir-choices-stream")
         and bool(force_refresh)
-    ):
-        _rate_limited_print(
-            "stream_skip_busy_ts",
-            "[file_dir_choices] stream scan skipped while RE is active "
-            f"(state='{re_state}'); publishing cached directories only",
-            min_interval_s=2.0,
-        )
+    )
+    was_blocked = bool(_FILE_DIR_MONITOR.get("stream_skip_busy_active", False))
+    if blocked_for_active_run:
+        if not was_blocked:
+            _FILE_DIR_MONITOR["stream_skip_busy_active"] = True
+            print(
+                "[file_dir_choices] stream scan skipped while RE is active "
+                f"(state='{re_state}'); publishing cached directories only"
+            )
         return {
             "ok": True,
             "directories": list(_FILE_DIR_CACHE["directories"]),
@@ -187,6 +193,8 @@ def list_imaging_file_dirs(
             "skipped_for_active_run": True,
             "re_state": re_state,
         }
+    if was_blocked:
+        _FILE_DIR_MONITOR["stream_skip_busy_active"] = False
 
     if (not force_refresh) and (now_mono - float(_FILE_DIR_CACHE["ts"]) < 2.0):
         return {
@@ -267,7 +275,7 @@ def list_imaging_file_dirs(
 def _start_file_dir_choices_stream():
     """Publish file-dir choices on a dedicated ZMQ PUB stream.
 
-    This decouples frequent directory updates from RE Manager RPC traffic.
+    Supports event-driven publish with watchdog and polling fallback.
     """
     if _FILE_DIR_STREAM_STATE["started"]:
         return
@@ -288,6 +296,14 @@ def _start_file_dir_choices_stream():
     if not topic:
         topic = "file_dir_choices"
 
+    stream_mode = str(os.environ.get("MITR_FILE_DIR_STREAM_MODE", "watchdog")).strip().lower()
+    if stream_mode in ("watch", "watchdog", "event", "events"):
+        stream_mode = "watchdog"
+    elif stream_mode in ("poll", "polling"):
+        stream_mode = "poll"
+    else:
+        stream_mode = "watchdog"
+
     try:
         interval_s = float(os.environ.get("MITR_FILE_DIR_STREAM_INTERVAL_S", "2.0"))
     except Exception:
@@ -301,51 +317,400 @@ def _start_file_dir_choices_stream():
     max_items = max(1, max_items)
 
     try:
-        max_depth = int(os.environ.get("MITR_FILE_DIR_STREAM_MAX_DEPTH", "1"))
+        max_depth = int(os.environ.get("MITR_FILE_DIR_STREAM_MAX_DEPTH", "3"))
     except Exception:
-        max_depth = 1
+        max_depth = 3
     max_depth = max(1, min(max_depth, 3))
+
+    try:
+        debounce_s = float(os.environ.get("MITR_FILE_DIR_STREAM_EVENT_DEBOUNCE_S", "0.25"))
+    except Exception:
+        debounce_s = 0.25
+    debounce_s = max(0.05, debounce_s)
+
+    try:
+        heartbeat_s = float(os.environ.get("MITR_FILE_DIR_STREAM_HEARTBEAT_S", "60.0"))
+    except Exception:
+        heartbeat_s = 60.0
+    heartbeat_s = max(5.0, heartbeat_s)
+
+    try:
+        full_rescan_s = float(os.environ.get("MITR_FILE_DIR_STREAM_FULL_RESCAN_S", "600.0"))
+    except Exception:
+        full_rescan_s = 600.0
+    full_rescan_s = max(30.0, full_rescan_s)
+    debug_watchdog = str(os.environ.get("MITR_FILE_DIR_WATCHDOG_DEBUG", "0")).strip().lower() not in (
+        "0",
+        "false",
+        "off",
+        "no",
+    )
+
+    stop_event = _FILE_DIR_STREAM_STATE["stop"]
+    stop_event.clear()
 
     topic_b = topic.encode("utf-8", errors="ignore")
 
     def _pub_loop():
         ctx = None
         sock = None
+        observer = None
         try:
-            ctx = zmq.Context.instance()
+            # Dedicated context for this publisher thread avoids global-context
+            # teardown races on interpreter shutdown/restart.
+            ctx = zmq.Context()
             sock = ctx.socket(zmq.PUB)
             sock.setsockopt(zmq.LINGER, 0)
             sock.setsockopt(zmq.SNDHWM, 10)
             sock.bind(addr)
             print(
                 "[file_dir_choices] stream publisher started "
-                f"addr='{addr}' topic='{topic}' interval_s={interval_s:.3f} "
-                f"max_depth={max_depth} max_items={max_items}"
+                f"addr='{addr}' topic='{topic}' mode='{stream_mode}' "
+                f"interval_s={interval_s:.3f} max_depth={max_depth} max_items={max_items}"
             )
 
-            while True:
-                payload = list_imaging_file_dirs(
+            last_dirs_signature = None
+            last_publish_mono = 0.0
+
+            def _watchdog_log(msg):
+                if debug_watchdog:
+                    print(f"[file_dir_choices][watchdog] {msg}")
+
+            def _scan_payload():
+                return list_imaging_file_dirs(
                     max_items=max_items,
                     max_depth=max_depth,
                     include_hidden=False,
                     force_refresh=True,
                 )
+
+            def _publish_payload(payload, *, force=False):
+                nonlocal last_dirs_signature
+                nonlocal last_publish_mono
+                if not isinstance(payload, dict):
+                    return False
+                dirs = payload.get("directories", [])
+                try:
+                    dirs_sig = tuple(str(x) for x in list(dirs))
+                except Exception:
+                    dirs_sig = tuple()
+                if (not force) and (dirs_sig == last_dirs_signature):
+                    return False
+                payload = dict(payload)
                 payload["published_ts"] = float(time.time())
                 try:
                     data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
                     sock.send_multipart([topic_b, data], flags=zmq.NOBLOCK)
+                    last_dirs_signature = dirs_sig
+                    last_publish_mono = time.monotonic()
+                    _watchdog_log(
+                        "published update "
+                        f"dirs={len(dirs_sig)} force={bool(force)} cached={bool(payload.get('cached', False))}"
+                    )
+                    return True
                 except Exception:
-                    pass
-                time.sleep(interval_s)
+                    return False
+
+            def _publish_cached_heartbeat():
+                payload = {
+                    "ok": True,
+                    "directories": list(_FILE_DIR_CACHE.get("directories", [])),
+                    "roots": list(_FILE_DIR_CACHE.get("roots", [])),
+                    "cached": True,
+                    "heartbeat": True,
+                }
+                _publish_payload(payload, force=True)
+
+            if stream_mode == "watchdog":
+                try:
+                    from watchdog.events import FileSystemEventHandler
+                    from watchdog.observers import Observer
+                except Exception as ex:
+                    print(
+                        "[file_dir_choices] watchdog mode unavailable; "
+                        f"falling back to polling mode ({ex})"
+                    )
+                    mode_watchdog = False
+                else:
+                    mode_watchdog = True
+
+                if mode_watchdog:
+                    watch_state = {"dirty": True, "deadline": 0.0, "events": []}
+                    watched_paths = set()
+                    state_lock = threading.Lock()
+                    cache_dirs = set()
+                    cache_roots = []
+                    configured_roots = []
+
+                    class _DirEventHandler(FileSystemEventHandler):
+                        def on_any_event(self, event):
+                            try:
+                                is_dir = bool(getattr(event, "is_directory", False))
+                            except Exception:
+                                is_dir = False
+                            if not is_dir:
+                                return
+                            evt = str(getattr(event, "event_type", "")).strip().lower()
+                            if evt not in ("created", "moved", "deleted"):
+                                return
+                            src = str(getattr(event, "src_path", "") or "").strip()
+                            dest = str(getattr(event, "dest_path", "") or "").strip()
+                            if dest:
+                                _watchdog_log(f"event={evt} src='{src}' dest='{dest}'")
+                            else:
+                                _watchdog_log(f"event={evt} path='{src}'")
+                            with state_lock:
+                                watch_state["events"].append((evt, src, dest))
+                                watch_state["dirty"] = True
+                                watch_state["deadline"] = time.monotonic() + debounce_s
+
+                    def _refresh_configured_roots():
+                        nonlocal configured_roots
+                        roots = []
+                        for root in _resolve_imaging_roots():
+                            try:
+                                roots.append(str(Path(root).expanduser()))
+                            except Exception:
+                                continue
+                        configured_roots = roots
+
+                    def _schedule_watch_paths(obs):
+                        roots = _resolve_imaging_roots()
+                        for root in roots:
+                            try:
+                                root = Path(root).expanduser()
+                            except Exception:
+                                continue
+                            if root.exists() and root.is_dir():
+                                key = (str(root), True)
+                                if key not in watched_paths:
+                                    obs.schedule(handler, str(root), recursive=True)
+                                    watched_paths.add(key)
+                                    _watchdog_log(f"watch root='{root}' recursive=True")
+                            else:
+                                parent = root.parent
+                                if parent.exists() and parent.is_dir():
+                                    key = (str(parent), False)
+                                    if key not in watched_paths:
+                                        obs.schedule(handler, str(parent), recursive=False)
+                                        watched_paths.add(key)
+                                        _watchdog_log(f"watch parent='{parent}' recursive=False")
+
+                    def _rel_from_path(path):
+                        p = str(path or "").strip()
+                        if not p:
+                            return None
+                        p = str(Path(p))
+                        for root in configured_roots:
+                            root_s = str(root).rstrip("/")
+                            if p == root_s:
+                                return ""
+                            pref = root_s + "/"
+                            if p.startswith(pref):
+                                rel = p[len(pref) :].strip("/")
+                                if not rel:
+                                    return ""
+                                parts = [x for x in rel.split("/") if x]
+                                if len(parts) > int(max_depth):
+                                    return None
+                                if any(str(part).startswith(".") for part in parts):
+                                    return None
+                                return "/".join(parts)
+                        return None
+
+                    def _add_rel(rel):
+                        if not rel:
+                            return False
+                        if rel in cache_dirs:
+                            return False
+                        cache_dirs.add(rel)
+                        return True
+
+                    def _remove_rel_prefix(rel):
+                        if not rel:
+                            return False
+                        changed = False
+                        if rel in cache_dirs:
+                            cache_dirs.discard(rel)
+                            changed = True
+                        pref = rel + "/"
+                        to_drop = [x for x in cache_dirs if x.startswith(pref)]
+                        if to_drop:
+                            changed = True
+                            for x in to_drop:
+                                cache_dirs.discard(x)
+                        return changed
+
+                    def _add_tree_from_abs(path):
+                        rel = _rel_from_path(path)
+                        if rel is None:
+                            return False
+                        changed = False
+                        if rel:
+                            changed = _add_rel(rel) or changed
+                        # If path does not exist (race/delete), we can still keep the leaf rel.
+                        p = Path(path)
+                        if (not p.exists()) or (not p.is_dir()):
+                            return changed
+                        base_depth = 0 if not rel else len(rel.split("/"))
+                        if base_depth >= int(max_depth):
+                            return changed
+                        stack = [(p, base_depth, rel)]
+                        while stack:
+                            cur_path, depth, rel_prefix = stack.pop()
+                            if depth >= int(max_depth):
+                                continue
+                            try:
+                                with os.scandir(cur_path) as entries:
+                                    children = []
+                                    for entry in entries:
+                                        try:
+                                            if not entry.is_dir(follow_symlinks=False):
+                                                continue
+                                            name = str(entry.name).strip()
+                                            if (not name) or name.startswith("."):
+                                                continue
+                                            child_rel = f"{rel_prefix}/{name}" if rel_prefix else name
+                                            if _add_rel(child_rel):
+                                                changed = True
+                                            children.append((Path(entry.path), depth + 1, child_rel))
+                                        except Exception:
+                                            continue
+                            except Exception:
+                                continue
+                            for child in sorted(children, key=lambda x: x[2], reverse=True):
+                                stack.append(child)
+                        return changed
+
+                    def _cache_payload_from_set():
+                        dirs = sorted(cache_dirs, key=str.lower)[: int(max_items)]
+                        roots = list(cache_roots)
+                        _FILE_DIR_CACHE["ts"] = time.monotonic()
+                        _FILE_DIR_CACHE["directories"] = list(dirs)
+                        _FILE_DIR_CACHE["roots"] = list(roots)
+                        return {
+                            "ok": True,
+                            "directories": dirs,
+                            "roots": roots,
+                            "cached": True,
+                            "incremental": True,
+                        }
+
+                    def _apply_event(evt, src, dest):
+                        changed = False
+                        need_full_rescan = False
+                        if evt == "created":
+                            rel = _rel_from_path(src)
+                            if rel == "":
+                                need_full_rescan = True
+                            elif rel is not None:
+                                changed = _add_tree_from_abs(src) or changed
+                        elif evt == "deleted":
+                            rel = _rel_from_path(src)
+                            if rel == "":
+                                need_full_rescan = True
+                            elif rel is not None:
+                                changed = _remove_rel_prefix(rel) or changed
+                        elif evt == "moved":
+                            rel_src = _rel_from_path(src)
+                            rel_dst = _rel_from_path(dest)
+                            if (rel_src == "") or (rel_dst == ""):
+                                need_full_rescan = True
+                            if rel_src not in (None, ""):
+                                changed = _remove_rel_prefix(rel_src) or changed
+                            if rel_dst not in (None, ""):
+                                changed = _add_tree_from_abs(dest) or changed
+                        return changed, need_full_rescan
+
+                    handler = _DirEventHandler()
+                    observer = Observer()
+                    _refresh_configured_roots()
+                    _schedule_watch_paths(observer)
+                    _FILE_DIR_STREAM_STATE["observer"] = observer
+                    observer.start()
+                    # Publish initial snapshot immediately.
+                    initial_payload = _scan_payload()
+                    cache_dirs = set(str(x) for x in list(initial_payload.get("directories", [])))
+                    cache_roots = list(initial_payload.get("roots", []))
+                    _publish_payload(initial_payload, force=True)
+
+                    next_full_rescan = time.monotonic() + full_rescan_s
+                    next_heartbeat = time.monotonic() + heartbeat_s
+                    while not stop_event.is_set():
+                        now = time.monotonic()
+                        do_apply = False
+                        pending_events = []
+                        with state_lock:
+                            if watch_state["dirty"] and (now >= watch_state["deadline"]):
+                                do_apply = True
+                                watch_state["dirty"] = False
+                                pending_events = list(watch_state["events"])
+                                watch_state["events"] = []
+                        if do_apply:
+                            _refresh_configured_roots()
+                            _schedule_watch_paths(observer)
+                            changed = False
+                            need_full_rescan = False
+                            for evt, src, dest in pending_events:
+                                ch, full = _apply_event(evt, src, dest)
+                                changed = changed or ch
+                                need_full_rescan = need_full_rescan or full
+                            if need_full_rescan:
+                                full_payload = _scan_payload()
+                                cache_dirs = set(str(x) for x in list(full_payload.get("directories", [])))
+                                cache_roots = list(full_payload.get("roots", []))
+                                _publish_payload(full_payload, force=False)
+                                _watchdog_log("event batch triggered full rescan")
+                            elif changed:
+                                if not _publish_payload(_cache_payload_from_set(), force=False):
+                                    _watchdog_log("incremental batch applied; published list unchanged")
+                            else:
+                                _watchdog_log("incremental batch applied; no cache changes")
+                            next_heartbeat = time.monotonic() + heartbeat_s
+                        if now >= next_full_rescan:
+                            _refresh_configured_roots()
+                            _schedule_watch_paths(observer)
+                            full_payload = _scan_payload()
+                            cache_dirs = set(str(x) for x in list(full_payload.get("directories", [])))
+                            cache_roots = list(full_payload.get("roots", []))
+                            _publish_payload(full_payload, force=False)
+                            next_full_rescan = now + full_rescan_s
+                        if now >= next_heartbeat:
+                            _publish_payload(_cache_payload_from_set(), force=True)
+                            next_heartbeat = now + heartbeat_s
+                        stop_event.wait(0.1)
+                else:
+                    while not stop_event.is_set():
+                        _publish_payload(_scan_payload(), force=True)
+                        stop_event.wait(interval_s)
+            else:
+                while not stop_event.is_set():
+                    _publish_payload(_scan_payload(), force=True)
+                    stop_event.wait(interval_s)
         except Exception as ex:
             print(f"[file_dir_choices] stream publisher stopped: {ex}")
             return
         finally:
             try:
+                obs = _FILE_DIR_STREAM_STATE.get("observer", None)
+                if obs is not None:
+                    obs.stop()
+                    obs.join(timeout=1.0)
+            except Exception:
+                pass
+            _FILE_DIR_STREAM_STATE["observer"] = None
+            try:
                 if sock is not None:
                     sock.close(0)
             except Exception:
                 pass
+            try:
+                if ctx is not None:
+                    ctx.term()
+            except Exception:
+                pass
+            _FILE_DIR_STREAM_STATE["thread"] = None
+            _FILE_DIR_STREAM_STATE["started"] = False
 
     th = threading.Thread(target=_pub_loop, name="file-dir-choices-stream", daemon=True)
     _FILE_DIR_STREAM_STATE["thread"] = th
@@ -353,4 +718,31 @@ def _start_file_dir_choices_stream():
     th.start()
 
 
+def _stop_file_dir_choices_stream():
+    th = _FILE_DIR_STREAM_STATE.get("thread", None)
+    try:
+        _FILE_DIR_STREAM_STATE["stop"].set()
+    except Exception:
+        pass
+    try:
+        obs = _FILE_DIR_STREAM_STATE.get("observer", None)
+        if obs is not None:
+            obs.stop()
+            obs.join(timeout=1.0)
+    except Exception:
+        pass
+    _FILE_DIR_STREAM_STATE["observer"] = None
+    if th is None:
+        _FILE_DIR_STREAM_STATE["started"] = False
+        return
+    try:
+        if th.is_alive() and (threading.current_thread() is not th):
+            th.join(timeout=1.0)
+    except Exception:
+        pass
+    _FILE_DIR_STREAM_STATE["thread"] = None
+    _FILE_DIR_STREAM_STATE["started"] = False
+
+
+atexit.register(_stop_file_dir_choices_stream)
 _start_file_dir_choices_stream()

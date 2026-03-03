@@ -307,7 +307,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
 
     @staticmethod
     def _build_list_file_dirs_item():
-        kwargs = {"max_depth": 1, "max_items": 512}
+        kwargs = {"max_depth": 3, "max_items": 512}
         if BFunc is not None:
             return BFunc("list_imaging_file_dirs", **kwargs)
         return {
@@ -521,7 +521,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
     def _query_file_dirs(self):
         # Local mode may be enabled explicitly with MITR_FILE_DIR_QUERY_MODE=local.
         if self._file_dir_query_mode == "local":
-            return self._fallback_local_file_dirs(max_items=512, max_depth=1)
+            return self._fallback_local_file_dirs(max_items=512, max_depth=3)
         if self._file_dir_query_mode == "stream":
             return []
         return self._query_worker_file_dirs()
