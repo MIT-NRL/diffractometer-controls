@@ -148,6 +148,8 @@ class MainScreen(display.MITRDisplay):
         self._wf_norm_ignore_next_image_changed = False
         self._last_source_image = None
         self._last_source_exposure_s = None
+        self._acquire_was_active = False
+        self._pending_next_frame_exposure_s = None
         self.wf_norm_checkbox = None
         self.wf_norm_select_button = None
         self.measure_line_checkbox = None
@@ -215,7 +217,7 @@ class MainScreen(display.MITRDisplay):
                     except Exception:
                         same_signal = False
                 if (not image_signal_connected) or (not same_signal):
-                    image_item.sigImageChanged.connect(self._on_new_image_event)
+                    image_item.sigImageChanged.connect(self._on_image_changed_event)
         except Exception:
             pass
 
@@ -1672,6 +1674,12 @@ class MainScreen(display.MITRDisplay):
             acquiring = value.strip().lower() in {"1", "true", "on", "acquire", "acquiring"}
         else:
             acquiring = bool(value)
+        was_active = bool(self._acquire_was_active)
+        if acquiring and (not was_active):
+            # Latch exposure at acquisition start so frame normalization is
+            # pinned to the frame's acquisition settings.
+            self._pending_next_frame_exposure_s = self._get_current_exposure_time_s()
+        self._acquire_was_active = acquiring
         self._set_acquire_indicator_style(acquiring)
         self._set_indicator_on_off_colors()
         self.ui.PyDMByteIndicator_2.update()
@@ -2694,12 +2702,23 @@ class MainScreen(display.MITRDisplay):
             self._startup_autoscale_timer.stop()
 
     def _on_new_image_event(self, *args):
-        frame_exposure_s = self._get_current_exposure_time_s()
+        frame_exposure_s = self._normalize_positive_exposure(self._pending_next_frame_exposure_s)
+        if frame_exposure_s is None:
+            frame_exposure_s = self._get_current_exposure_time_s()
+        # Consume one-frame latch; if no new acquire edge is seen, fall back to
+        # reading the current exposure on subsequent frame events.
+        self._pending_next_frame_exposure_s = None
         self._apply_robust_normalization(
             *args,
             source_exposure_s=frame_exposure_s,
             source_is_new_frame=True,
         )
+
+    def _on_image_changed_event(self, *args):
+        # Fallback for backends that do not emit newImageSignal reliably.
+        # Treat as non-authoritative so redraws/style updates do not overwrite
+        # the exposure snapshot for the most recent acquired frame.
+        self._apply_robust_normalization(*args, source_is_new_frame=False)
 
     def _apply_robust_normalization(self, *args, source_exposure_s=None, source_is_new_frame=False):
         if self._wf_norm_image_update_in_progress:
