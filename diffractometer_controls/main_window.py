@@ -192,6 +192,12 @@ class MITRMainWindow(PyDMMainWindow):
         norm_outlier_action.triggered.connect(lambda checked=False: self._set_norm_filter_setting(WF_NORM_FILTER_OUTLIER))
         norm_median_action.triggered.connect(lambda checked=False: self._set_norm_filter_setting(WF_NORM_FILTER_MEDIAN))
 
+        analysis_menu.addSeparator()
+        launch_focus_program_action = analysis_menu.addAction("Launch focus program")
+        launch_focus_program_action.setIcon(self._load_focus_program_icon())
+        launch_focus_program_action.setToolTip("Open offline focus analysis in a separate process.")
+        launch_focus_program_action.triggered.connect(self.launch_focus_program)
+
         # Add a "Bluesky Controls" submenu
         bluesky_menu = control_system_menu.addMenu("Bluesky Controls")
 
@@ -728,6 +734,70 @@ class MITRMainWindow(PyDMMainWindow):
             run_uid=str(run_uid).strip(),
         )
 
+    @staticmethod
+    def _load_focus_program_icon():
+        base_dir = Path(__file__).resolve().parent
+        icon = QtGui.QIcon()
+        for candidate in (
+            base_dir / "icons" / "focus_program.svg",
+            base_dir / "icons" / "camera.svg",
+            base_dir / "NRL_Logo.png",
+        ):
+            if candidate.exists():
+                icon.addFile(str(candidate))
+                if not icon.isNull():
+                    break
+        return icon
+
+    def _resolve_focus_python_executable(self):
+        viewer_python = Path(sys.executable)
+        conda_prefix = str(os.environ.get("CONDA_PREFIX", "")).strip()
+        if not conda_prefix:
+            return viewer_python
+
+        candidates = [Path(conda_prefix) / "bin" / "python"]
+        if os.name == "nt":
+            candidates = [
+                Path(conda_prefix) / "python.exe",
+                Path(conda_prefix) / "Scripts" / "python.exe",
+            ] + candidates
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return viewer_python
+
+    def launch_focus_program(self):
+        viewer_script = Path(__file__).resolve().parent / "focus_offline_viewer.py"
+        if not viewer_script.exists():
+            msg = f"Focus program not found: {viewer_script}"
+            log.warning(msg)
+            QMessageBox.warning(self, "Focus Program", msg)
+            return
+
+        viewer_python = self._resolve_focus_python_executable()
+        cmd = [str(viewer_python), str(viewer_script)]
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(viewer_script.parent),
+                env=dict(os.environ),
+            )
+            self.statusBar().showMessage(
+                f"Launched focus program (pid={proc.pid})", 3000
+            )
+            log.info(
+                "Launched focus_offline_viewer pid=%s python=%s",
+                proc.pid,
+                str(viewer_python),
+            )
+        except Exception:
+            log.exception("Failed to launch focus_offline_viewer")
+            QMessageBox.critical(
+                self,
+                "Focus Program",
+                "Failed to launch focus program. See logs for details.",
+            )
+
     def _stop_focus_online_viewer(self):
         proc = self._focus_online_proc
         self._focus_online_proc = None
@@ -766,12 +836,7 @@ class MITRMainWindow(PyDMMainWindow):
         if not viewer_script.exists():
             log.warning("Focus online viewer script not found: %s", viewer_script)
             return
-        viewer_python = Path(sys.executable)
-        conda_prefix = str(os.environ.get("CONDA_PREFIX", "")).strip()
-        if conda_prefix:
-            candidate = Path(conda_prefix) / "bin" / "python"
-            if candidate.exists():
-                viewer_python = candidate
+        viewer_python = self._resolve_focus_python_executable()
         def _env_int(name: str, default: int, min_val: int = 1) -> int:
             try:
                 return max(min_val, int(str(os.environ.get(name, default)).strip()))

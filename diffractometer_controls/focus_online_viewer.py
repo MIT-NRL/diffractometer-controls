@@ -36,9 +36,13 @@ except Exception:
     REManagerAPI = None
 
 try:
-    from focus_offline_viewer import FocusOfflineWindow, FrameInfo
+    from focus_offline_viewer import FocusOfflineWindow, FrameInfo, _build_focus_program_icon
 except Exception:
-    from diffractometer_controls.focus_offline_viewer import FocusOfflineWindow, FrameInfo
+    from diffractometer_controls.focus_offline_viewer import (
+        FocusOfflineWindow,
+        FrameInfo,
+        _build_focus_program_icon,
+    )
 
 
 def _is_number(value) -> bool:
@@ -237,6 +241,12 @@ class FocusOnlineBridge(QtCore.QObject):
         )
         self.window.installEventFilter(self)
         self.window.setWindowTitle("Online Focus Scan Viewer")
+        try:
+            icon = _build_focus_program_icon()
+            if not icon.isNull():
+                self.window.setWindowIcon(icon)
+        except Exception:
+            pass
         self.window.show()
         self._bring_window_to_front(self.window)
         self._install_focus_controls()
@@ -1204,6 +1214,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     args = build_arg_parser().parse_args(argv)
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    try:
+        app_icon = _build_focus_program_icon()
+        if not app_icon.isNull():
+            app.setWindowIcon(app_icon)
+    except Exception:
+        pass
     pg.setConfigOption("imageAxisOrder", "row-major")
 
     bridge = FocusOnlineBridge(

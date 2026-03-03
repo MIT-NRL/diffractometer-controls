@@ -56,6 +56,24 @@ except Exception:
     lm = None
 
 
+def _build_focus_program_icon() -> "QtGui.QIcon":
+    """Build an icon with local fallbacks for cross-platform window/taskbar display."""
+    icon = QtGui.QIcon()
+    base_dir = Path(__file__).resolve().parent
+    icon_dir = base_dir / "icons"
+
+    for candidate in (
+        icon_dir / "focus_program.svg",
+        icon_dir / "camera.svg",
+        base_dir / "NRL_Logo.png",
+    ):
+        if candidate.exists():
+            icon.addFile(str(candidate))
+            if not icon.isNull():
+                break
+    return icon
+
+
 def _read_image(path: Path) -> np.ndarray:
     """Read an image file into a 2D float array."""
     arr = None
@@ -1150,13 +1168,17 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._load_generation = 0
         self._edge_near_fraction = 0.10
         self._edge_min_candidates = 3
-        self._local_fit_points = 7
+        # Half-width (in motor-position units) of the local quadratic fit window.
+        self._local_fit_radius = 0.5
         self._optimal_focus_position: float = np.nan
         self._optimal_focus_sigma: float = np.nan
         self._optimal_psf_position: float = np.nan
         self._optimal_psf_sigma: float = np.nan
         self._optimal_mtf50_position: float = np.nan
         self._optimal_mtf50_value: float = np.nan
+        self._sigma_fit_center_hint: float = np.nan
+        self._psf_fit_center_hint: float = np.nan
+        self._mtf_fit_center_hint: float = np.nan
         self._shutting_down = False
 
         self._build_ui()
@@ -1208,10 +1230,15 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.btn_play.setCheckable(True)
         self.btn_play.hide()
         self.btn_recompute = QtWidgets.QPushButton("Recompute ROI")
-        self.local_fit_points_spin = QtWidgets.QSpinBox()
-        self.local_fit_points_spin.setRange(3, 31)
-        self.local_fit_points_spin.setSingleStep(2)
-        self.local_fit_points_spin.setValue(self._local_fit_points)
+        self.local_fit_radius_spin = QtWidgets.QDoubleSpinBox()
+        self.local_fit_radius_spin.setRange(0.01, 1000.0)
+        self.local_fit_radius_spin.setDecimals(3)
+        self.local_fit_radius_spin.setSingleStep(0.05)
+        self.local_fit_radius_spin.setKeyboardTracking(False)
+        self.local_fit_radius_spin.setValue(float(self._local_fit_radius))
+        self.local_fit_radius_spin.setToolTip(
+            "Half-width (motor units) around the current extrema used for local quadratic fit."
+        )
         self.preprocess_mode_combo = QtWidgets.QComboBox()
         self.preprocess_mode_combo.addItem("Median", "median")
         self.preprocess_mode_combo.addItem("Tomopy Outlier", "tomopy_outlier")
@@ -1249,8 +1276,8 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         control_row.addWidget(self.preprocess_mode_combo)
         control_row.addWidget(QtWidgets.QLabel("Size:"))
         control_row.addWidget(self.preprocess_size_spin)
-        control_row.addWidget(QtWidgets.QLabel("Local fit pts:"))
-        control_row.addWidget(self.local_fit_points_spin)
+        control_row.addWidget(QtWidgets.QLabel("Local fit range:"))
+        control_row.addWidget(self.local_fit_radius_spin)
         self.optimal_focus_label = QtWidgets.QLabel("Optimal motor position: --")
         control_row.addWidget(self.optimal_focus_label)
         control_row.addStretch(1)
@@ -1480,7 +1507,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             self.btn_open_files.clicked.connect(self._open_files_dialog)
         self.btn_play.toggled.connect(self._toggle_play)
         self.btn_recompute.clicked.connect(self._recompute_current)
-        self.local_fit_points_spin.valueChanged.connect(self._on_local_fit_points_changed)
+        self.local_fit_radius_spin.valueChanged.connect(self._on_local_fit_radius_changed)
         self.preprocess_mode_combo.currentIndexChanged.connect(self._on_preprocess_mode_ui_changed)
         self.preprocess_size_spin.valueChanged.connect(self._on_preprocess_mode_ui_changed)
         self.timer.timeout.connect(self._tick)
@@ -2406,28 +2433,65 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 and np.isfinite(m_for_lock)
                 and np.isfinite(b_for_lock)
             ):
-                rows.append((idx, float(r.step_sigma), m_for_lock, b_for_lock))
+                rows.append(
+                    (
+                        idx,
+                        float(self.frames[idx].position),
+                        float(r.step_sigma),
+                        m_for_lock,
+                        b_for_lock,
+                    )
+                )
         if len(rows) < self._edge_min_candidates:
             return False
 
-        sigmas = np.asarray([row[1] for row in rows], dtype=np.float64)
-        min_sigma = float(np.nanmin(sigmas))
-        sigma_std = float(np.nanstd(sigmas)) if np.isfinite(sigmas).any() else 0.0
-        tol = max(abs(min_sigma) * self._edge_near_fraction, 0.05 * sigma_std, 1e-12)
-        near_rows = [row for row in rows if row[1] <= (min_sigma + tol)]
-        if len(near_rows) < self._edge_min_candidates:
-            order = np.argsort(sigmas)
-            top_n = int(min(max(self._edge_min_candidates, 1), len(rows)))
-            near_rows = [rows[int(i)] for i in order[:top_n]]
-        if len(near_rows) < 1:
+        # Primary selection: frames nearest current optimal focus motor position.
+        # Fallback: legacy near-min sigma selection if optimum is unavailable.
+        target_pos = np.nan
+        for cand in (
+            self._optimal_focus_position,
+            self._optimal_psf_position,
+            self._optimal_mtf50_position,
+        ):
+            try:
+                cand_f = float(cand)
+            except Exception:
+                cand_f = np.nan
+            if np.isfinite(cand_f):
+                target_pos = cand_f
+                break
+
+        selected_rows = []
+        if np.isfinite(target_pos):
+            pos_radius = float(max(1e-6, self._local_fit_radius))
+            selected_rows = [row for row in rows if abs(row[1] - target_pos) <= pos_radius]
+            if len(selected_rows) < self._edge_min_candidates:
+                order = np.argsort([abs(row[1] - target_pos) for row in rows])
+                top_n = int(min(max(self._edge_min_candidates, 1), len(rows)))
+                selected_rows = [rows[int(i)] for i in order[:top_n]]
+        else:
+            sigmas = np.asarray([row[2] for row in rows], dtype=np.float64)
+            min_sigma = float(np.nanmin(sigmas))
+            sigma_std = float(np.nanstd(sigmas)) if np.isfinite(sigmas).any() else 0.0
+            tol = max(abs(min_sigma) * self._edge_near_fraction, 0.05 * sigma_std, 1e-12)
+            selected_rows = [row for row in rows if row[2] <= (min_sigma + tol)]
+            if len(selected_rows) < self._edge_min_candidates:
+                order = np.argsort(sigmas)
+                top_n = int(min(max(self._edge_min_candidates, 1), len(rows)))
+                selected_rows = [rows[int(i)] for i in order[:top_n]]
+
+        if len(selected_rows) < 1:
             return False
 
-        m_med = float(np.nanmedian(np.asarray([row[2] for row in near_rows], dtype=np.float64)))
-        b_med = float(np.nanmedian(np.asarray([row[3] for row in near_rows], dtype=np.float64)))
+        m_med = float(np.nanmedian(np.asarray([row[3] for row in selected_rows], dtype=np.float64)))
+        b_med = float(np.nanmedian(np.asarray([row[4] for row in selected_rows], dtype=np.float64)))
         if not (np.isfinite(m_med) and np.isfinite(b_med)):
             return False
 
-        ref_idx = int(min(near_rows, key=lambda row: row[1])[0])
+        if np.isfinite(target_pos):
+            ref_idx = int(min(selected_rows, key=lambda row: abs(row[1] - target_pos))[0])
+        else:
+            ref_idx = int(min(selected_rows, key=lambda row: row[2])[0])
         prev_line = self._fixed_edge_line
         self._fixed_edge_line = (m_med, b_med)
         self._fixed_edge_reference_index = ref_idx
@@ -2459,15 +2523,27 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 f"max_shift={max_shift_px:.3f}px; rerunning full reprocess."
             )
 
-        self._log(
-            "Locked global edge from near-min sigma: "
-            f"frame={ref_idx + 1}, m={m_med:.6f}, b={b_med:.6f}"
-        )
-        if not bool(rerun_with_fixed_edge):
-            self.statusBar().showMessage(
-                f"Locked edge from near-min sigma at frame {ref_idx + 1}; "
-                "skipping fixed-edge rerun (disk-backed all-frame mode)."
+        if np.isfinite(target_pos):
+            self._log(
+                "Locked global edge from frames nearest optimal motor position: "
+                f"target={target_pos:.5f}, frame={ref_idx + 1}, m={m_med:.6f}, b={b_med:.6f}"
             )
+        else:
+            self._log(
+                "Locked global edge from near-min sigma (fallback): "
+                f"frame={ref_idx + 1}, m={m_med:.6f}, b={b_med:.6f}"
+            )
+        if not bool(rerun_with_fixed_edge):
+            if np.isfinite(target_pos):
+                self.statusBar().showMessage(
+                    f"Locked edge near optimal motor={target_pos:.5f} (frame {ref_idx + 1}); "
+                    "skipping fixed-edge rerun (disk-backed all-frame mode)."
+                )
+            else:
+                self.statusBar().showMessage(
+                    f"Locked edge from near-min sigma at frame {ref_idx + 1}; "
+                    "skipping fixed-edge rerun (disk-backed all-frame mode)."
+                )
             self._log(
                 "Skipping fixed-edge rerun for this cycle to avoid repeated disk rereads."
             )
@@ -2476,9 +2552,15 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             elif self.current_index in self._results:
                 self._update_profile_plot(self._results[self.current_index])
             return False
-        self.statusBar().showMessage(
-            f"Locked edge from near-min sigma at frame {ref_idx + 1}; reprocessing all frames with fixed edge."
-        )
+        if np.isfinite(target_pos):
+            self.statusBar().showMessage(
+                f"Locked edge near optimal motor={target_pos:.5f} at frame {ref_idx + 1}; "
+                "reprocessing all frames with fixed edge."
+            )
+        else:
+            self.statusBar().showMessage(
+                f"Locked edge from near-min sigma at frame {ref_idx + 1}; reprocessing all frames with fixed edge."
+            )
         # On initial lock, jump the viewer to the selected near-minimum frame
         # without triggering a new quick-pass load.
         if prev_line is None and ref_idx != int(self.current_index):
@@ -2872,8 +2954,10 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
     def _local_parabola_fit(
         x: np.ndarray,
         y: np.ndarray,
-        local_points: int = 7,
+        local_radius: float = 0.5,
         find: str = "min",
+        center_hint: Optional[float] = None,
+        robust_frac: float = 0.30,
     ) -> Optional[Tuple[np.ndarray, np.ndarray, float, float]]:
         finite = np.isfinite(x) & np.isfinite(y)
         if int(np.count_nonzero(finite)) < 3:
@@ -2885,16 +2969,46 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         yf = yf[order]
         if xf.size < 3:
             return None
-        if find == "max":
-            center_idx = int(np.nanargmax(yf))
-        else:
-            center_idx = int(np.nanargmin(yf))
-        center_x = float(xf[center_idx])
-        local_n = int(max(3, min(local_points, xf.size)))
-        nearest = np.argsort(np.abs(xf - center_x))[:local_n]
-        nearest = np.sort(nearest)
-        x_local = xf[nearest]
-        y_local = yf[nearest]
+        center_x = np.nan
+        if center_hint is not None:
+            try:
+                hint = float(center_hint)
+                if np.isfinite(hint):
+                    center_x = float(np.clip(hint, float(np.nanmin(xf)), float(np.nanmax(xf))))
+            except Exception:
+                center_x = np.nan
+
+        if not np.isfinite(center_x):
+            frac = float(max(0.05, min(0.50, robust_frac)))
+            try:
+                if find == "max":
+                    cutoff = float(np.nanpercentile(yf, 100.0 * (1.0 - frac)))
+                    seed_x = xf[yf >= cutoff]
+                else:
+                    cutoff = float(np.nanpercentile(yf, 100.0 * frac))
+                    seed_x = xf[yf <= cutoff]
+            except Exception:
+                seed_x = np.empty(0, dtype=np.float64)
+
+            if seed_x.size > 0:
+                center_x = float(np.nanmedian(seed_x))
+            else:
+                # Last-resort fallback.
+                if find == "max":
+                    center_idx = int(np.nanargmax(yf))
+                else:
+                    center_idx = int(np.nanargmin(yf))
+                center_x = float(xf[center_idx])
+
+        radius = float(max(1e-6, local_radius))
+        in_window = np.abs(xf - center_x) <= radius
+        idx_local = np.flatnonzero(in_window)
+        if idx_local.size < 3:
+            # Fallback for sparse early data: still fit with nearest 3 points.
+            nearest = np.argsort(np.abs(xf - center_x))[:3]
+            idx_local = np.sort(nearest)
+        x_local = xf[idx_local]
+        y_local = yf[idx_local]
         if x_local.size < 3:
             return None
         coeff = np.polyfit(x_local, y_local, 2)
@@ -2905,7 +3019,14 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             return None
         if find != "max" and a <= 0.0:
             return None
-        x_line = np.linspace(float(np.nanmin(x_local)), float(np.nanmax(x_local)), 200)
+        # Draw the fitted parabola across the full requested local window,
+        # not just where sampled points exist.
+        x_line_min = float(center_x - radius)
+        x_line_max = float(center_x + radius)
+        if not np.isfinite(x_line_min) or not np.isfinite(x_line_max) or (x_line_max <= x_line_min):
+            x_line_min = float(np.nanmin(x_local))
+            x_line_max = float(np.nanmax(x_local))
+        x_line = np.linspace(x_line_min, x_line_max, 200)
         y_line = np.polyval(coeff, x_line)
         x_vertex = -b / (2.0 * a)
         y_vertex = float(np.polyval(coeff, x_vertex))
@@ -2939,6 +3060,9 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             self._optimal_psf_sigma = np.nan
             self._optimal_mtf50_position = np.nan
             self._optimal_mtf50_value = np.nan
+            self._sigma_fit_center_hint = np.nan
+            self._psf_fit_center_hint = np.nan
+            self._mtf_fit_center_hint = np.nan
             self.optimal_focus_label.setText("Optimal motor position: --")
             return
 
@@ -2982,6 +3106,24 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         sigma_err_arr = np.asarray(sigma_errs, dtype=np.float64)
         psf_sigma_arr = np.asarray(psf_sigmas, dtype=np.float64)
         mtf50_arr = np.asarray(mtf50s, dtype=np.float64)
+
+        # Keep X view anchored to measured motor positions, so fit curves
+        # rendered beyond sampled points do not expand plot limits.
+        finite_x = x_arr[np.isfinite(x_arr)]
+        if finite_x.size > 0:
+            x_min = float(np.nanmin(finite_x))
+            x_max = float(np.nanmax(finite_x))
+            if x_max <= x_min:
+                pad = max(0.05, abs(x_min) * 0.05, 1e-6)
+                x_min -= pad
+                x_max += pad
+            else:
+                pad = 0.05 * (x_max - x_min)
+                x_min -= pad
+                x_max += pad
+            self.sigma_metric_plot.setXRange(x_min, x_max, padding=0.0)
+            self.psf_metric_plot.setXRange(x_min, x_max, padding=0.0)
+            self.mtf_metric_plot.setXRange(x_min, x_max, padding=0.0)
 
         self.curve_sigma_quick.setData(
             np.asarray(xs_quick, dtype=np.float64),
@@ -3069,41 +3211,57 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 beam=0.0,
             )
 
-        # Fit locally around current extrema using all currently available points
-        # (quick + full), then update smoothly as reprocessed points overwrite.
-        local_points = int(max(3, self._local_fit_points))
+        # Fit locally around current extrema using a fixed motor-position window.
+        # This keeps the fit domain stable even if adaptive sampling is denser
+        # on one side of the extrema.
+        local_radius = float(max(1e-6, self._local_fit_radius))
         sigma_fit = self._local_parabola_fit(
-            x_arr, sigma_arr, local_points=local_points, find="min"
+            x_arr,
+            sigma_arr,
+            local_radius=local_radius,
+            find="min",
+            center_hint=self._sigma_fit_center_hint,
         )
         if sigma_fit is not None:
             x_line, y_line, x_min, y_min = sigma_fit
             self.curve_quad_fit.setData(x_line, y_line)
             self._optimal_focus_position = float(x_min)
             self._optimal_focus_sigma = float(y_min)
+            self._sigma_fit_center_hint = float(x_min)
         else:
             self.curve_quad_fit.setData([], [])
             self._optimal_focus_position = np.nan
             self._optimal_focus_sigma = np.nan
 
         psf_fit = self._local_parabola_fit(
-            x_arr, psf_sigma_arr, local_points=local_points, find="min"
+            x_arr,
+            psf_sigma_arr,
+            local_radius=local_radius,
+            find="min",
+            center_hint=self._psf_fit_center_hint,
         )
         if psf_fit is not None:
             self.curve_psf_fit.setData(psf_fit[0], psf_fit[1])
             self._optimal_psf_position = float(psf_fit[2])
             self._optimal_psf_sigma = float(psf_fit[3])
+            self._psf_fit_center_hint = float(psf_fit[2])
         else:
             self.curve_psf_fit.setData([], [])
             self._optimal_psf_position = np.nan
             self._optimal_psf_sigma = np.nan
 
         mtf_fit = self._local_parabola_fit(
-            x_arr, mtf50_arr, local_points=local_points, find="max"
+            x_arr,
+            mtf50_arr,
+            local_radius=local_radius,
+            find="max",
+            center_hint=self._mtf_fit_center_hint,
         )
         if mtf_fit is not None:
             self.curve_mtf50_fit.setData(mtf_fit[0], mtf_fit[1])
             self._optimal_mtf50_position = float(mtf_fit[2])
             self._optimal_mtf50_value = float(mtf_fit[3])
+            self._mtf_fit_center_hint = float(mtf_fit[2])
         else:
             self.curve_mtf50_fit.setData([], [])
             self._optimal_mtf50_position = np.nan
@@ -3254,6 +3412,9 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._optimal_psf_sigma = np.nan
         self._optimal_mtf50_position = np.nan
         self._optimal_mtf50_value = np.nan
+        self._sigma_fit_center_hint = np.nan
+        self._psf_fit_center_hint = np.nan
+        self._mtf_fit_center_hint = np.nan
 
         self.frames = new_frames
         self.current_index = 0
@@ -3365,16 +3526,13 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.interval_ms = int(value)
         self.timer.setInterval(self.interval_ms)
 
-    def _on_local_fit_points_changed(self, value: int):
-        v = int(value)
-        if v % 2 == 0:
-            v += 1
-        v = int(max(3, min(31, v)))
-        if v != int(self.local_fit_points_spin.value()):
-            prev = self.local_fit_points_spin.blockSignals(True)
-            self.local_fit_points_spin.setValue(v)
-            self.local_fit_points_spin.blockSignals(prev)
-        self._local_fit_points = v
+    def _on_local_fit_radius_changed(self, value: float):
+        v = float(max(0.01, min(1000.0, float(value))))
+        if abs(v - float(self.local_fit_radius_spin.value())) > 1e-12:
+            prev = self.local_fit_radius_spin.blockSignals(True)
+            self.local_fit_radius_spin.setValue(v)
+            self.local_fit_radius_spin.blockSignals(prev)
+        self._local_fit_radius = v
         self._update_metric_plot()
 
     def _toggle_play(self, checked: bool):
@@ -3572,6 +3730,10 @@ def main(argv=None) -> int:
     effective_max_workers_total = int(max(3, int(args.max_workers_total)))
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    app.setApplicationName("MITR Focus Program")
+    app_icon = _build_focus_program_icon()
+    if not app_icon.isNull():
+        app.setWindowIcon(app_icon)
     pg.setConfigOption("imageAxisOrder", "row-major")
 
     w = FocusOfflineWindow(
@@ -3584,6 +3746,8 @@ def main(argv=None) -> int:
         preprocess_mode=args.preprocess_mode,
         preprocess_size=args.preprocess_size,
     )
+    if not app_icon.isNull():
+        w.setWindowIcon(app_icon)
     w.show()
     return int(app.exec_())
 
