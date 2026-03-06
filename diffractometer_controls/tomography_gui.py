@@ -2702,6 +2702,9 @@ class MainScreen(display.MITRDisplay):
             self._startup_autoscale_timer.stop()
 
     def _on_new_image_event(self, *args):
+        if self._wf_norm_ignore_next_image_changed:
+            self._wf_norm_ignore_next_image_changed = False
+            return
         frame_exposure_s = self._normalize_positive_exposure(self._pending_next_frame_exposure_s)
         if frame_exposure_s is None:
             frame_exposure_s = self._get_current_exposure_time_s()
