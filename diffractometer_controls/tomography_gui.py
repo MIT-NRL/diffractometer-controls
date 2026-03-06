@@ -2715,50 +2715,66 @@ class MainScreen(display.MITRDisplay):
         )
 
     def _on_image_changed_event(self, *args):
-        # Fallback for backends that do not emit newImageSignal reliably.
-        # Treat as non-authoritative so redraws/style updates do not overwrite
-        # the exposure snapshot for the most recent acquired frame.
+        # Some backends only deliver frame changes through sigImageChanged.
+        # If we have a latched acquire-time exposure waiting, consume it here
+        # and treat this as the authoritative new-frame update. Otherwise keep
+        # this path non-authoritative so redraws do not overwrite frame state.
+        frame_exposure_s = self._normalize_positive_exposure(self._pending_next_frame_exposure_s)
+        if frame_exposure_s is not None:
+            self._pending_next_frame_exposure_s = None
+            self._apply_robust_normalization(
+                *args,
+                source_exposure_s=frame_exposure_s,
+                source_is_new_frame=True,
+            )
+            return
         self._apply_robust_normalization(*args, source_is_new_frame=False)
 
     def _apply_robust_normalization(self, *args, source_exposure_s=None, source_is_new_frame=False):
         if self._wf_norm_image_update_in_progress:
             return
-        if (not args) and self._wf_norm_ignore_next_image_changed:
+        if self._wf_norm_ignore_next_image_changed and (not source_is_new_frame):
             self._wf_norm_ignore_next_image_changed = False
             return
         image = None
+        explicit_image = False
         if args:
             candidate = args[0]
             if candidate is not None:
                 image = candidate
-
-        if image is None:
-            image_view = self.ui.cameraImage
-            try:
-                image = image_view.getImageItem().image
-            except Exception:
-                image = getattr(image_view, "image", None)
-
-        if image is None:
-            return
+                explicit_image = True
 
         norm_active = (
             self.wf_norm_checkbox is not None
             and self.wf_norm_checkbox.isChecked()
             and self._wf_norm_reciprocal is not None
         )
+
+        if image is None:
+            if norm_active and self._last_source_image is not None:
+                # When norm is active, the widget image may already be the
+                # normalized display buffer. Reuse the cached raw frame unless
+                # a fresh image was explicitly supplied by a signal.
+                image = self._last_source_image
+            else:
+                image_view = self.ui.cameraImage
+                try:
+                    image = image_view.getImageItem().image
+                except Exception:
+                    image = getattr(image_view, "image", None)
+
+        if image is None:
+            return
+
         source_image = np.asarray(image)
         source_exposure_s = self._normalize_positive_exposure(source_exposure_s)
-        if source_is_new_frame:
-            # Bind the exposure to the frame as it arrives so later toggles
-            # use the acquisition-time exposure, not a live PV value.
-            self._last_source_image = source_image
-            self._last_source_exposure_s = source_exposure_s
-        elif self._last_source_image is None:
+        should_refresh_raw_cache = source_is_new_frame or (not norm_active) or explicit_image
+        if should_refresh_raw_cache:
+            # Keep the cached raw frame aligned with the most recent PV image.
             self._last_source_image = source_image
             if source_exposure_s is not None:
                 self._last_source_exposure_s = source_exposure_s
-            else:
+            elif self._last_source_exposure_s is None:
                 self._last_source_exposure_s = self._get_current_exposure_time_s()
 
         effective_source_exposure_s = source_exposure_s
@@ -2773,6 +2789,11 @@ class MainScreen(display.MITRDisplay):
             if normalized is not None:
                 display_image = normalized
                 self._set_image_item_data(display_image)
+
+        if source_is_new_frame and norm_active:
+            # Norm-mode histogram range is data-dependent; when a fresh frame
+            # arrives, follow the new image instead of preserving an older zoom.
+            self._histogram_user_view_active = False
 
         # Some backends reset interaction mode when first frame is rendered.
         if self._measure_enabled:
