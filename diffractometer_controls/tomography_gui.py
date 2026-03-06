@@ -251,6 +251,52 @@ class MainScreen(display.MITRDisplay):
             return None
         return None
 
+    def _get_latest_pv_image(self):
+        image_view = self.ui.cameraImage
+        try:
+            raw = getattr(image_view, "image_waveform", None)
+        except Exception:
+            raw = None
+        if raw is None:
+            return None
+        try:
+            img = np.asarray(raw)
+        except Exception:
+            return None
+        if img.size == 0:
+            return None
+
+        try:
+            dimension_order = getattr(image_view, "_dimension_order", None)
+            reading_order = getattr(image_view, "readingOrder", None)
+            width = int(getattr(image_view, "imageWidth", 0) or 0)
+            width_first = getattr(type(image_view), "WidthFirst", None)
+            c_like = getattr(type(image_view), "Clike", None)
+        except Exception:
+            dimension_order = None
+            reading_order = None
+            width = 0
+            width_first = None
+            c_like = None
+
+        try:
+            if width_first is not None and dimension_order == width_first:
+                shape = img.shape
+                if len(shape) >= 2:
+                    img = img.reshape(shape[1], shape[0])
+            if img.ndim == 1 and width > 0:
+                if c_like is not None and reading_order == c_like:
+                    img = img.reshape((-1, width), order="C")
+                else:
+                    img = img.reshape((width, -1), order="F")
+        except Exception:
+            return None
+
+        img = np.squeeze(np.asarray(img))
+        if img.ndim != 2 or img.size == 0:
+            return None
+        return img
+
     def _enforce_pan_interaction(self):
         view_box = self._get_image_viewbox()
         if view_box is None:
@@ -845,12 +891,20 @@ class MainScreen(display.MITRDisplay):
         checked = bool(enabled)
         if not checked:
             self._set_wf_norm_visual_state("idle")
-            if self._last_source_image is not None:
-                self._set_image_item_data(np.asarray(self._last_source_image))
-                self._apply_robust_normalization(
-                    self._last_source_image,
-                    source_exposure_s=self._last_source_exposure_s,
-                )
+            raw_image = self._last_source_image
+            if raw_image is None:
+                raw_image = self._get_latest_pv_image()
+            if raw_image is not None:
+                raw_image = np.asarray(raw_image)
+                self._last_source_image = raw_image
+                self._last_image = raw_image
+                self._set_image_item_data(raw_image)
+                self._histogram_user_view_active = False
+                if self.auto_levels_checkbox.isChecked():
+                    self._auto_levels_from_current_image()
+                else:
+                    self._update_level_slider_scale_from_image(raw_image)
+                    self._set_image_levels(self.min_spinbox.value(), self.max_spinbox.value())
             self._reset_histogram_view()
             self._apply_profile_popup_theme_from_palette()
             return
@@ -1079,9 +1133,13 @@ class MainScreen(display.MITRDisplay):
             self._wf_norm_ignore_next_image_changed = True
             image_item.setImage(image_data, autoLevels=False)
         except Exception:
-            self._wf_norm_ignore_next_image_changed = False
+            self._clear_internal_image_update_flags()
         finally:
-            self._wf_norm_image_update_in_progress = False
+            QtCore.QTimer.singleShot(0, self._clear_internal_image_update_flags)
+
+    def _clear_internal_image_update_flags(self):
+        self._wf_norm_ignore_next_image_changed = False
+        self._wf_norm_image_update_in_progress = False
 
     def _cancel_profile_requests(self):
         with self._profile_worker_lock:
@@ -2406,13 +2464,6 @@ class MainScreen(display.MITRDisplay):
         mode = "norm" if self._is_wf_norm_active() else "raw"
         force_update = (mode != self._level_slider_mode)
         self._level_slider_mode = mode
-        if (
-            (not force_update)
-            and (mode == "norm")
-            and hasattr(self, "auto_levels_checkbox")
-            and (not self.auto_levels_checkbox.isChecked())
-        ):
-            return
         bounds = self._infer_level_bounds_from_image_data(data)
         if bounds is None:
             return
@@ -2702,10 +2753,11 @@ class MainScreen(display.MITRDisplay):
             self._startup_autoscale_timer.stop()
 
     def _on_new_image_event(self, *args):
-        if self._wf_norm_ignore_next_image_changed:
+        pending_frame_exposure_s = self._normalize_positive_exposure(self._pending_next_frame_exposure_s)
+        if self._wf_norm_ignore_next_image_changed and pending_frame_exposure_s is None:
             self._wf_norm_ignore_next_image_changed = False
             return
-        frame_exposure_s = self._normalize_positive_exposure(self._pending_next_frame_exposure_s)
+        frame_exposure_s = pending_frame_exposure_s
         if frame_exposure_s is None:
             frame_exposure_s = self._get_current_exposure_time_s()
         # Consume one-frame latch; if no new acquire edge is seen, fall back to
@@ -2740,12 +2792,10 @@ class MainScreen(display.MITRDisplay):
             self._wf_norm_ignore_next_image_changed = False
             return
         image = None
-        explicit_image = False
         if args:
             candidate = args[0]
             if candidate is not None:
                 image = candidate
-                explicit_image = True
 
         norm_active = (
             self.wf_norm_checkbox is not None
@@ -2754,12 +2804,10 @@ class MainScreen(display.MITRDisplay):
         )
 
         if image is None:
-            if norm_active and self._last_source_image is not None:
-                # When norm is active, the widget image may already be the
-                # normalized display buffer. Reuse the cached raw frame unless
-                # a fresh image was explicitly supplied by a signal.
+            image = self._get_latest_pv_image()
+            if image is None and self._last_source_image is not None:
                 image = self._last_source_image
-            else:
+            if image is None:
                 image_view = self.ui.cameraImage
                 try:
                     image = image_view.getImageItem().image
@@ -2771,7 +2819,10 @@ class MainScreen(display.MITRDisplay):
 
         source_image = np.asarray(image)
         source_exposure_s = self._normalize_positive_exposure(source_exposure_s)
-        should_refresh_raw_cache = source_is_new_frame or (not norm_active) or explicit_image
+        # Only promote true raw-frame sources into the raw cache. Explicit image
+        # arguments are also used for internal reprocessing of cached frames and
+        # must not be allowed to overwrite the cache with display data.
+        should_refresh_raw_cache = source_is_new_frame or (not norm_active)
         if should_refresh_raw_cache:
             # Keep the cached raw frame aligned with the most recent PV image.
             self._last_source_image = source_image
@@ -2809,9 +2860,12 @@ class MainScreen(display.MITRDisplay):
         if self._profile_enabled and not self._profile_roi_dragging:
             self._update_profile_plot()
         if not self.auto_levels_checkbox.isChecked():
+            self._update_level_slider_scale_from_image(display_image)
             if not self._manual_levels_initialized:
                 self._auto_levels_from_current_image()
                 self._manual_levels_initialized = True
+            else:
+                self._set_image_levels(self.min_spinbox.value(), self.max_spinbox.value())
             return
 
         data = np.asarray(display_image)
