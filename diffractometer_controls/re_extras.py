@@ -4,7 +4,7 @@ from pydm.display import Display
 from qtpy import QtCore, QtGui
 from qtpy.QtWidgets import (QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QScrollArea, QFrame,
-    QApplication, QWidget, QLabel)
+    QApplication, QWidget, QLabel, QTextEdit)
 from bluesky_widgets.qt.run_engine_client import (
     QtReConsoleMonitor,
     QtReEnvironmentControls,
@@ -33,6 +33,34 @@ class REPlans(display.MITRDisplay):
     def ui_filepath(self):
         return super().ui_filepath()
 
+    def _apply_console_theme(self):
+        console = getattr(self, "_re_console", None)
+        if console is None:
+            return
+
+        text_edit = getattr(console, "_text_edit", None)
+        if text_edit is None:
+            text_edits = console.findChildren(QTextEdit)
+            text_edit = text_edits[0] if text_edits else None
+        if text_edit is None:
+            return
+
+        app = QApplication.instance()
+        palette = QtGui.QPalette(app.palette() if app is not None else self.palette())
+        disabled_base = palette.color(QtGui.QPalette.Disabled, QtGui.QPalette.Base)
+        palette.setColor(QtGui.QPalette.Base, disabled_base)
+        text_edit.setPalette(palette)
+        text_edit.viewport().update()
+        text_edit.update()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() in (
+            QtCore.QEvent.PaletteChange,
+            QtCore.QEvent.ApplicationPaletteChange,
+        ):
+            self._apply_console_theme()
+
     def customize_ui(self):
         from application import MITRApplication
 
@@ -43,3 +71,5 @@ class REPlans(display.MITRDisplay):
         re_queue_history = QtRePlanHistory(re_client)
         self.ui.RE_Console.layout().addWidget(re_console)
         self.ui.RE_Queue_History.layout().addWidget(re_queue_history)
+        self._re_console = re_console
+        self._apply_console_theme()

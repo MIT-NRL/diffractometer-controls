@@ -13,6 +13,17 @@ from pathlib import Path
 from qtpy import QtCore, QtGui
 
 
+def _configure_qt_highdpi():
+    if hasattr(QtCore.Qt, "AA_EnableHighDpiScaling"):
+        QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
+    if hasattr(QtCore.Qt, "AA_UseHighDpiPixmaps"):
+        QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
+    rounding_policy_enum = getattr(QtCore.Qt, "HighDpiScaleFactorRoundingPolicy", None)
+    set_rounding_policy = getattr(QtGui.QGuiApplication, "setHighDpiScaleFactorRoundingPolicy", None)
+    if rounding_policy_enum is not None and callable(set_rounding_policy):
+        set_rounding_policy(rounding_policy_enum.PassThrough)
+
+
 def main():
     logger = logging.getLogger("")
     handler = logging.StreamHandler()
@@ -21,6 +32,7 @@ def main():
     logger.addHandler(handler)
     logger.setLevel("INFO")
     handler.setLevel("INFO")
+    _configure_qt_highdpi()
 
     from pydm import config
 
@@ -117,6 +129,11 @@ def main():
     #     "--homefile", help="Path to a PyDM file to return to when the home button is clicked in the navigation bar"
     # )
     parser.add_argument(
+        "--displayfile",
+        help="A PyDM file to display in the launched window.",
+        default="main_screen.ui",
+    )
+    parser.add_argument(
         "--perfmon",
         action="store_true",
         help="Enable performance monitoring," + " and print CPU usage to the terminal.",
@@ -200,6 +217,7 @@ def main():
 
     app = MITRApplication(
         ipaddress=str(pydm_args.ip_addr),
+        ui_file=pydm_args.displayfile,
         command_line_args=pydm_args.display_args,
         perfmon=pydm_args.perfmon,
         hide_nav_bar=pydm_args.hide_nav_bar,

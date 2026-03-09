@@ -81,6 +81,7 @@ class MITRMainWindow(PyDMMainWindow):
         self._run_finish_font_px = 16
         self._run_progress_font_px = 15
         self._run_is_dark_mode = False
+        self._themed_icon_targets = []
         self._focus_online_proc = None
         self._focus_online_session_id = None
         self._focus_online_run_uid = None
@@ -106,14 +107,14 @@ class MITRMainWindow(PyDMMainWindow):
         self.setWindowIcon(QtGui.QIcon(icon_path))
         re_manager_api = self.re_manager_api
 
-        bar = self.statusBar()
-        heartbeat_indicator = PyDMByteIndicator(init_channel=f"ca://{self.macros['P']}HEARTBEAT")
-        heartbeat_indicator.labels = ['IOC Heartbeat']
-        heartbeat_indicator.labelPosition = 2
+        if self._should_show_heartbeat_indicator():
+            bar = self.statusBar()
+            heartbeat_indicator = PyDMByteIndicator(init_channel=f"ca://{self.macros['P']}HEARTBEAT")
+            heartbeat_indicator.labels = ['IOC Heartbeat']
+            heartbeat_indicator.labelPosition = 2
+            bar.addPermanentWidget(heartbeat_indicator)
 
-        bar.addPermanentWidget(heartbeat_indicator)
-
-        gear_icon = qta.icon('fa6s.gear')
+        gear_icon = self._make_themed_icon('fa6s.gear')
         # controls = PyDMRelatedDisplayButton(filename="/home/mitr_4dh4/EPICS/IOCs/4dh4/4dh4App/op/adl/ioc_motors.adl")
         # controls.macros = self.macros_str
         # controls.setText("Controls")
@@ -126,10 +127,11 @@ class MITRMainWindow(PyDMMainWindow):
         # Create a QToolButton
 
         controlsAll = QToolButton(self)
-        controlsAll.setIcon(qta.icon('fa6s.gear'))  # Set an appropriate icon
+        controlsAll.setIcon(gear_icon)
         controlsAll.setText("All Controls")  # Set the text for the button
         controlsAll.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)  # Text below the icon
         controlsAll.setIconSize(QSize(24, 24))  # Match the icon size of the home button
+        self._register_themed_icon(controlsAll, 'fa6s.gear')
 
 
         # Connect the button to the load_file function
@@ -153,10 +155,32 @@ class MITRMainWindow(PyDMMainWindow):
         # self.ui.navbar.addWidget(controls)
         # self.ui.navbar.addWidget(controlsAll)
 
-        # Add a "Control System" menu to the menu bar
+        # Append application theme selection to the existing View menu.
+        view_menu = self._get_or_create_menu("View")
         control_system_menu = self.menuBar().addMenu("Control System")
         analysis_menu = self.menuBar().addMenu("Analysis")
         self.menuBar().insertMenu(control_system_menu.menuAction(), analysis_menu)
+
+        if view_menu.actions():
+            view_menu.addSeparator()
+        theme_menu = view_menu.addMenu("Theme")
+        theme_action_group = QtGui.QActionGroup(theme_menu)
+        theme_action_group.setExclusive(True)
+        self._theme_action_group = theme_action_group
+        self._theme_actions = {}
+        for label, mode, tip in (
+            ("Light Mode", "light", "Force the application to use the light theme."),
+            ("Dark Mode", "dark", "Force the application to use the dark theme."),
+            ("Auto Toggle", "system", "Follow the desktop theme preference."),
+        ):
+            action = theme_menu.addAction(label)
+            action.setCheckable(True)
+            action.setToolTip(tip)
+            action.setData(mode)
+            theme_action_group.addAction(action)
+            action.triggered.connect(lambda checked=False, m=mode: self._set_theme_mode(m))
+            self._theme_actions[mode] = action
+        self._sync_theme_actions()
 
         normalization_menu = analysis_menu.addMenu("Normalization filtering")
         normalization_action_group = QtGui.QActionGroup(normalization_menu)
@@ -204,7 +228,7 @@ class MITRMainWindow(PyDMMainWindow):
         # Add vscode editor of the bluesky directory
         bluesky_vscode = bluesky_menu.addAction("Edit Bluesky Files")
         bluesky_vscode.triggered.connect(lambda: subprocess.Popen(["code", "-n", "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls"]))
-        bluesky_vscode.setIcon(qta.icon('fa6.file-code'))
+        self._set_themed_action_icon(bluesky_vscode, 'fa6.file-code')
         bluesky_vscode.setToolTip("Edit the Bluesky files in VSCode")
         bluesky_menu.addAction(bluesky_vscode)
 
@@ -214,21 +238,21 @@ class MITRMainWindow(PyDMMainWindow):
         # Add actions to the "Bluesky Controls" submenu
         bluesky_RE_reset = bluesky_menu.addAction("RE Manager Reset")
         bluesky_RE_reset.triggered.connect(lambda: self.reset_process("queue-server"))
-        bluesky_RE_reset.setIcon(qta.icon('fa5s.redo'))
+        self._set_themed_action_icon(bluesky_RE_reset, 'fa5s.redo')
         bluesky_RE_reset.setToolTip("Reset the Bluesky Run Engine Manager")
         bluesky_menu.addAction(bluesky_RE_reset)
 
         # Add actions to the "Bluesky Controls" submenu
         bluesky_proxy_reset = bluesky_menu.addAction("RE Proxy Reset")
         bluesky_proxy_reset.triggered.connect(lambda: self.reset_process("bluesky-proxy"))
-        bluesky_proxy_reset.setIcon(qta.icon('fa5s.redo'))
+        self._set_themed_action_icon(bluesky_proxy_reset, 'fa5s.redo')
         bluesky_proxy_reset.setToolTip("Reset the Bluesky Run Engine Proxy")
         bluesky_menu.addAction(bluesky_proxy_reset)
 
         # Add Bluesky GUI reset action to the "Bluesky Controls" submenu
         bluesky_gui_reset = bluesky_menu.addAction("GUI Reset")
         bluesky_gui_reset.triggered.connect(lambda: self.control_servers("4dh4gui", "restart"))
-        bluesky_gui_reset.setIcon(qta.icon('fa5s.redo'))
+        self._set_themed_action_icon(bluesky_gui_reset, 'fa5s.redo')
         bluesky_gui_reset.setToolTip("Reset the Bluesky GUI")
         bluesky_menu.addAction(bluesky_gui_reset)
 
@@ -240,7 +264,7 @@ class MITRMainWindow(PyDMMainWindow):
 
         # Remove Reactor Power Suspender action
         remove_suspender_action = suspender_menu.addAction("Remove Reactor Power Suspender")
-        remove_suspender_action.setIcon(qta.icon('fa5s.trash'))
+        self._set_themed_action_icon(remove_suspender_action, 'fa5s.trash')
         remove_suspender_action.setToolTip("Remove the reactor power suspender from the Run Engine")
         remove_suspender_action.triggered.connect(
             lambda: self._set_reactor_power_suspender_enabled(False)
@@ -248,7 +272,7 @@ class MITRMainWindow(PyDMMainWindow):
 
         # Install Reactor Power Suspender action
         install_suspender_action = suspender_menu.addAction("Install Reactor Power Suspender")
-        install_suspender_action.setIcon(qta.icon('fa5s.plus'))
+        self._set_themed_action_icon(install_suspender_action, 'fa5s.plus')
         install_suspender_action.setToolTip("Install the reactor power suspender to the Run Engine")
         install_suspender_action.triggered.connect(
             lambda: self._set_reactor_power_suspender_enabled(True)
@@ -261,13 +285,13 @@ class MITRMainWindow(PyDMMainWindow):
         # Add vscode editor of the EPICS directory
         epics_vscode = epics_menu.addAction("Edit EPICS IOC Files")
         epics_vscode.triggered.connect(lambda: subprocess.Popen(["code", "-n", "/home/mitr_4dh4/EPICS/IOCs/4dh4"]))
-        epics_vscode.setIcon(qta.icon('fa6.file-code'))
+        self._set_themed_action_icon(epics_vscode, 'fa6.file-code')
         epics_vscode.setToolTip("Edit the EPICS IOC files in VSCode")
         epics_menu.addAction(epics_vscode)
 
         epics_top_vscode = epics_menu.addAction("Edit EPICS Files")
         epics_top_vscode.triggered.connect(lambda: subprocess.Popen(["code", "-n", "/home/mitr_4dh4/EPICS"]))
-        epics_top_vscode.setIcon(qta.icon('fa6.file-code'))
+        self._set_themed_action_icon(epics_top_vscode, 'fa6.file-code')
         epics_top_vscode.setToolTip("Edit the EPICS files in VSCode")
         epics_menu.addAction(epics_top_vscode)
 
@@ -277,21 +301,21 @@ class MITRMainWindow(PyDMMainWindow):
         # Add start action to the "EPICS Controls" submenu
         epics_ioc_start = epics_menu.addAction("IOC Start")
         epics_ioc_start.triggered.connect(lambda: self.control_servers("4dh4ioc", "start"))
-        epics_ioc_start.setIcon(qta.icon('fa5s.play'))
+        self._set_themed_action_icon(epics_ioc_start, 'fa5s.play')
         epics_ioc_start.setToolTip("Start the EPICS IOC")
         epics_menu.addAction(epics_ioc_start)
 
         # Add actions to the "EPICS Controls" submenu
         epics_ioc_reset = epics_menu.addAction("IOC Reset")
         epics_ioc_reset.triggered.connect(lambda: self.control_servers("4dh4ioc", "restart"))
-        epics_ioc_reset.setIcon(qta.icon('fa5s.redo'))
+        self._set_themed_action_icon(epics_ioc_reset, 'fa5s.redo')
         epics_ioc_reset.setToolTip("Reset the EPICS IOC")
         epics_menu.addAction(epics_ioc_reset)
 
         # Add stop action to the "EPICS Controls" submenu
         epics_ioc_stop = epics_menu.addAction("IOC Stop")
         epics_ioc_stop.triggered.connect(lambda: self.control_servers("4dh4ioc", "stop"))
-        epics_ioc_stop.setIcon(qta.icon('fa5s.stop'))
+        self._set_themed_action_icon(epics_ioc_stop, 'fa5s.stop')
         epics_ioc_stop.setToolTip("Stop the EPICS IOC")
         epics_menu.addAction(epics_ioc_stop)
 
@@ -302,7 +326,13 @@ class MITRMainWindow(PyDMMainWindow):
             macros=self.macros,
             # open_in_new_window=True
         ))
+        self._register_themed_icon(controls_action, 'fa6s.gear')
         control_system_menu.addAction(controls_action)
+
+    def _should_show_heartbeat_indicator(self):
+        app = QApplication.instance()
+        startup_ui_file = getattr(app, "_startup_ui_file", "main_screen.ui")
+        return Path(str(startup_ui_file)).name == "main_screen.ui"
 
     def _is_tomopy_available(self):
         try:
@@ -332,6 +362,104 @@ class MITRMainWindow(PyDMMainWindow):
                 self.statusBar().showMessage(f"Normalization filter set to: {m}", 2500)
         except Exception:
             pass
+
+    def _get_or_create_menu(self, title):
+        wanted = str(title).replace("&", "").strip().lower()
+        for action in self.menuBar().actions():
+            menu = action.menu()
+            if menu is None:
+                continue
+            current = menu.title().replace("&", "").strip().lower()
+            if current == wanted:
+                return menu
+        return self.menuBar().addMenu(title)
+
+    def _make_themed_icon(self, icon_name):
+        palette = self.palette()
+        color = palette.color(QtGui.QPalette.ButtonText).name()
+        disabled = palette.color(QtGui.QPalette.Disabled, QtGui.QPalette.ButtonText).name()
+        return qta.icon(icon_name, color=color, color_disabled=disabled)
+
+    def _register_themed_icon(self, target, icon_name):
+        self._themed_icon_targets.append((target, icon_name))
+        target.setIcon(self._make_themed_icon(icon_name))
+
+    def _set_themed_action_icon(self, action, icon_name):
+        self._register_themed_icon(action, icon_name)
+
+    def _refresh_themed_icons(self):
+        kept = []
+        for target, icon_name in self._themed_icon_targets:
+            try:
+                target.setIcon(self._make_themed_icon(icon_name))
+                kept.append((target, icon_name))
+            except RuntimeError:
+                continue
+        self._themed_icon_targets = kept
+
+    @staticmethod
+    def _theme_mode_from_app(app):
+        from application import get_app_settings
+
+        settings = get_app_settings()
+        getter = getattr(app, "theme_mode", None)
+        if callable(getter):
+            try:
+                return getter()
+            except Exception:
+                pass
+        return str(settings.value("appearance/theme_mode", "system")).strip().lower()
+
+    @staticmethod
+    def _is_dark_theme_active_from_app(app):
+        getter = getattr(app, "is_dark_theme_active", None)
+        if callable(getter):
+            try:
+                return bool(getter())
+            except Exception:
+                pass
+        if app is None:
+            return False
+        try:
+            palette = app.palette()
+            color = palette.color(QtGui.QPalette.Window)
+            return color.lightness() < 128
+        except Exception:
+            return False
+
+    def _set_theme_mode(self, mode):
+        from application import THEME_MODE_SETTINGS_KEY, MITRApplication, get_app_settings
+
+        mode = str(mode).strip().lower()
+        if mode not in {"light", "dark", "system"}:
+            mode = "system"
+        settings = get_app_settings()
+        settings.setValue(THEME_MODE_SETTINGS_KEY, mode)
+        settings.sync()
+        app = MITRApplication.instance()
+        if app is not None:
+            app.apply_theme_preference(mode)
+        self._sync_theme_actions()
+        try:
+            self.statusBar().showMessage(f"Theme set to: {mode}", 2000)
+        except Exception:
+            pass
+
+    def _sync_theme_actions(self):
+        app = QApplication.instance()
+        theme_mode = self._theme_mode_from_app(app)
+        for mode, action in getattr(self, "_theme_actions", {}).items():
+            was_blocked = action.blockSignals(True)
+            action.setChecked(mode == theme_mode)
+            action.blockSignals(was_blocked)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() in (
+            QtCore.QEvent.PaletteChange,
+            QtCore.QEvent.ApplicationPaletteChange,
+        ):
+            self._refresh_themed_icons()
 
     def _setup_run_status_widget(self, toolbar):
         prefix = f"{self.macros.get('P', '')}Bluesky:Run:"

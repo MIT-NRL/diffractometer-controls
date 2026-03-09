@@ -1,8 +1,9 @@
 import re
+import types
 
 from qtpy import QtCore
 from qtpy.QtGui import QPalette
-from qtpy.QtWidgets import QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QSizePolicy, QTextEdit, QPushButton
+from qtpy.QtWidgets import QApplication, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QSizePolicy, QTextEdit, QPushButton
 from bluesky_widgets.qt.run_engine_client import (
     QtReEnvironmentControls,
     QtReExecutionControls,
@@ -20,10 +21,12 @@ class REControlPanel(display.MITRDisplay):
     _running_plan_font_max_px = 28
 
     def __init__(self, parent=None, args=None, macros=None, ui_filename='re_control_panel.ui'):
-        super().__init__(parent, args, macros, ui_filename)
         self._running_plan_font_px = 15
         self._running_plan_font_min_px = 11
         self._running_plan_font_max_px = 28
+        self._pending_restyle_methods = set()
+        self._restyle_flush_scheduled = False
+        super().__init__(parent, args, macros, ui_filename)
         # print("REControlPanel here")
         # self.customize_ui()
 
@@ -32,6 +35,50 @@ class REControlPanel(display.MITRDisplay):
 
     def ui_filepath(self):
         return super().ui_filepath()
+
+    def _current_palette(self):
+        app = QApplication.instance()
+        return app.palette() if app is not None else self.palette()
+
+    @staticmethod
+    def _set_stylesheet_if_changed(widget, stylesheet):
+        if widget.styleSheet() != stylesheet:
+            widget.setStyleSheet(stylesheet)
+
+    @staticmethod
+    def _set_text_if_changed(widget, text):
+        if widget.text() != text:
+            widget.setText(text)
+
+    def _schedule_restyle(self, *method_names):
+        self._pending_restyle_methods.update(method_names)
+        if self._restyle_flush_scheduled:
+            return
+        self._restyle_flush_scheduled = True
+        QtCore.QTimer.singleShot(0, self._flush_scheduled_restyles)
+
+    def _flush_scheduled_restyles(self):
+        self._restyle_flush_scheduled = False
+        if not self._pending_restyle_methods:
+            return
+        method_names = list(self._pending_restyle_methods)
+        self._pending_restyle_methods.clear()
+        for method_name in method_names:
+            method = getattr(self, method_name, None)
+            if callable(method):
+                method()
+
+    def _patch_label_set_text(self, label, *method_names):
+        if label.property("_dc_restyle_text_patch_applied"):
+            return
+        original_set_text = label.setText
+
+        def _patched_set_text(widget, text):
+            original_set_text(text)
+            self._schedule_restyle(*method_names)
+
+        label.setText = types.MethodType(_patched_set_text, label)
+        label.setProperty("_dc_restyle_text_patch_applied", True)
 
     def _style_re_connection_status_label(self):
         """Emphasize the RE manager connection state label."""
@@ -44,7 +91,7 @@ class REControlPanel(display.MITRDisplay):
         for label in self._re_manager.findChildren(QLabel):
             text = label.text().strip().upper()
             if text in status_styles:
-                label.setStyleSheet(status_styles[text])
+                self._set_stylesheet_if_changed(label, status_styles[text])
 
     def _style_re_queue_state_label(self):
         """Emphasize queue run state in Queue Controls."""
@@ -55,7 +102,7 @@ class REControlPanel(display.MITRDisplay):
         for label in self._re_queue_controls.findChildren(QLabel):
             text = label.text().strip().upper()
             if text in queue_state_styles:
-                label.setStyleSheet(queue_state_styles[text])
+                self._set_stylesheet_if_changed(label, queue_state_styles[text])
 
     def _style_re_running_plan_widget(self):
         """Improve readability of the Running Plan panel."""
@@ -84,12 +131,12 @@ class REControlPanel(display.MITRDisplay):
                 text_edit.installEventFilter(self)
                 text_edit.setProperty("_dc_ctrl_wheel_zoom_enabled", True)
                 text_edit.setToolTip("Use Ctrl+mouse wheel to change text size.")
-            palette = text_edit.palette()
+            palette = self._current_palette()
             base_color = palette.color(QPalette.Base).name()
             text_color = palette.color(QPalette.Text).name()
             border_color = palette.color(QPalette.Mid).name()
             muted_color = palette.color(QPalette.Mid).name()
-            text_edit.setStyleSheet(
+            text_edit_style = (
                 "QTextEdit {"
                 f"font-size: {body_font_px}px; "
                 "padding: 4px; "
@@ -99,7 +146,8 @@ class REControlPanel(display.MITRDisplay):
                 f"color: {text_color};"
                 "}"
             )
-            text_edit.document().setDefaultStyleSheet(
+            self._set_stylesheet_if_changed(text_edit, text_edit_style)
+            document_style = (
                 f"body {{ line-height: 1.45; color: {text_color}; }} "
                 f"b {{ color: {text_color}; font-weight: 700; }} "
                 "b.dc-section-hdr { "
@@ -115,6 +163,8 @@ class REControlPanel(display.MITRDisplay):
                 "font-weight: 600; "
                 "}"
             )
+            if text_edit.document().defaultStyleSheet() != document_style:
+                text_edit.document().setDefaultStyleSheet(document_style)
             html = text_edit.toHtml()
             formatted_html = self._format_running_plan_html(html)
             if formatted_html != html:
@@ -128,23 +178,34 @@ class REControlPanel(display.MITRDisplay):
         for label in self._re_running_plan.findChildren(QLabel):
             if label.text().strip().upper() == "RUNNING PLAN":
                 if manager_paused and has_running_item:
-                    label.setStyleSheet(
-                        "font-size: 15px; font-weight: 800; color: #92400e; "
-                        "background-color: #fef3c7; border: 1px solid #fcd34d; "
-                        "border-radius: 6px; padding: 2px 8px;"
-                    )
+                    self._set_stylesheet_if_changed(label, self._running_plan_badge_style("paused"))
                 elif has_running_item:
-                    label.setStyleSheet(
-                        "font-size: 15px; font-weight: 800; color: #7f1d1d; "
-                        "background-color: #fee2e2; border: 1px solid #fecaca; "
-                        "border-radius: 6px; padding: 2px 8px;"
-                    )
+                    self._set_stylesheet_if_changed(label, self._running_plan_badge_style("running"))
                 else:
-                    label.setStyleSheet(
-                        "font-size: 15px; font-weight: 700; color: #334155; "
-                        "background-color: #e2e8f0; border: 1px solid #cbd5e1; "
-                        "border-radius: 6px; padding: 2px 8px;"
-                    )
+                    self._set_stylesheet_if_changed(label, self._running_plan_badge_style("idle"))
+
+    def _running_plan_badge_style(self, state):
+        pal = self._current_palette()
+        is_dark = pal.color(QPalette.Window).lightness() < 128
+        if is_dark:
+            palette = {
+                "paused": ("#fbbf24", "#3f2d09", "#b45309"),
+                "running": ("#f87171", "#3f1114", "#b91c1c"),
+                "idle": ("#cbd5e1", "#1e293b", "#475569"),
+            }
+        else:
+            palette = {
+                "paused": ("#fef3c7", "#92400e", "#fcd34d"),
+                "running": ("#fee2e2", "#7f1d1d", "#fecaca"),
+                "idle": ("#e2e8f0", "#334155", "#cbd5e1"),
+            }
+        bg, fg, border = palette.get(state, palette["idle"])
+        weight = 800 if state in {"paused", "running"} else 700
+        return (
+            f"font-size: 15px; font-weight: {weight}; color: {fg}; "
+            f"background-color: {bg}; border: 1px solid {border}; "
+            "border-radius: 6px; padding: 2px 8px;"
+        )
 
     @staticmethod
     def _format_running_plan_html(html):
@@ -251,8 +312,8 @@ class REControlPanel(display.MITRDisplay):
             state_style = state_styles.get(value_key, "color: #111827; background-color: #eef2ff;")
             if label_name == "Stop Pending" and value_key == "YES":
                 state_style = "color: #92400e; background-color: #fef3c7;"
-            label.setText(f"{label_name}: {display_value}")
-            label.setStyleSheet(f"{text_style} {state_style}")
+            self._set_text_if_changed(label, f"{label_name}: {display_value}")
+            self._set_stylesheet_if_changed(label, f"{text_style} {state_style}")
 
     def _compact_re_status_layout(self):
         """Tighten spacing inside status panel to free horizontal space."""
@@ -353,6 +414,17 @@ class REControlPanel(display.MITRDisplay):
             group_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
             group_box.setMaximumHeight(widget_height)
 
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() in (
+            QtCore.QEvent.PaletteChange,
+            QtCore.QEvent.ApplicationPaletteChange,
+        ):
+            self._style_re_connection_status_label()
+            self._style_re_queue_state_label()
+            self._style_re_status_labels()
+            self._style_re_running_plan_widget()
+
     def customize_ui(self):
         # button = self.ui.pushButton
         # print('Here')
@@ -383,20 +455,18 @@ class REControlPanel(display.MITRDisplay):
         self._re_running_plan = re_running_plan
         self._re_queue_controls = re_queue_controls
         self._re_plan_execution = re_plan_execution
-        self._re_connection_status_timer = QtCore.QTimer(self)
-        self._re_connection_status_timer.timeout.connect(
-            self._style_re_connection_status_label
-        )
-        self._re_connection_status_timer.timeout.connect(
-            self._style_re_queue_state_label
-        )
-        self._re_connection_status_timer.timeout.connect(
-            self._style_re_status_labels
-        )
-        self._re_connection_status_timer.timeout.connect(
-            self._style_re_running_plan_widget
-        )
-        self._re_connection_status_timer.start(500)
+
+        for label in self._re_manager.findChildren(QLabel):
+            self._patch_label_set_text(label, "_style_re_connection_status_label")
+        for label in self._re_queue_controls.findChildren(QLabel):
+            self._patch_label_set_text(label, "_style_re_queue_state_label")
+        for label in self._re_status.findChildren(QLabel):
+            self._patch_label_set_text(label, "_style_re_status_labels", "_style_re_running_plan_widget")
+        for text_edit in self._re_running_plan.findChildren(QTextEdit):
+            text_edit.textChanged.connect(
+                lambda: self._schedule_restyle("_style_re_running_plan_widget")
+            )
+
         self._compact_panel_layouts()
         self._normalize_panel_heights()
         self._style_groupbox_titles()
