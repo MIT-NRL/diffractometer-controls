@@ -17,7 +17,6 @@ def _safe_caput(suffix, value):
 
 class _RunStatusPublisher:
     def __init__(self):
-        self._descriptor_stream = {}
         self._run_uid = ""
         self._run_active = False
         self._run_paused = False
@@ -87,11 +86,26 @@ class _RunStatusPublisher:
                 _safe_caput("FinishEpoch", self._finish_epoch)
             _safe_caput("LastUpdateEpoch", now)
 
+    def publish_progress(self, *, done_units=None, total_units=None, finish_epoch=None, now=None):
+        """Publish runtime plan progress directly to the run-status PVs."""
+        if not self._run_active:
+            return
+
+        now = time.time() if now is None else float(now)
+        if done_units is not None:
+            _safe_caput("DoneUnits", int(done_units))
+        if total_units is not None:
+            _safe_caput("TotalUnits", int(total_units))
+        if finish_epoch is not None:
+            self._finish_epoch = float(finish_epoch)
+            if not self._run_paused:
+                _safe_caput("FinishEpoch", self._finish_epoch)
+        _safe_caput("LastUpdateEpoch", now)
+
     def __call__(self, name, doc):
         now = time.time()
 
         if name == "start":
-            self._descriptor_stream = {}
             self._run_uid = str(doc.get("uid", ""))
             self._run_active = True
             self._run_paused = False
@@ -115,33 +129,6 @@ class _RunStatusPublisher:
             _safe_caput("StartEpoch", now)
             self._set_finish_epoch(finish_epoch)
             _safe_caput("LastUpdateEpoch", now)
-
-        elif name == "descriptor":
-            self._descriptor_stream[doc.get("uid", "")] = doc.get("name", "")
-
-        elif name == "event":
-            stream_name = self._descriptor_stream.get(doc.get("descriptor", ""), "")
-            if stream_name == "progress":
-                data = doc.get("data", {})
-                if "done_units" in data:
-                    _safe_caput("DoneUnits", int(data["done_units"]))
-                if "total_units" in data:
-                    _safe_caput("TotalUnits", int(data["total_units"]))
-                if "finish_epoch" in data:
-                    self._set_finish_epoch(float(data["finish_epoch"]))
-                _safe_caput("LastUpdateEpoch", now)
-                return
-
-            if stream_name == "interruptions":
-                data = doc.get("data", {})
-                tokens = " ".join(str(v) for v in data.values() if v is not None).lower()
-                resume_markers = (" resume", "resum", "released", "release")
-                suspend_markers = ("suspend", "tripp", "suspender")
-                if any(marker in tokens for marker in resume_markers):
-                    self._set_suspended(False, now=now)
-                elif any(marker in tokens for marker in suspend_markers):
-                    self._set_suspended(True, now=now, reason=tokens)
-                return
 
         elif name == "stop":
             self._run_active = False
@@ -174,10 +161,15 @@ def _mark_worker_closed():
 
 _run_status_publisher = _RunStatusPublisher()
 RE.subscribe(_run_status_publisher)
-try:
-    RE.record_interruptions = True
-except Exception:
-    pass
+
+
+def _publish_run_progress(*, done_units=None, total_units=None, finish_epoch=None, now=None):
+    _run_status_publisher.publish_progress(
+        done_units=done_units,
+        total_units=total_units,
+        finish_epoch=finish_epoch,
+        now=now,
+    )
 
 
 _existing_state_hook = RE.state_hook
@@ -196,17 +188,23 @@ def _state_hook_with_status(*args, _previous_hook=_previous_state_hook, **kwargs
     if isinstance(state, str):
         state_lower = state.lower()
         if _run_status_publisher._run_active:
-            if state_lower in ("pausing", "paused", "suspending", "suspended"):
-                _run_status_publisher._set_paused(True, now=time.time())
+            now = time.time()
+            if state_lower in ("suspending", "suspended"):
+                _run_status_publisher._set_paused(True, now=now)
+                _run_status_publisher._set_suspended(True, now=now)
+            elif state_lower in ("pausing", "paused"):
+                _run_status_publisher._set_suspended(False, now=now)
+                _run_status_publisher._set_paused(True, now=now)
             elif state_lower in ("running", "executing"):
-                _run_status_publisher._set_paused(False, now=time.time())
+                _run_status_publisher._set_suspended(False, now=now)
+                _run_status_publisher._set_paused(False, now=now)
             elif state_lower == "idle" and _run_status_publisher._run_paused:
                 # RE may transiently report idle while paused at a checkpoint.
                 _safe_caput(
                     "State",
                     "SUSPENDED" if _run_status_publisher._run_suspended else "PAUSED",
                 )
-                _safe_caput("LastUpdateEpoch", time.time())
+                _safe_caput("LastUpdateEpoch", now)
 
     if callable(_previous_hook):
         return _previous_hook(*args, **kwargs)
