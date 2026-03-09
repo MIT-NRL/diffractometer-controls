@@ -20,7 +20,7 @@ import bluesky.preprocessors as bpp
 import numpy as np
 from ophyd import (Component as Cpt,
                    EpicsSignal, EpicsSignalRO, EpicsSignalWithRBV, 
-                   EpicsMotor, Signal)
+                   EpicsMotor)
 from ophyd.positioner import PositionerBase
 from ophyd.device import DeviceStatus
 from ophyd.status import Status, SubscriptionStatus
@@ -178,11 +178,6 @@ class _ProgressEstimator:
             else 0.0
         )
         self._unit_t0 = None
-
-        self._sig_done = Signal(name="done_units", value=0)
-        self._sig_total = Signal(name="total_units", value=self.total_units)
-        self._sig_finish = Signal(name="finish_epoch", value=0.0)
-        self._sig_avg = Signal(name="avg_unit_s", value=self.avg_unit_s)
         self._started = False
 
     def _compute_finish_epoch(self):
@@ -192,16 +187,16 @@ class _ProgressEstimator:
         return float(time.time() + remaining * self.avg_unit_s)
 
     def _publish_progress(self):
-        self._sig_done.put(int(self.done_units))
-        self._sig_total.put(int(self.total_units))
-        self._sig_avg.put(float(self.avg_unit_s))
-        self._sig_finish.put(float(self._compute_finish_epoch()))
-        yield from bps.create(name="progress")
-        yield from bps.read(self._sig_done)
-        yield from bps.read(self._sig_total)
-        yield from bps.read(self._sig_finish)
-        yield from bps.read(self._sig_avg)
-        yield from bps.save()
+        publish = globals().get("_publish_run_progress", None)
+        if callable(publish):
+            publish(
+                done_units=int(self.done_units),
+                total_units=int(self.total_units),
+                finish_epoch=float(self._compute_finish_epoch()),
+                now=time.time(),
+            )
+        if False:
+            yield None
 
     def mark_started(self):
         if not self._started:
