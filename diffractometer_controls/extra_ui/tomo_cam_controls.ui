@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>378</width>
-    <height>838</height>
+    <width>279</width>
+    <height>735</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -15,7 +15,13 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout_5">
    <property name="spacing">
-    <number>1</number>
+    <number>3</number>
+   </property>
+   <property name="topMargin">
+    <number>4</number>
+   </property>
+   <property name="bottomMargin">
+    <number>4</number>
    </property>
    <item>
     <widget class="PyDMLabel" name="PyDMLabel">
@@ -46,6 +52,9 @@
       <enum>QFrame::Box</enum>
      </property>
      <layout class="QVBoxLayout" name="verticalLayout">
+      <property name="spacing">
+       <number>4</number>
+      </property>
       <item>
        <widget class="PyDMLabel" name="PyDMLabel_2">
         <property name="font">
@@ -977,6 +986,9 @@
       <enum>QFrame::Box</enum>
      </property>
      <layout class="QVBoxLayout" name="verticalLayout_2">
+      <property name="spacing">
+       <number>3</number>
+      </property>
       <item>
        <widget class="PyDMLabel" name="PyDMLabel_3">
         <property name="font">
@@ -1743,6 +1755,9 @@
       <enum>QFrame::Box</enum>
      </property>
      <layout class="QVBoxLayout" name="verticalLayout_4">
+      <property name="spacing">
+       <number>3</number>
+      </property>
       <item>
        <widget class="PyDMLabel" name="PyDMLabel_5">
         <property name="font">
@@ -1990,6 +2005,9 @@
       <enum>QFrame::Box</enum>
      </property>
      <layout class="QVBoxLayout" name="verticalLayout_3">
+      <property name="spacing">
+       <number>3</number>
+      </property>
       <item>
        <widget class="PyDMLabel" name="PyDMLabel_4">
         <property name="font">

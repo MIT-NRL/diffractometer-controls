@@ -1754,7 +1754,7 @@ background-color: rgb(25, 102, 255);</string>
           <stringlist>
            <string>URLDriver.ui</string>
            <string>URLDriverSetup.ui</string>
-           <string>cam_url_display.py</string>
+           <string>cam_url.ui</string>
           </stringlist>
          </property>
          <property name="titles" stdset="0">

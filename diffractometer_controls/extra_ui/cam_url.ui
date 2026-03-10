@@ -108,99 +108,7 @@
       </layout>
      </item>
      <item>
-      <widget class="PyDMByteIndicator" name="PyDMByteIndicator">
-       <property name="enabled">
-        <bool>true</bool>
-       </property>
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="minimumSize">
-        <size>
-         <width>40</width>
-         <height>40</height>
-        </size>
-       </property>
-       <property name="baseSize">
-        <size>
-         <width>0</width>
-         <height>0</height>
-        </size>
-       </property>
-       <property name="font">
-        <font>
-         <pointsize>12</pointsize>
-        </font>
-       </property>
-       <property name="toolTip">
-        <string>ca://${P}${R}Acquire</string>
-       </property>
-       <property name="channel" stdset="0">
-        <string>ca://${P}${R}Acquire</string>
-       </property>
-       <property name="showLabels" stdset="0">
-        <bool>false</bool>
-       </property>
-       <property name="circles" stdset="0">
-        <bool>true</bool>
-       </property>
-      </widget>
-     </item>
-     <item>
       <layout class="QVBoxLayout" name="verticalLayout_3">
-       <item>
-        <layout class="QHBoxLayout" name="horizontalLayout_2">
-         <item>
-          <widget class="QLabel" name="label">
-           <property name="font">
-            <font>
-             <pointsize>12</pointsize>
-            </font>
-           </property>
-           <property name="text">
-            <string>Exposure (s)</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="PyDMLineEdit" name="PyDMLineEdit">
-           <property name="sizePolicy">
-            <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
-             <horstretch>0</horstretch>
-             <verstretch>0</verstretch>
-            </sizepolicy>
-           </property>
-           <property name="font">
-            <font>
-             <pointsize>12</pointsize>
-            </font>
-           </property>
-           <property name="toolTip">
-            <string>ca://${P}${R}AcquireTime</string>
-           </property>
-           <property name="styleSheet">
-            <string notr="true">PyDMLineEdit {
-  color: rgb(0, 0, 0);
-  background-color: rgb(115, 223, 255);
-  border: 1px solid black;
-  margin: 0px;
-  padding: 0px;
-  spacing: 0px;
-  }</string>
-           </property>
-           <property name="showUnits" stdset="0">
-            <bool>true</bool>
-           </property>
-           <property name="channel" stdset="0">
-            <string>ca://${P}${R}AcquireTime</string>
-           </property>
-          </widget>
-         </item>
-        </layout>
-       </item>
        <item>
         <widget class="PyDMLabel" name="PyDMLabel">
          <property name="font">
@@ -237,92 +145,28 @@ background-color: rgb(213, 213, 213);</string>
      <item>
       <layout class="QVBoxLayout" name="verticalLayout_2">
        <item>
-        <layout class="QHBoxLayout" name="horizontalLayout">
+        <layout class="QVBoxLayout" name="verticalLayout_5">
          <item>
-          <widget class="PyDMLabel" name="PyDMLabel_3">
-           <property name="font">
-            <font>
-             <pointsize>12</pointsize>
-            </font>
-           </property>
+          <widget class="PyDMLabel" name="PyDMLabel_2">
            <property name="toolTip">
-            <string>ca://${P}${R}ArrayCounter_RBV</string>
+            <string/>
            </property>
-           <property name="styleSheet">
-            <string notr="true">color: rgb(0, 0, 255);
-background-color: rgb(213, 213, 213)</string>
-           </property>
-           <property name="channel" stdset="0">
-            <string>ca://${P}${R}ArrayCounter_RBV</string>
+           <property name="text">
+            <string>Camera Source</string>
            </property>
           </widget>
          </item>
          <item>
-          <widget class="PyDMLabel" name="PyDMLabel_4">
-           <property name="font">
-            <font>
-             <pointsize>12</pointsize>
-            </font>
-           </property>
+          <widget class="PyDMEnumComboBox" name="PyDMEnumComboBox">
            <property name="toolTip">
-            <string>ca://${P}${R}ArrayRate_RBV</string>
-           </property>
-           <property name="styleSheet">
-            <string notr="true">color: rgb(0, 0, 255);
-background-color: rgb(213, 213, 213)</string>
-           </property>
-           <property name="showUnits" stdset="0">
-            <bool>true</bool>
+            <string>ca://${P}camURL:URLSelect</string>
            </property>
            <property name="channel" stdset="0">
-            <string>ca://${P}${R}ArrayRate_RBV</string>
-           </property>
-           <property name="displayFormat" stdset="0">
-            <enum>PyDMLabel::Decimal</enum>
+            <string>ca://${P}camURL:URLSelect</string>
            </property>
           </widget>
          </item>
         </layout>
-       </item>
-       <item>
-        <widget class="PyDMLabel" name="PyDMLabel_2">
-         <property name="sizePolicy">
-          <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
-           <horstretch>0</horstretch>
-           <verstretch>0</verstretch>
-          </sizepolicy>
-         </property>
-         <property name="minimumSize">
-          <size>
-           <width>200</width>
-           <height>0</height>
-          </size>
-         </property>
-         <property name="font">
-          <font>
-           <pointsize>12</pointsize>
-          </font>
-         </property>
-         <property name="toolTip">
-          <string>ca://${P}${R}StatusMessage_RBV</string>
-         </property>
-         <property name="styleSheet">
-          <string notr="true">color: rgb(0, 0, 255);
-background-color: rgb(213, 213, 213)</string>
-         </property>
-         <property name="alignment">
-          <set>Qt::AlignCenter</set>
-         </property>
-         <property name="channel" stdset="0">
-          <string>ca://${P}${R}StatusMessage_RBV</string>
-         </property>
-         <property name="enableRichText" stdset="0">
-          <bool>true</bool>
-         </property>
-         <property name="displayFormat" stdset="0">
-          <enum>PyDMLabel::String</enum>
-         </property>
-        </widget>
        </item>
       </layout>
      </item>
@@ -337,19 +181,14 @@ background-color: rgb(213, 213, 213)</string>
    <header>pydm.widgets.label</header>
   </customwidget>
   <customwidget>
-   <class>PyDMByteIndicator</class>
-   <extends>QWidget</extends>
-   <header>pydm.widgets.byte</header>
-  </customwidget>
-  <customwidget>
    <class>PyDMEmbeddedDisplay</class>
    <extends>QFrame</extends>
    <header>pydm.widgets.embedded_display</header>
   </customwidget>
   <customwidget>
-   <class>PyDMLineEdit</class>
-   <extends>QLineEdit</extends>
-   <header>pydm.widgets.line_edit</header>
+   <class>PyDMEnumComboBox</class>
+   <extends>QComboBox</extends>
+   <header>pydm.widgets.enum_combo_box</header>
   </customwidget>
   <customwidget>
    <class>PyDMPushButton</class>
