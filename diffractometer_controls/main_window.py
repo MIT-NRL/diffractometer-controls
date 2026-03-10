@@ -1069,6 +1069,12 @@ class MITRMainWindow(PyDMMainWindow):
         self._stop_focus_online_viewer()
         self._stop_adaptive_focus_listener()
 
+        for conn in self.findChildren(QtReManagerConnection):
+            try:
+                conn._deactivate_updates = True
+            except Exception:
+                pass
+
         for editor in self.findChildren(RePlanEditorWidget):
             shutdown = getattr(editor, "shutdown", None)
             if callable(shutdown):
