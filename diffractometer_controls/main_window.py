@@ -1069,6 +1069,14 @@ class MITRMainWindow(PyDMMainWindow):
         self._stop_focus_online_viewer()
         self._stop_adaptive_focus_listener()
 
+        for editor in self.findChildren(RePlanEditorWidget):
+            shutdown = getattr(editor, "shutdown", None)
+            if callable(shutdown):
+                try:
+                    shutdown(wait=True, timeout=0.25)
+                except Exception:
+                    pass
+
         for timer_name in ("_run_eta_timer", "_run_anim_timer"):
             timer = getattr(self, timer_name, None)
             if timer is not None:

@@ -78,10 +78,48 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         self.signal_file_dir_choices_ready.connect(self._on_file_dir_choices_ready)
         self._file_dir_request_event = threading.Event()
         self._file_dir_query_thread = None
+        self.destroyed.connect(self._on_destroyed)
         if self._file_dir_query_mode == "stream":
             self._start_file_dir_stream_subscriber()
         else:
             self._ensure_file_dir_query_thread()
+
+    def _on_destroyed(self, *args):
+        self.shutdown(wait=False)
+
+    def shutdown(self, *, wait=False, timeout=0.2):
+        self._file_dir_stream_stop.set()
+        self._file_dir_request_event.set()
+        try:
+            self.signal_file_dir_choices_ready.disconnect(self._on_file_dir_choices_ready)
+        except Exception:
+            pass
+
+        if not wait:
+            return
+
+        current = threading.current_thread()
+        for thread_attr in ("_file_dir_stream_thread", "_file_dir_query_thread"):
+            thread = getattr(self, thread_attr, None)
+            if thread is None or thread is current:
+                continue
+            try:
+                if thread.is_alive():
+                    thread.join(timeout=timeout)
+            except Exception:
+                pass
+
+    def _emit_file_dir_choices_ready(self, choices, error):
+        if self._file_dir_stream_stop.is_set():
+            return False
+        try:
+            self.signal_file_dir_choices_ready.emit(choices, error)
+            return True
+        except RuntimeError as ex:
+            if "has been deleted" in str(ex):
+                self._file_dir_stream_stop.set()
+                return False
+            raise
 
     def _current_item_key(self):
         if not self._queue_item:
@@ -271,7 +309,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                 poller = zmq.Poller()
                 poller.register(sock, zmq.POLLIN)
                 while not self._file_dir_stream_stop.is_set():
-                    events = dict(poller.poll(500))
+                    events = dict(poller.poll(100))
                     if sock not in events:
                         continue
                     try:
@@ -290,9 +328,11 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                         continue
                     choices = self._extract_file_dir_choices(payload)
                     if choices:
-                        self.signal_file_dir_choices_ready.emit(choices, None)
+                        if not self._emit_file_dir_choices_ready(choices, None):
+                            break
             except Exception as ex:
-                _LOG.warning("file_dir stream subscriber stopped: %s", ex)
+                if not self._file_dir_stream_stop.is_set():
+                    _LOG.warning("file_dir stream subscriber stopped: %s", ex)
             finally:
                 try:
                     if sock is not None:
@@ -535,9 +575,11 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         self._file_dir_query_thread.start()
 
     def _file_dir_query_loop(self):
-        while True:
+        while not self._file_dir_stream_stop.is_set():
             self._file_dir_request_event.wait()
             self._file_dir_request_event.clear()
+            if self._file_dir_stream_stop.is_set():
+                break
 
             err = None
             choices = []
@@ -545,9 +587,12 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                 choices = self._query_file_dirs()
             except Exception as ex:
                 err = str(ex)
-            self.signal_file_dir_choices_ready.emit(choices, err)
+            if not self._emit_file_dir_choices_ready(choices, err):
+                break
 
     def _request_file_dir_choices(self, *, force=False):
+        if self._file_dir_stream_stop.is_set():
+            return
         if self._file_dir_query_mode == "stream":
             self._start_file_dir_stream_subscriber()
             if self._file_dir_cached_choices:
@@ -562,6 +607,8 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         self._file_dir_request_event.set()
 
     def _on_file_dir_choices_ready(self, choices, error):
+        if self._file_dir_stream_stop.is_set():
+            return
         if error and (not choices):
             _LOG.warning("file_dir choices update failed: %s", str(error))
             return
@@ -1400,6 +1447,7 @@ class RePlanEditorWidget(rec.QtRePlanEditor):
         super().__init__(model, parent)
         self._pending_parameters_valid = None
         self._parameters_valid_update_scheduled = False
+        self.destroyed.connect(self._on_destroyed)
         try:
             # Replace the table used by the internal editor widget and
             # swap it into the layout so it is visible.
@@ -1431,6 +1479,20 @@ class RePlanEditorWidget(rec.QtRePlanEditor):
             # Fall back silently if internal layout changes in future versions
             # of bluesky-widgets and attribute names differ.
             pass
+
+    def _on_destroyed(self, *args):
+        self.shutdown(wait=False)
+
+    def shutdown(self, *, wait=False, timeout=0.2):
+        editor = getattr(self._plan_editor, "_wd_editor", None)
+        shutdown = getattr(editor, "shutdown", None)
+        if callable(shutdown):
+            try:
+                shutdown(wait=wait, timeout=timeout)
+            except TypeError:
+                shutdown()
+            except Exception:
+                pass
 
     def _queue_parameters_valid_update(self, is_valid):
         self._pending_parameters_valid = bool(is_valid)
