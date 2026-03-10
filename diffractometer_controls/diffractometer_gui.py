@@ -76,7 +76,7 @@ class MainScreen(display.MITRDisplay):
             # app.re_dispatcher.subscribe(stream_documents_into_runs(figModel.add_run))
 
             viewer = DiffractionPlotWidget()
-            self._diffraction_live_plot = DiffractionLivePlot(viewer)
+            self._diffraction_live_plot = DiffractionLivePlot(viewer, re_client=re_client)
             app.re_dispatcher.subscribe(self._diffraction_live_plot.on_document)
 
             app.re_dispatcher.start()
