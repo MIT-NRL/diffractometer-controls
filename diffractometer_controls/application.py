@@ -122,6 +122,66 @@ def get_app_settings():
 
 class MITRApplication(PyDMApplication):
     @staticmethod
+    def _patch_bluesky_model_event_disconnects():
+        widget_event_specs = {
+            "QtReManagerConnection": (("status_changed", "on_update_widgets"),),
+            "QtReEnvironmentControls": (("status_changed", "on_update_widgets"),),
+            "QtReQueueControls": (("status_changed", "on_update_widgets"),),
+            "QtReExecutionControls": (("status_changed", "on_update_widgets"),),
+            "QtReStatusMonitor": (("status_changed", "on_update_widgets"),),
+            "QtRePlanQueue": (
+                ("status_changed", "on_update_widgets"),
+                ("plan_queue_changed", "on_plan_queue_changed"),
+                ("queue_item_selection_changed", "on_queue_item_selection_changed"),
+            ),
+            "QtRePlanHistory": (
+                ("status_changed", "on_update_widgets"),
+                ("plan_history_changed", "on_plan_history_changed"),
+                ("history_item_selection_changed", "on_history_item_selection_changed"),
+            ),
+            "QtReRunningPlan": (
+                ("running_item_changed", "on_running_item_changed"),
+                ("status_changed", "on_update_widgets"),
+            ),
+        }
+
+        for class_name, event_specs in widget_event_specs.items():
+            widget_cls = getattr(bw_run_engine_client, class_name, None)
+            if widget_cls is None or getattr(widget_cls, "_dc_event_disconnect_patch_applied", False):
+                continue
+
+            original_init = widget_cls.__init__
+
+            def _make_disconnect(specs):
+                def _disconnect(self, *_args):
+                    model = getattr(self, "model", None)
+                    events = getattr(model, "events", None)
+                    if events is None:
+                        return
+                    for emitter_name, callback_name in specs:
+                        emitter = getattr(events, emitter_name, None)
+                        callback = getattr(self, callback_name, None)
+                        if emitter is None or callback is None:
+                            continue
+                        try:
+                            emitter.disconnect(callback)
+                        except Exception:
+                            pass
+                return _disconnect
+
+            disconnect_method = _make_disconnect(event_specs)
+
+            def _make_patched_init(orig_init, disconnect_cb):
+                def _patched_init(self, *args, **kwargs):
+                    orig_init(self, *args, **kwargs)
+                    self._dc_disconnect_model_events = lambda: disconnect_cb(self)
+                    self.destroyed.connect(disconnect_cb)
+                return _patched_init
+
+            widget_cls.__init__ = _make_patched_init(original_init, disconnect_method)
+            widget_cls._dc_event_disconnect_patch_applied = True
+
+    @staticmethod
     def _patch_bluesky_button_widths():
         """
         Patch bluesky_widgets PushButtonMinimumWidth to compute width using
@@ -170,6 +230,8 @@ class MITRApplication(PyDMApplication):
 
         original_init = console_cls.__init__
         original_change_event = getattr(console_cls, "changeEvent", None)
+        original_finished = getattr(console_cls, "_finished_receiving_console_output", None)
+        original_process = getattr(console_cls, "_process_new_console_output", None)
 
         def _apply_console_palette(self):
             text_edit = getattr(self, "_text_edit", None)
@@ -188,6 +250,7 @@ class MITRApplication(PyDMApplication):
             text_edit.update()
 
         def _patched_init(self, *args, **kwargs):
+            self._dc_console_stop_requested = False
             original_init(self, *args, **kwargs)
             _apply_console_palette(self)
 
@@ -202,8 +265,54 @@ class MITRApplication(PyDMApplication):
             ):
                 _apply_console_palette(self)
 
+        def _poll_console_once(self):
+            client = getattr(self.model, "_client", None)
+            console_monitor = getattr(client, "console_monitor", None)
+            if client is None or console_monitor is None:
+                return None
+
+            request_timeout_error = getattr(client, "RequestTimeoutError", Exception)
+            while not getattr(self, "_dc_console_stop_requested", False):
+                try:
+                    payload = console_monitor.next_msg(timeout=0.2)
+                    if payload is None:
+                        continue
+                    return payload.get("time", None), payload.get("msg", None)
+                except request_timeout_error:
+                    continue
+                except Exception as ex:
+                    print(f"Exception occurred: {ex}")
+                    if getattr(self, "_dc_console_stop_requested", False):
+                        break
+            return None
+
+        def _patched_start_thread(self):
+            self._thread = bw_run_engine_client.FunctionWorker(lambda: _poll_console_once(self))
+            self._thread.returned.connect(self._process_new_console_output)
+            self._thread.finished.connect(self._finished_receiving_console_output)
+            self._thread.start()
+
+        def _patched_finished_receiving_console_output(self):
+            if getattr(self, "_dc_console_stop_requested", False):
+                return
+            if callable(original_finished):
+                original_finished(self)
+
+        def _patched_process_new_console_output(self, result):
+            if result is None or getattr(self, "_dc_console_stop_requested", False):
+                return
+            if callable(original_process):
+                original_process(self, result)
+
+        def _patched_del(self):
+            self._dc_console_stop_requested = True
+
         console_cls.__init__ = _patched_init
         console_cls.changeEvent = _patched_change_event
+        console_cls._start_thread = _patched_start_thread
+        console_cls._finished_receiving_console_output = _patched_finished_receiving_console_output
+        console_cls._process_new_console_output = _patched_process_new_console_output
+        console_cls.__del__ = _patched_del
         console_cls._dc_apply_console_palette = _apply_console_palette
         console_cls._dc_theme_refresh_patch_applied = True
 
@@ -218,6 +327,7 @@ class MITRApplication(PyDMApplication):
         self.re_manager_api = REManagerAPI(zmq_control_addr=f'tcp://{ipaddress}:60615', zmq_info_addr=f'tcp://{ipaddress}:60625')
         self._ipaddress = str(ipaddress)
         self._startup_ui_file = ui_file
+        self._patch_bluesky_model_event_disconnects()
         self._patch_bluesky_button_widths()
         self._patch_bluesky_console_theme_refresh()
         self._theme_mode = "system"

@@ -36,6 +36,15 @@ class REPlans(display.MITRDisplay):
     def ui_filepath(self):
         return super().ui_filepath()
 
+    def prepare_for_detach(self):
+        for editor in self.findChildren(RePlanEditorWidget):
+            shutdown = getattr(editor, "shutdown", None)
+            if callable(shutdown):
+                try:
+                    shutdown(wait=True, timeout=0.25)
+                except Exception:
+                    pass
+
     @staticmethod
     def _reorganize_queue_toolbar(queue_widget):
         """Rebuild Plan Queue toolbar into two rows grouped by function."""
@@ -161,3 +170,11 @@ class REPlans(display.MITRDisplay):
         # Rebuild queue toolbar into grouped two-row controls.
         QtCore.QTimer.singleShot(0, lambda: self._reorganize_queue_toolbar(re_queue))
         QtCore.QTimer.singleShot(0, lambda: self._style_queue_widget(re_queue))
+        QtCore.QTimer.singleShot(0, lambda: re_queue.slot_update_widgets(bool(re_client.re_manager_connected)))
+        QtCore.QTimer.singleShot(
+            0,
+            lambda: re_queue.slot_plan_queue_changed(
+                list(getattr(re_client, "_plan_queue_items", []) or []),
+                list(getattr(re_client, "selected_queue_item_uids", []) or []),
+            ),
+        )

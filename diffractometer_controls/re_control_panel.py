@@ -425,6 +425,44 @@ class REControlPanel(display.MITRDisplay):
             self._style_re_status_labels()
             self._style_re_running_plan_widget()
 
+    def prepare_for_detach(self):
+        re_manager = getattr(self, "_re_manager", None)
+        if re_manager is not None:
+            try:
+                re_manager._deactivate_updates = True
+            except Exception:
+                pass
+
+    def _sync_from_model(self):
+        re_manager = getattr(self, "_re_manager", None)
+        if re_manager is None:
+            return
+
+        model = re_manager.model
+        is_connected = getattr(model, "re_manager_connected", None)
+        status = getattr(model, "re_manager_status", {}) or {}
+        running_item = getattr(model, "_running_item", {}) or {}
+        run_list = getattr(model, "_run_list", []) or []
+
+        re_manager.slot_update_widgets(is_connected)
+        self._re_environment.slot_update_widgets(bool(is_connected), status)
+        self._re_status.slot_update_widgets(status)
+        self._re_running_plan.slot_running_item_changed(running_item, run_list)
+        self._re_running_plan.slot_update_widgets(bool(is_connected), status)
+        self._re_queue_controls.slot_update_widgets(bool(is_connected), status)
+        self._re_plan_execution.slot_update_widgets(bool(is_connected), status)
+
+        if is_connected and not getattr(re_manager, "updates_activated", False):
+            def _resume_status_updates():
+                re_manager.updates_activated = True
+                re_manager._deactivate_updates = False
+                re_manager._first_connection = True
+                re_manager._update_widget_states()
+                re_manager.slot_update_widgets(True)
+                re_manager._start_thread()
+
+            QtCore.QTimer.singleShot(0, _resume_status_updates)
+
     def customize_ui(self):
         # button = self.ui.pushButton
         # print('Here')
@@ -475,6 +513,7 @@ class REControlPanel(display.MITRDisplay):
         self._compact_re_status_layout()
         self._style_re_status_labels()
         self._style_re_running_plan_widget()
+        self._sync_from_model()
 
 
     # def printstuff():

@@ -33,6 +33,11 @@ class REPlans(display.MITRDisplay):
     def ui_filepath(self):
         return super().ui_filepath()
 
+    def prepare_for_detach(self):
+        console = getattr(self, "_re_console", None)
+        if console is not None:
+            console._dc_console_stop_requested = True
+
     def _console_text_edit(self):
         console = getattr(self, "_re_console", None)
         if console is None:
@@ -152,4 +157,9 @@ class REPlans(display.MITRDisplay):
         if autoscroll_checkbox is not None:
             autoscroll_checkbox.stateChanged.connect(self._handle_console_autoscroll_toggled)
 
+        re_queue_history.slot_update_widgets()
+        re_queue_history.slot_plan_history_changed(
+            list(getattr(re_client, "_plan_history_items", []) or []),
+            list(getattr(re_client, "selected_history_item_pos", []) or []),
+        )
         self._apply_console_theme()

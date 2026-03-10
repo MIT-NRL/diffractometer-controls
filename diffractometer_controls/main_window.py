@@ -1102,8 +1102,35 @@ class MITRMainWindow(PyDMMainWindow):
             title += " [Read Only Mode]"
         self.setWindowTitle(title)
 
+    def set_display_widget(self, new_widget):
+        super().set_display_widget(new_widget)
+        restore = getattr(new_widget, "restore_after_navigation", None)
+        if callable(restore):
+            try:
+                restore()
+            except Exception:
+                pass
+
+    def clear_display_widget(self):
+        display_widget = self.display_widget()
+        cleanup = getattr(display_widget, "cleanup_before_navigation", None)
+        if callable(cleanup):
+            try:
+                cleanup()
+            except Exception:
+                pass
+        super().clear_display_widget()
+
     def cleanup_before_close(self):
         """Stop local timers/channels so app shutdown is not delayed."""
+        display_widget = self.display_widget()
+        cleanup_display = getattr(display_widget, "cleanup_before_navigation", None)
+        if callable(cleanup_display):
+            try:
+                cleanup_display()
+            except Exception:
+                pass
+
         self._stop_focus_online_viewer()
         self._stop_adaptive_focus_listener()
 

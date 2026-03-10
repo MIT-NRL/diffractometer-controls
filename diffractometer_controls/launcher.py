@@ -78,6 +78,7 @@ def main():
     from pydm.utilities.macro import parse_macro_string
 
     from bluesky_widgets.qt import threading as bw_threading
+    from bluesky_widgets.qt import run_engine_client as bw_run_engine_client
 
     def _patch_bluesky_worker_safe_shutdown():
         """
@@ -113,6 +114,31 @@ def main():
         worker_cls._dc_safe_shutdown_patch_applied = True
 
     _patch_bluesky_worker_safe_shutdown()
+
+    def _patch_bluesky_status_reload_shutdown():
+        """
+        Make Queue Server status polling responsive to disconnect/shutdown.
+        The upstream widget sleeps for a full update period, which can keep a
+        FunctionWorker alive past our shutdown budget.
+        """
+        cls = bw_run_engine_client.QtReManagerConnection
+        if getattr(cls, "_dc_status_reload_shutdown_patch_applied", False):
+            return
+
+        def _patched_reload_status(self):
+            self.model.load_re_manager_status()
+            remaining = max(float(getattr(self, "update_period", 0) or 0), 0.0)
+            while remaining > 0:
+                if getattr(self, "_deactivate_updates", False):
+                    break
+                delay = min(0.05, remaining)
+                time.sleep(delay)
+                remaining -= delay
+
+        cls._reload_status = _patched_reload_status
+        cls._dc_status_reload_shutdown_patch_applied = True
+
+    _patch_bluesky_status_reload_shutdown()
 
     parser = argparse.ArgumentParser(description="Python Display Manager")
     parser.add_argument(
@@ -306,13 +332,30 @@ def main():
         if _shutdown_started:
             return
         _shutdown_started = True
-        print("About to quit")
+
+        try:
+            import epics.ca as epics_ca
+        except Exception:
+            epics_ca = None
+        if epics_ca is not None:
+            try:
+                epics_ca.disable_ca_messages()
+            except Exception:
+                pass
 
         main_window = getattr(app, "main_window", None)
         cleanup = getattr(main_window, "cleanup_before_close", None)
         if callable(cleanup):
             try:
                 cleanup()
+            except Exception:
+                pass
+
+        re_client = getattr(app, "re_client", None)
+        stop_console_monitor = getattr(re_client, "stop_console_output_monitoring", None)
+        if callable(stop_console_monitor):
+            try:
+                stop_console_monitor()
             except Exception:
                 pass
 
@@ -332,6 +375,21 @@ def main():
     app.aboutToQuit.connect(_on_about_to_quit)
 
     exit_code = app.exec_()
+
+    try:
+        import epics.ca as epics_ca
+    except Exception:
+        epics_ca = None
+
+    if epics_ca is not None:
+        try:
+            epics_ca.disable_ca_messages()
+        except Exception:
+            pass
+        try:
+            epics_ca.finalize_libca(maxtime=1.0)
+        except Exception:
+            pass
 
     if pydm_args.profile:
         profile.disable()
