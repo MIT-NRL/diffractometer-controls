@@ -29,6 +29,37 @@ except Exception:
 _LOG = logging.getLogger(__name__)
 
 
+def _format_display_value(value, *, compact=False):
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        items = [_format_display_value(v, compact=compact) for v in value]
+        if compact:
+            return ", ".join(items)
+        return "[" + ", ".join(items) + "]"
+    if isinstance(value, tuple):
+        items = [_format_display_value(v, compact=compact) for v in value]
+        if compact:
+            return ", ".join(items)
+        if len(items) == 1:
+            return "(" + items[0] + ",)"
+        return "(" + ", ".join(items) + ")"
+    if isinstance(value, set):
+        items = [_format_display_value(v, compact=compact) for v in sorted(value, key=str)]
+        if compact:
+            return ", ".join(items)
+        return "{" + ", ".join(items) + "}"
+    if isinstance(value, dict):
+        items = [
+            f"{_format_display_value(k, compact=compact)}: {_format_display_value(v, compact=compact)}"
+            for k, v in value.items()
+        ]
+        if compact:
+            return "; ".join(items)
+        return "{" + ", ".join(items) + "}"
+    return str(value)
+
+
 class _DynamicChoicesComboBox(QComboBox):
     """ComboBox that emits a signal before opening the popup list."""
 
@@ -135,7 +166,7 @@ class _CheckableChoicesComboBox(_DynamicChoicesComboBox):
 
     def _refresh_display_text(self):
         selected = self.checked_items()
-        text = repr(selected) if selected else ""
+        text = _format_display_value(selected, compact=True) if selected else ""
         line_edit = self.lineEdit()
         if line_edit is not None:
             line_edit.setText(text)
@@ -855,10 +886,13 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
     def _show_row_value(self, *, row):
         # Based on original implementation but uses metadata from the model
         def print_value(v):
+            # Use quote-free formatting in the viewer and for string-like fields.
+            # Keep Python-literal formatting for editable structured values.
             if isinstance(v, str):
-                return f"'{v}'"
-            else:
-                return str(v)
+                return v
+            if not self._editable:
+                return _format_display_value(v)
+            return str(v)
 
         _, p = self._param_from_row(row)
         if p is None:
@@ -870,6 +904,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         is_var_keyword = p["parameters"].kind == inspect.Parameter.VAR_KEYWORD
         is_value_set = p["is_value_set"]
         is_editable = self._editable
+        widget_editable = bool(self._editable)
 
         description = self._params_descriptions.get("parameters", {}).get(p_name, None)
         if not description:
@@ -1126,7 +1161,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             combo = _DynamicChoicesComboBox()
             combo.setEditable(True)
             combo.setInsertPolicy(QComboBox.NoInsert)
-            combo.setEnabled(True)
+            combo.setEnabled(widget_editable)
             combo.setToolTip(description)
             combo.setProperty("dc_base_tooltip", description)
             if not is_value_set:
@@ -1149,6 +1184,9 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                 initial_choices.extend(choices)
             initial_choices.extend(self._file_dir_cached_choices)
             self._populate_dynamic_combo_choices(combo, initial_choices, current_text=cur_text)
+            line_edit = combo.lineEdit()
+            if line_edit is not None:
+                line_edit.setReadOnly(not widget_editable)
             self._file_dir_combos.add(combo)
 
             def _on_popup_open():
@@ -1247,6 +1285,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         elif choices and _is_multi_select_param():
             combo = _CheckableChoicesComboBox()
             combo.set_choices(choices)
+            combo.setEnabled(widget_editable)
             combo.setToolTip(description)
             combo.setProperty("dc_base_tooltip", description)
 
@@ -1314,7 +1353,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                 cur_bool = default_value
             if cur_bool is not None:
                 combo.setCurrentIndex(1 if cur_bool else 0)
-            combo.setEnabled(True)
+            combo.setEnabled(widget_editable)
             combo.setToolTip(description)
             if not is_value_set:
                 self._set_combo_implicit_style(combo, True)
@@ -1378,10 +1417,12 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             # so users can choose from the dropdown instead of typing.
             # Allow selection from the dropdown whenever choices exist so
             # users can pick without typing the name manually.
-            combo.setEnabled(True)
+            combo.setEnabled(widget_editable)
             combo.setToolTip(description)
             if not is_value_set:
                 self._set_combo_implicit_style(combo, True)
+            if le is not None:
+                le.setReadOnly(not widget_editable or combo.currentIndex() != custom_index)
 
             def _on_combo_change(*_args, _row=row, _combo=combo):
                 try:
@@ -1457,7 +1498,28 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                     widget = self.cellWidget(n, 2)
                     if widget is not None:
                         try:
-                            if isinstance(widget, QComboBox):
+                            if isinstance(widget, _CheckableChoicesComboBox):
+                                selected = list(widget.checked_items())
+                                is_required = (
+                                    p["parameters"].default == inspect.Parameter.empty
+                                    and p["parameters"].kind
+                                    not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+                                )
+                                if not selected:
+                                    if is_required:
+                                        cell_valid = False
+                                        data_valid = False
+                                        self._set_combo_invalid_style(widget)
+                                    else:
+                                        cell_valid = True
+                                        self._params[p_index]["value"] = inspect.Parameter.empty
+                                        self._set_combo_implicit_style(widget, True)
+                                    continue
+
+                                p["value"] = selected
+                                cell_valid = True
+                                self._set_combo_implicit_style(widget, False)
+                            elif isinstance(widget, QComboBox):
                                 txt = widget.currentText()
                                 is_file_dir = self._is_file_dir_param(p.get("name", ""))
                                 if not str(txt).strip():
@@ -1696,32 +1758,16 @@ class RePlanEditorWidget(rec.QtRePlanEditor):
         self._parameters_valid_update_scheduled = False
         self.destroyed.connect(self._on_destroyed)
         try:
-            # Replace the table used by the internal editor widget and
-            # swap it into the layout so it is visible.
-            old = self._plan_editor._wd_editor
-            new = RePlanEditorTable(self.model, editable=old.editable, detailed=old.detailed)
-
-            # Preserve current item (if any).
-            try:
-                new.show_item(item=old.queue_item, editable=old.editable)
-            except Exception:
-                pass
-
-            # Reconnect signals expected by the editor.
-            new.signal_parameters_valid.connect(self._queue_parameters_valid_update)
-            new.signal_item_description_changed.connect(self._plan_editor._slot_item_description_changed)
-            new.signal_cell_modified.connect(self._plan_editor._switch_to_editing_mode)
-
-            # Replace in layout to ensure the new table is shown.
-            layout = self._plan_editor.layout()
-            if layout is not None:
-                index = layout.indexOf(old)
-                if index >= 0:
-                    layout.removeWidget(old)
-                    old.setParent(None)
-                    layout.insertWidget(index, new)
-
-            self._plan_editor._wd_editor = new
+            self._replace_internal_table(
+                owner=self._plan_viewer,
+                description_slot=self._plan_viewer.slot_item_description_changed,
+            )
+            self._replace_internal_table(
+                owner=self._plan_editor,
+                valid_slot=self._queue_parameters_valid_update,
+                description_slot=self._plan_editor._slot_item_description_changed,
+                modified_slot=self._plan_editor._switch_to_editing_mode,
+            )
         except Exception:
             # Fall back silently if internal layout changes in future versions
             # of bluesky-widgets and attribute names differ.
@@ -1731,15 +1777,53 @@ class RePlanEditorWidget(rec.QtRePlanEditor):
         self.shutdown(wait=False)
 
     def shutdown(self, *, wait=False, timeout=0.2):
-        editor = getattr(self._plan_editor, "_wd_editor", None)
-        shutdown = getattr(editor, "shutdown", None)
-        if callable(shutdown):
+        for owner in (self._plan_viewer, self._plan_editor):
+            editor = getattr(owner, "_wd_editor", None)
+            shutdown = getattr(editor, "shutdown", None)
+            if not callable(shutdown):
+                continue
             try:
                 shutdown(wait=wait, timeout=timeout)
             except TypeError:
                 shutdown()
             except Exception:
                 pass
+
+    def _replace_internal_table(
+        self,
+        *,
+        owner,
+        valid_slot=None,
+        description_slot=None,
+        modified_slot=None,
+    ):
+        old = getattr(owner, "_wd_editor", None)
+        if old is None:
+            return
+
+        new = RePlanEditorTable(self.model, editable=old.editable, detailed=old.detailed)
+
+        try:
+            new.show_item(item=old.queue_item, editable=old.editable)
+        except Exception:
+            pass
+
+        if callable(valid_slot):
+            new.signal_parameters_valid.connect(valid_slot)
+        if callable(description_slot):
+            new.signal_item_description_changed.connect(description_slot)
+        if callable(modified_slot):
+            new.signal_cell_modified.connect(modified_slot)
+
+        layout = owner.layout()
+        if layout is not None:
+            index = layout.indexOf(old)
+            if index >= 0:
+                layout.removeWidget(old)
+                old.setParent(None)
+                layout.insertWidget(index, new)
+
+        owner._wd_editor = new
 
     def _queue_parameters_valid_update(self, is_valid):
         self._pending_parameters_valid = bool(is_valid)
