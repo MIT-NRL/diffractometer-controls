@@ -31,6 +31,7 @@ log = logging.getLogger(__name__)
 THEME_MODE_SETTINGS_KEY = "appearance/theme_mode"
 SETTINGS_ORGANIZATION = "MITR"
 SETTINGS_APPLICATION = "MITR"
+DEFAULT_QT_STYLE = "Fusion"
 
 
 ui_dir = Path(__file__).parent
@@ -222,7 +223,10 @@ class MITRApplication(PyDMApplication):
         self._theme_mode = "system"
 
         super().__init__(ui_file=ui_file, use_main_window=use_main_window, *args, **kwargs)
-        self._base_style_name = self.style().objectName() or "Fusion"
+        base_style = QStyleFactory.create(DEFAULT_QT_STYLE)
+        if base_style is not None:
+            self.setStyle(base_style)
+        self._base_style_name = self.style().objectName() or DEFAULT_QT_STYLE
         self._base_palette = QtGui.QPalette(self.palette())
         self.apply_theme_preference()
  

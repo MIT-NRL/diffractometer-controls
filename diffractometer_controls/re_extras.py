@@ -47,10 +47,32 @@ class REPlans(display.MITRDisplay):
 
         app = QApplication.instance()
         palette = QtGui.QPalette(app.palette() if app is not None else self.palette())
-        disabled_base = palette.color(QtGui.QPalette.Disabled, QtGui.QPalette.Base)
-        palette.setColor(QtGui.QPalette.Base, disabled_base)
+        base_color = palette.color(QtGui.QPalette.Disabled, QtGui.QPalette.Base)
+        text_color = palette.color(QtGui.QPalette.Active, QtGui.QPalette.Text)
+        highlight_color = palette.color(QtGui.QPalette.Active, QtGui.QPalette.Highlight)
+        highlighted_text_color = palette.color(
+            QtGui.QPalette.Active, QtGui.QPalette.HighlightedText
+        )
+
+        for group in (QtGui.QPalette.Active, QtGui.QPalette.Inactive, QtGui.QPalette.Disabled):
+            palette.setColor(group, QtGui.QPalette.Base, base_color)
+            palette.setColor(group, QtGui.QPalette.Text, text_color)
+
         text_edit.setPalette(palette)
-        text_edit.viewport().update()
+        text_edit.setAutoFillBackground(True)
+        text_edit.setStyleSheet(
+            "QTextEdit {"
+            f" background-color: {base_color.name()};"
+            f" color: {text_color.name()};"
+            f" selection-background-color: {highlight_color.name()};"
+            f" selection-color: {highlighted_text_color.name()};"
+            " }"
+        )
+        viewport = text_edit.viewport()
+        if viewport is not None:
+            viewport.setPalette(palette)
+            viewport.setAutoFillBackground(True)
+            viewport.update()
         text_edit.update()
 
     def changeEvent(self, event):

@@ -33,6 +33,7 @@ def main():
     logger.setLevel("INFO")
     handler.setLevel("INFO")
     _configure_qt_highdpi()
+    os.environ["QT_STYLE_OVERRIDE"] = "Fusion"
 
     from pydm import config
 
