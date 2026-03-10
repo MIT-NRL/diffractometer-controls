@@ -2,6 +2,7 @@
 import bluesky.plan_patterns
 import bluesky.plans as bp
 from bluesky.plans import scan, count, grid_scan, rel_scan, rel_grid_scan
+from bluesky_queueserver import parameter_annotation_decorator
 
 # import bluesky.plan_stubs
 import bluesky.plan_stubs as bps
@@ -36,15 +37,53 @@ frame_type_sig = EpicsSignal("4dh4:TS:FrameType", name="frame_type_sig")
 # monitor_and_count = bpp.monitor_during_decorator([he3psd0.counts])(bp.count)
 
 
+def _collect_diffraction_detector_names():
+    """Collect HE3 diffraction detector names for Queue Server dropdowns."""
+    required_components = {"acquire", "acquire_time", "nbins", "soft_lld", "counts", "total_counts"}
+    names = []
+    g = globals()
+    for var, obj in list(g.items()):
+        if var.startswith("_"):
+            continue
+        try:
+            if not isinstance(obj, Device):
+                continue
+            component_names = set(getattr(obj, "component_names", ()))
+            if required_components.issubset(component_names):
+                names.append(var)
+        except Exception:
+            continue
+
+    seen = set()
+    out = []
+    for name in names:
+        if name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out
+
+
+@parameter_annotation_decorator(
+    {
+        "parameters": {
+            "detectors": {
+                "annotation": "typing.Union[typing.List[DiffractionDetectors], DiffractionDetectors]",
+                "description": "Diffraction detector or detectors to read",
+                "devices": {"DiffractionDetectors": _collect_diffraction_detector_names()},
+                "convert_device_names": True,
+            }
+        }
+    }
+)
 def count_he3(
                 title:str,
-                sample:str,
-                gauge_volume:str,
+                sample:str = "",
+                gauge_volume:str = "",
+                *,
                 detectors, 
                 acquire_time:float = None,
                 num = 1, 
                 delay = None, 
-                *, 
                 per_shot = None, 
                 md = None
                 
@@ -135,10 +174,29 @@ def count_he3(
 
 
 
+@parameter_annotation_decorator(
+    {
+        "parameters": {
+            "detectors": {
+                "annotation": "typing.Union[typing.List[DiffractionDetectors], DiffractionDetectors]",
+                "description": "Diffraction detector or detectors to read",
+                "devices": {"DiffractionDetectors": _collect_diffraction_detector_names()},
+                "convert_device_names": True,
+            },
+            "motor": {
+                "annotation": "typing.Union[str, Motors]",
+                "description": "Motor to scan (must be movable)",
+                "devices": {"Motors": _collect_movable_names()},
+                "convert_device_names": True,
+            },
+        }
+    }
+)
 def scan_he3( 
             title:str,
-            sample:str,
-            gauge_volume:str,
+            sample:str = "",
+            gauge_volume:str = "",
+            *,
             detectors, 
             motor, 
             start_pos:float, 
@@ -239,10 +297,36 @@ def scan_he3(
 
     return(yield from main_plan())
 
+
+@parameter_annotation_decorator(
+    {
+        "parameters": {
+            "detectors": {
+                "annotation": "typing.Union[typing.List[DiffractionDetectors], DiffractionDetectors]",
+                "description": "Diffraction detector or detectors to read",
+                "devices": {"DiffractionDetectors": _collect_diffraction_detector_names()},
+                "convert_device_names": True,
+            },
+            "motor1": {
+                "annotation": "typing.Union[str, Motors]",
+                "description": "First motor to scan in parallel",
+                "devices": {"Motors": _collect_movable_names()},
+                "convert_device_names": True,
+            },
+            "motor2": {
+                "annotation": "typing.Union[str, Motors]",
+                "description": "Second motor to scan in parallel",
+                "devices": {"Motors": _collect_movable_names()},
+                "convert_device_names": True,
+            },
+        }
+    }
+)
 def scan_parallel_he3( 
             title:str,
-            sample:str,
-            gauge_volume:str,
+            sample:str = "",
+            gauge_volume:str = "",
+            *,
             detectors, 
             motor1, 
             start_pos1:float, 
@@ -354,10 +438,29 @@ def scan_parallel_he3(
     return(yield from main_plan())
 
 
+@parameter_annotation_decorator(
+    {
+        "parameters": {
+            "detectors": {
+                "annotation": "typing.Union[typing.List[DiffractionDetectors], DiffractionDetectors]",
+                "description": "Diffraction detector or detectors to read",
+                "devices": {"DiffractionDetectors": _collect_diffraction_detector_names()},
+                "convert_device_names": True,
+            },
+            "motor": {
+                "annotation": "typing.Union[str, Motors]",
+                "description": "Motor to scan through the requested positions",
+                "devices": {"Motors": _collect_movable_names()},
+                "convert_device_names": True,
+            },
+        }
+    }
+)
 def scan_list_he3( 
             title:str,
-            sample:str,
-            gauge_volume:str,
+            sample:str = "",
+            gauge_volume:str = "",
+            *,
             detectors, 
             motor, 
             position_list:list,
@@ -458,10 +561,35 @@ def scan_list_he3(
     return(yield from main_plan())
 
 
+@parameter_annotation_decorator(
+    {
+        "parameters": {
+            "detectors": {
+                "annotation": "typing.Union[typing.List[DiffractionDetectors], DiffractionDetectors]",
+                "description": "Diffraction detector or detectors to read",
+                "devices": {"DiffractionDetectors": _collect_diffraction_detector_names()},
+                "convert_device_names": True,
+            },
+            "motor_outer": {
+                "annotation": "typing.Union[str, Motors]",
+                "description": "Outer motor for the 2D scan",
+                "devices": {"Motors": _collect_movable_names()},
+                "convert_device_names": True,
+            },
+            "motor_inner": {
+                "annotation": "typing.Union[str, Motors]",
+                "description": "Inner motor for the 2D scan",
+                "devices": {"Motors": _collect_movable_names()},
+                "convert_device_names": True,
+            },
+        }
+    }
+)
 def scan2D_he3( 
             title:str,
-            sample:str,
-            gauge_volume:str,
+            sample:str = "",
+            gauge_volume:str = "",
+            *,
             detectors, 
             motor_outer, 
             start_pos_outer:float, 
