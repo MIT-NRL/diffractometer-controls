@@ -154,3 +154,6 @@ diffractometer_controls/bluesky_config/startup/existing_plans_and_devices.yaml
 
 # PyQt automated UI files
 *_ui.py
+
+# Local editor settings
+.vscode/settings.json
