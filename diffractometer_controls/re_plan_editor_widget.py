@@ -39,6 +39,110 @@ class _DynamicChoicesComboBox(QComboBox):
         super().showPopup()
 
 
+class _CheckableChoicesComboBox(_DynamicChoicesComboBox):
+    """Combo box with checkable popup items for multi-select parameters."""
+
+    signal_selection_changed = QtCore.Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setEditable(True)
+        line_edit = self.lineEdit()
+        if line_edit is not None:
+            line_edit.setReadOnly(True)
+        self._block_popup_hide = False
+        self.view().viewport().installEventFilter(self)
+        self._refresh_display_text()
+
+    def eventFilter(self, obj, event):
+        if obj is self.view().viewport():
+            if event.type() == QtCore.QEvent.MouseButtonRelease:
+                index = self.view().indexAt(event.pos())
+                if index.isValid():
+                    self._toggle_index(index)
+                    return True
+        return super().eventFilter(obj, event)
+
+    def hidePopup(self):
+        if self._block_popup_hide:
+            self._block_popup_hide = False
+            return
+        super().hidePopup()
+
+    def currentText(self):
+        line_edit = self.lineEdit()
+        if line_edit is not None:
+            return line_edit.text()
+        return super().currentText()
+
+    def checked_items(self):
+        items = []
+        model = self.model()
+        for row in range(model.rowCount()):
+            item = model.item(row)
+            if item is None:
+                continue
+            if item.checkState() == QtCore.Qt.Checked:
+                items.append(str(item.text()))
+        return items
+
+    def set_choices(self, choices):
+        current = self.checked_items()
+        blocker = QtCore.QSignalBlocker(self.model())
+        try:
+            self.clear()
+            for choice in list(choices or []):
+                self.addItem(str(choice))
+                item = self.model().item(self.count() - 1)
+                if item is None:
+                    continue
+                item.setFlags(
+                    QtCore.Qt.ItemIsEnabled
+                    | QtCore.Qt.ItemIsUserCheckable
+                    | QtCore.Qt.ItemIsSelectable
+                )
+                item.setData(QtCore.Qt.Unchecked, QtCore.Qt.CheckStateRole)
+        finally:
+            del blocker
+        self.set_checked_items(current, emit_signal=False)
+
+    def set_checked_items(self, values, *, emit_signal=True):
+        selected = {str(v) for v in list(values or [])}
+        blocker = QtCore.QSignalBlocker(self.model())
+        try:
+            for row in range(self.model().rowCount()):
+                item = self.model().item(row)
+                if item is None:
+                    continue
+                state = QtCore.Qt.Checked if item.text() in selected else QtCore.Qt.Unchecked
+                item.setCheckState(state)
+        finally:
+            del blocker
+        self._refresh_display_text()
+        if emit_signal:
+            self.signal_selection_changed.emit()
+
+    def _toggle_index(self, index):
+        item = self.model().itemFromIndex(index)
+        if item is None:
+            return
+        item.setCheckState(
+            QtCore.Qt.Unchecked if item.checkState() == QtCore.Qt.Checked else QtCore.Qt.Checked
+        )
+        self._block_popup_hide = True
+        self._refresh_display_text()
+        self.signal_selection_changed.emit()
+
+    def _refresh_display_text(self):
+        selected = self.checked_items()
+        text = repr(selected) if selected else ""
+        line_edit = self.lineEdit()
+        if line_edit is not None:
+            line_edit.setText(text)
+        else:
+            self.setEditText(text)
+
+
 class RePlanEditorTable(rec._QtRePlanEditorTable):
     """Table subclass that renders dropdowns for parameters when the
     plan metadata exposes choices via 'values' or 'devices'.
@@ -772,7 +876,10 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             description = f"Description for parameter '{p_name}' was not found ..."
 
         v = value if is_value_set else default_value
-        s_value = "" if v == inspect.Parameter.empty else print_value(v)
+        if isinstance(v, str) and v == "":
+            s_value = ""
+        else:
+            s_value = "" if v == inspect.Parameter.empty else print_value(v)
         is_required_param = (
             default_value == inspect.Parameter.empty
             and not is_var_positional
@@ -877,6 +984,26 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                 ann_type = ann.get("type")
                 if ann_type in (int, float, bool, str):
                     return ann_type
+                ann_candidates = [
+                    ann_type,
+                    ann.get("type_name"),
+                    ann.get("full_type"),
+                    ann.get("annotation"),
+                ]
+                for candidate in ann_candidates:
+                    low = str(candidate or "").strip().lower()
+                    if not low:
+                        continue
+                    if ("list[" in low) or ("dict[" in low):
+                        continue
+                    if "str" in low:
+                        return str
+                    if "bool" in low:
+                        return bool
+                    if "float" in low:
+                        return float
+                    if "int" in low:
+                        return int
                 if isinstance(ann_type, str):
                     low = ann_type.lower()
                     if low == "int":
@@ -889,7 +1016,51 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                         return str
             except Exception:
                 pass
+            if isinstance(value, str):
+                return str
+            if default_value is not inspect.Parameter.empty and isinstance(default_value, str):
+                return str
+            if isinstance(value, bool):
+                return bool
+            if default_value is not inspect.Parameter.empty and isinstance(default_value, bool):
+                return bool
+            if isinstance(value, int) and not isinstance(value, bool):
+                return int
+            if default_value is not inspect.Parameter.empty and isinstance(default_value, int) and not isinstance(default_value, bool):
+                return int
+            if isinstance(value, float):
+                return float
+            if default_value is not inspect.Parameter.empty and isinstance(default_value, float):
+                return float
             return None
+
+        def _is_multi_select_param():
+            candidates = []
+            for meta_source in (meta, pmeta):
+                if not isinstance(meta_source, dict):
+                    continue
+                ann = meta_source.get("annotation")
+                candidates.append(ann)
+                if isinstance(ann, dict):
+                    candidates.extend(
+                        [
+                            ann.get("type"),
+                            ann.get("type_name"),
+                            ann.get("full_type"),
+                            ann.get("annotation"),
+                        ]
+                    )
+            for candidate in candidates:
+                if candidate in (list, tuple, set):
+                    return True
+                text = str(candidate or "").strip().lower()
+                if ("typing.list[" in text) or text.startswith("list[") or ("list[" in text):
+                    return True
+            if isinstance(value, (list, tuple, set)):
+                return True
+            if default_value is not inspect.Parameter.empty and isinstance(default_value, (list, tuple, set)):
+                return True
+            return False
 
         # Cache expected type on params for validation
         try:
@@ -1073,6 +1244,66 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                 combo.lineEdit().returnPressed.connect(_on_combo_commit)
             self.setCellWidget(row, 2, combo)
             self._request_file_dir_choices(force=(not bool(self._file_dir_cached_choices)))
+        elif choices and _is_multi_select_param():
+            combo = _CheckableChoicesComboBox()
+            combo.set_choices(choices)
+            combo.setToolTip(description)
+            combo.setProperty("dc_base_tooltip", description)
+
+            selected_values = []
+            if is_value_set and (value != inspect.Parameter.empty):
+                if isinstance(value, (list, tuple, set)):
+                    selected_values = [str(v) for v in value]
+                else:
+                    try:
+                        parsed = ast.literal_eval(str(value))
+                    except Exception:
+                        parsed = None
+                    if isinstance(parsed, (list, tuple, set)):
+                        selected_values = [str(v) for v in parsed]
+            elif default_value != inspect.Parameter.empty:
+                if isinstance(default_value, (list, tuple, set)):
+                    selected_values = [str(v) for v in default_value]
+                else:
+                    try:
+                        parsed = ast.literal_eval(str(default_value))
+                    except Exception:
+                        parsed = None
+                    if isinstance(parsed, (list, tuple, set)):
+                        selected_values = [str(v) for v in parsed]
+
+            if selected_values:
+                combo.set_checked_items(selected_values, emit_signal=False)
+            if not is_value_set:
+                self._set_combo_implicit_style(combo, True)
+
+            def _on_multi_combo_popup_open(_combo=combo):
+                self._set_combo_implicit_style(_combo, False)
+
+            def _on_multi_combo_change(*_args, _row=row, _combo=combo):
+                try:
+                    p_index = self._param_index_from_row(_row)
+                    if p_index is None:
+                        return
+                    selected = list(_combo.checked_items())
+                    if not selected:
+                        self._params[p_index]["value"] = inspect.Parameter.empty
+                        self._params[p_index]["is_value_set"] = False
+                        self._params[p_index]["is_user_modified"] = True
+                        self._set_combo_implicit_style(_combo, True)
+                        _emit_modified_deferred()
+                        return
+                    self._params[p_index]["value"] = selected
+                    self._params[p_index]["is_value_set"] = True
+                    self._params[p_index]["is_user_modified"] = True
+                    self._set_combo_implicit_style(_combo, False)
+                    _emit_modified_deferred()
+                except Exception:
+                    pass
+
+            combo.signal_popup_about_to_show.connect(_on_multi_combo_popup_open)
+            combo.signal_selection_changed.connect(_on_multi_combo_change)
+            self.setCellWidget(row, 2, combo)
         elif _is_bool_param():
             combo = QComboBox()
             combo.addItems(["False", "True"])
@@ -1166,10 +1397,14 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                         self._set_combo_implicit_style(_combo, True)
                         _emit_modified_deferred()
                         return
-                    try:
-                        val = ast.literal_eval(txt)
-                    except Exception:
+                    exp_t = self._params[p_index].get("expected_type")
+                    if exp_t is str:
                         val = txt
+                    else:
+                        try:
+                            val = ast.literal_eval(txt)
+                        except Exception:
+                            val = txt
                     self._params[p_index]["value"] = val
                     self._params[p_index]["is_value_set"] = True
                     self._params[p_index]["is_user_modified"] = True
@@ -1261,10 +1496,14 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                                             value=txt,
                                         )
                                 else:
-                                    try:
-                                        p["value"] = ast.literal_eval(txt)
-                                    except Exception:
+                                    exp_t = p.get("expected_type")
+                                    if exp_t is str:
                                         p["value"] = txt
+                                    else:
+                                        try:
+                                            p["value"] = ast.literal_eval(txt)
+                                        except Exception:
+                                            p["value"] = txt
                                     cell_valid = True
                                     self._set_combo_implicit_style(widget, False)
                             else:
@@ -1278,6 +1517,14 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                             cell_valid = True
                             cell_text = table_item.text()
                             exp_t = p.get("expected_type")
+                            if exp_t is str:
+                                p["value"] = cell_text
+                                blocker = QtCore.QSignalBlocker(self)
+                                try:
+                                    table_item.setForeground(self._text_color_valid)
+                                finally:
+                                    del blocker
+                                continue
                             try:
                                 p["value"] = ast.literal_eval(cell_text)
                             except Exception:
