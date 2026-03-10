@@ -24,6 +24,7 @@ user_groups:
     allowed_functions:
       - "function_sleep"  # Explicitly listed name
       - ":^func_for_test"
+      - "list_imaging_file_dirs"
       - "adaptive_focus_submit_command"
       - "adaptive_focus_get_session"
   test_user:  # Another group used for unit tests.
