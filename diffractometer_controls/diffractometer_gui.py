@@ -20,6 +20,10 @@ try:
     from diffractometer_controls.re_plan_editor_widget import RePlanEditorWidget
 except Exception:
     from re_plan_editor_widget import RePlanEditorWidget
+try:
+    from diffractometer_controls.diffraction_live_plot import DiffractionLivePlot, DiffractionPlotWidget
+except Exception:
+    from diffraction_live_plot import DiffractionLivePlot, DiffractionPlotWidget
 
 # from bluesky_widgets.qt.figures import QtFigure, QtFigures
 # from bluesky_widgets.models.auto_plot_builders import AutoLines, AutoPlotter, AutoImages
@@ -30,8 +34,6 @@ from bluesky.utils import install_remote_qt_kicker
 
 from bluesky_widgets.models.run_engine_client import RunEngineClient
 import display
-
-from figures import QtFigure, NewLivePlot
 
 class MainScreen(display.MITRDisplay):
     re_dispatcher: RemoteDispatcher
@@ -73,8 +75,9 @@ class MainScreen(display.MITRDisplay):
             # viewer = QtFigure(figModel.figure)
             # app.re_dispatcher.subscribe(stream_documents_into_runs(figModel.add_run))
 
-            viewer = QtFigure()
-            app.re_dispatcher.subscribe(NewLivePlot('he3psd0_counts',x='he3psd0_position_x',ax=viewer.axes,marker='o',lw=1,mfc='none'))
+            viewer = DiffractionPlotWidget()
+            self._diffraction_live_plot = DiffractionLivePlot(viewer)
+            app.re_dispatcher.subscribe(self._diffraction_live_plot.on_document)
 
             app.re_dispatcher.start()
             # install_remote_qt_kicker()
