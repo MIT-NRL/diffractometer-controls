@@ -350,7 +350,7 @@
                   </font>
                  </property>
                  <property name="toolTip">
-                  <string>ca://${P}${R}DetectorState_RBV</string>
+                  <string>ca://${P}camURL:DetectorState_RBV</string>
                  </property>
                  <property name="styleSheet">
                   <string notr="true">color: rgb(0, 216, 0);
@@ -363,7 +363,7 @@ background-color: rgb(213, 213, 213);</string>
                   <set>Qt::AlignCenter</set>
                  </property>
                  <property name="channel" stdset="0">
-                  <string>ca://${P}${R}DetectorState_RBV</string>
+                  <string>ca://${P}camURL:DetectorState_RBV</string>
                  </property>
                  <property name="enableRichText" stdset="0">
                   <bool>true</bool>
