@@ -1,6 +1,8 @@
 import math
+import ast
 from collections.abc import Iterable
 
+import matplotlib.cm as cm
 import matplotlib.figure
 import numpy as np
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -66,7 +68,8 @@ class DiffractionPlotWidget(QWidget):
         layout.addWidget(self._toolbar)
         self.setLayout(layout)
 
-        self._profile_lines = {}
+        self._profile_history = {}
+        self._profile_colormaps = {}
         self._summary_lines = {}
         self._summary_x = {}
         self._summary_y = {}
@@ -103,7 +106,8 @@ class DiffractionPlotWidget(QWidget):
         self.summary_axes.set_ylabel(summary_y_label)
         self.figure.suptitle(run_title)
 
-        self._profile_lines.clear()
+        self._profile_history.clear()
+        self._profile_colormaps.clear()
         self._summary_lines.clear()
         self._summary_x.clear()
         self._summary_y.clear()
@@ -118,20 +122,25 @@ class DiffractionPlotWidget(QWidget):
         if x_arr.shape != y_arr.shape:
             return
 
-        line = self._profile_lines.get(detector_name)
-        if line is None:
-            (line,) = self.profile_axes.plot(
-                x_arr,
-                y_arr,
-                marker="o",
-                lw=1,
-                mfc="none",
-                ms=3,
-                label=str(detector_name),
-            )
-            self._profile_lines[detector_name] = line
-        else:
-            line.set_data(x_arr, y_arr)
+        history = self._profile_history.setdefault(detector_name, [])
+        color_map = self._profile_colormaps.get(detector_name)
+        if color_map is None:
+            color_map = self._select_profile_colormap(detector_name)
+            self._profile_colormaps[detector_name] = color_map
+
+        (line,) = self.profile_axes.plot(
+            x_arr,
+            y_arr,
+            color=color_map(0.9),
+            marker="o",
+            lw=1.5,
+            mfc="none",
+            ms=3,
+            alpha=0.95,
+            label=str(detector_name),
+        )
+        history.append(line)
+        self._restyle_profile_history(detector_name)
 
         self.profile_axes.relim()
         self.profile_axes.autoscale_view()
@@ -172,10 +181,50 @@ class DiffractionPlotWidget(QWidget):
         self._redraw()
 
     def _update_legends(self):
-        if self._profile_lines:
-            self.profile_axes.legend(loc="best")
+        if self._profile_history:
+            handles = []
+            labels = []
+            for detector_name, history in self._profile_history.items():
+                if not history:
+                    continue
+                handles.append(history[-1])
+                labels.append(str(detector_name))
+            if handles:
+                self.profile_axes.legend(handles, labels, loc="best")
         if self._summary_lines:
             self.summary_axes.legend(loc="best")
+
+    def _restyle_profile_history(self, detector_name):
+        history = self._profile_history.get(detector_name, [])
+        if not history:
+            return
+
+        color_map = self._profile_colormaps.get(detector_name)
+        if color_map is None:
+            color_map = self._select_profile_colormap(detector_name)
+            self._profile_colormaps[detector_name] = color_map
+        total = len(history)
+        for index, line in enumerate(history):
+            if total <= 1:
+                age = 1.0
+                color_pos = 0.9
+            else:
+                age = index / (total - 1)
+                color_pos = 0.15 + (0.75 * age)
+            is_latest = index == (total - 1)
+            line.set_color(color_map(color_pos))
+            line.set_alpha(0.95 if is_latest else 0.35 + (0.15 * color_pos))
+            line.set_linewidth(1.5 if is_latest else 0.8 + (0.3 * age))
+            line.set_marker("o" if is_latest else "None")
+
+    def _select_profile_colormap(self, detector_name):
+        names = ("viridis", "plasma", "cividis", "magma", "turbo")
+        detector_names = sorted(self._profile_history.keys())
+        try:
+            index = detector_names.index(detector_name)
+        except ValueError:
+            index = len(detector_names)
+        return cm.get_cmap(names[index % len(names)])
 
     def _redraw(self):
         self.figure.canvas.draw_idle()
@@ -203,9 +252,12 @@ class DiffractionLivePlot(QtCore.QObject):
         self._run_title = ""
         self._plan_name = ""
         self._motor_names = []
+        self._summary_mode = "point"
         self._summary_x_label = "Point"
         self._summary_title = "Total Counts"
         self._summary_counter = 0
+        self._summary_path_last_point = None
+        self._summary_path_distance = 0.0
         self._detector_axis_cache = {}
         self._detector_axis_bounds = {}
 
@@ -265,7 +317,10 @@ class DiffractionLivePlot(QtCore.QObject):
         self._run_title = str(doc.get("title", "") or "")
         self._plan_name = str(doc.get("plan_name", "") or "")
         self._motor_names = self._normalize_motor_names(doc.get("motors"))
+        self._summary_mode = "point"
         self._summary_counter = 0
+        self._summary_path_last_point = None
+        self._summary_path_distance = 0.0
 
         det_config = dict(doc.get("det_config", {}) or {})
         axis_min = det_config.get("position_x_min", -209.21799055746422)
@@ -278,7 +333,8 @@ class DiffractionLivePlot(QtCore.QObject):
             axis_max = 209.21799055746422
         self._detector_axis_bounds = {"min": axis_min, "max": axis_max}
 
-        summary_x_label, summary_title = self._choose_summary_config()
+        summary_mode, summary_x_label, summary_title = self._choose_summary_config()
+        self._summary_mode = summary_mode
         self._summary_x_label = summary_x_label
         self._summary_title = summary_title
 
@@ -342,7 +398,22 @@ class DiffractionLivePlot(QtCore.QObject):
             return []
         if isinstance(motors, str):
             text = motors.strip()
-            return [text] if text else []
+            if not text:
+                return []
+            if text[0] in ("[", "(") and text[-1] in ("]", ")"):
+                try:
+                    parsed = ast.literal_eval(text)
+                except Exception:
+                    parsed = None
+                if isinstance(parsed, Iterable) and not isinstance(parsed, (str, bytes)):
+                    out = []
+                    for item in parsed:
+                        item_text = str(item or "").strip()
+                        if item_text:
+                            out.append(item_text)
+                    if out:
+                        return out
+            return [text]
         if isinstance(motors, Iterable):
             out = []
             for item in motors:
@@ -355,14 +426,20 @@ class DiffractionLivePlot(QtCore.QObject):
 
     def _choose_summary_config(self):
         if self._plan_name == "count_he3":
-            return "Exposure", "Total Counts vs Exposure"
+            return "exposure", "Exposure", "Total Counts vs Exposure"
         if len(self._motor_names) == 1:
-            return self._motor_names[0], "Total Counts vs Position"
-        return "Point", "Total Counts vs Point"
+            return "motor", self._motor_names[0], "Total Counts vs Position"
+        if len(self._motor_names) > 1:
+            return "path", "Path Length", "Total Counts vs Scan Path"
+        return "point", "Point", "Total Counts vs Point"
 
     def _extract_summary_x(self, *, data, seq_num):
-        if len(self._motor_names) == 1:
+        if self._summary_mode == "motor" and len(self._motor_names) == 1:
             value = _coerce_number(data.get(self._motor_names[0]))
+            if value is not None:
+                return value
+        if self._summary_mode == "path" and len(self._motor_names) > 1:
+            value = self._extract_scan_path_x(data)
             if value is not None:
                 return value
         if seq_num is not None:
@@ -371,6 +448,24 @@ class DiffractionLivePlot(QtCore.QObject):
                 return value
         self._summary_counter += 1
         return float(self._summary_counter)
+
+    def _extract_scan_path_x(self, data):
+        point = []
+        for motor_name in self._motor_names:
+            value = _coerce_number(data.get(motor_name))
+            if value is None:
+                return None
+            point.append(value)
+        current = np.asarray(point, dtype=float)
+        if self._summary_path_last_point is None:
+            self._summary_path_last_point = current
+            self._summary_path_distance = 0.0
+            return 0.0
+        self._summary_path_distance += float(
+            np.linalg.norm(current - self._summary_path_last_point)
+        )
+        self._summary_path_last_point = current
+        return self._summary_path_distance
 
     @staticmethod
     def _extract_detector_fields(data):
