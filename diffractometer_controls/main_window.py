@@ -140,8 +140,16 @@ class MITRMainWindow(PyDMMainWindow):
             macros=self.macros,
         ))
 
+        camera_button = QToolButton(self)
+        camera_button.setIcon(self._load_camera_icon())
+        camera_button.setText("Camera")
+        camera_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        camera_button.setIconSize(QSize(24, 24))
+        camera_button.clicked.connect(self.launch_camera_viewer)
+
         # Add the button to the navbar
         self.ui.navbar.addWidget(controlsAll)
+        self.ui.navbar.addWidget(camera_button)
         self._setup_run_status_widget(self.ui.navbar)
 
         # controlsAll = CustomRelatedDisplayButtonWrapper(
@@ -863,6 +871,20 @@ class MITRMainWindow(PyDMMainWindow):
         )
 
     @staticmethod
+    def _load_camera_icon():
+        base_dir = Path(__file__).resolve().parent
+        icon = QtGui.QIcon()
+        for candidate in (
+            base_dir / "icons" / "camera.svg",
+            base_dir / "NRL_Logo.png",
+        ):
+            if candidate.exists():
+                icon.addFile(str(candidate))
+                if not icon.isNull():
+                    break
+        return icon
+
+    @staticmethod
     def _load_focus_program_icon():
         base_dir = Path(__file__).resolve().parent
         icon = QtGui.QIcon()
@@ -893,6 +915,22 @@ class MITRMainWindow(PyDMMainWindow):
             if candidate.exists():
                 return candidate
         return viewer_python
+
+    def launch_camera_viewer(self):
+        from application import MITRApplication
+
+        app = MITRApplication.instance()
+        macros = dict(self.macros)
+        macros.update({"R": "camURL:", "im": "urlimage1:"})
+        try:
+            if app is not None:
+                app.new_pydm_process("extra_ui/cam_url.ui", macros=macros)
+            else:
+                load_file("extra_ui/cam_url.ui", macros=macros, target=ScreenTarget.NEW_PROCESS)
+        except Exception as ex:
+            msg = f"Unable to launch camera viewer: {ex}"
+            log.warning(msg)
+            QMessageBox.warning(self, "Camera Viewer", msg)
 
     def launch_focus_program(self):
         viewer_script = Path(__file__).resolve().parent / "focus_offline_viewer.py"
