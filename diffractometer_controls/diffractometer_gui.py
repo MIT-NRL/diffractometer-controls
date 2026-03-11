@@ -1,10 +1,11 @@
 import sys
 
 # from pydm.display import Display
-from qtpy import QtCore, QtGui
+from qtpy import QtCore, QtGui, QtWidgets
 from qtpy.QtWidgets import (QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QScrollArea, QFrame,
     QApplication, QWidget, QLabel)
+from pydm.widgets.channel import PyDMChannel
 from bluesky_widgets.qt.run_engine_client import (
     QtReConsoleMonitor,
     QtReEnvironmentControls,
@@ -50,48 +51,153 @@ class MainScreen(display.MITRDisplay):
         return super().ui_filepath()
 
     def customize_ui(self):
-            from application import MITRApplication
-            from bluesky_widgets.utils.streaming import stream_documents_into_runs
+        from application import MITRApplication
+        from bluesky_widgets.utils.streaming import stream_documents_into_runs
 
-            app = MITRApplication.instance()
-            re_client = app.re_client
+        self._time_remaining_channel = None
+        self._acquire_time_channel = None
+        self._acquire_time_total = 0.0
+        self._time_remaining_value = 0.0
 
-            # re_queue = QtRePlanQueue(re_client)
-            # re_plan_editor = RePlanEditorWidget(re_client)
-            # self.ui.RE_Queue.layout().addWidget(re_queue)
-            # self.ui.RE_Plan_Editor.layout().addWidget(re_plan_editor)
+        app = MITRApplication.instance()
+        re_client = app.re_client
 
-            # figModel = Lines('motor',['det1','det2'],max_runs=3)
-            # figModel = AutoLines(max_runs=1)
-            # figModel = Lines('he3psd0_position_x[0]',['he3psd0_counts[0]'],max_runs=1)
-            
-            # viewer = QtFigures(figModel.figures)
-            # self.runs = []
-            # app.re_dispatcher.subscribe(stream_documents_into_runs(figModel.add_run))
-            # app.re_dispatcher.subscribe(print)
+        # re_queue = QtRePlanQueue(re_client)
+        # re_plan_editor = RePlanEditorWidget(re_client)
+        # self.ui.RE_Queue.layout().addWidget(re_queue)
+        # self.ui.RE_Plan_Editor.layout().addWidget(re_plan_editor)
 
-            #Viewer for imaging data
-            # figModel = Images("tiff1")
-            # viewer = QtFigure(figModel.figure)
-            # app.re_dispatcher.subscribe(stream_documents_into_runs(figModel.add_run))
+        # figModel = Lines('motor',['det1','det2'],max_runs=3)
+        # figModel = AutoLines(max_runs=1)
+        # figModel = Lines('he3psd0_position_x[0]',['he3psd0_counts[0]'],max_runs=1)
 
-            viewer = DiffractionPlotWidget()
-            self._diffraction_live_plot = DiffractionLivePlot(viewer, re_client=re_client)
-            app.re_dispatcher.subscribe(self._diffraction_live_plot.on_document)
+        # viewer = QtFigures(figModel.figures)
+        # self.runs = []
+        # app.re_dispatcher.subscribe(stream_documents_into_runs(figModel.add_run))
+        # app.re_dispatcher.subscribe(print)
 
-            app.re_dispatcher.start()
-            # install_remote_qt_kicker()
+        #Viewer for imaging data
+        # figModel = Images("tiff1")
+        # viewer = QtFigure(figModel.figure)
+        # app.re_dispatcher.subscribe(stream_documents_into_runs(figModel.add_run))
 
-            # re_console = QtReConsoleMonitor(re_client)
-            # re_queue_history = QtRePlanHistory(re_client)
-            # self.ui.RE_Console.layout().addWidget(re_console)
-            # self.ui.RE_Queue_History.layout().addWidget(re_queue_history)
+        viewer = DiffractionPlotWidget()
+        self._diffraction_live_plot = DiffractionLivePlot(viewer, re_client=re_client)
+        app.re_dispatcher.subscribe(self._diffraction_live_plot.on_document)
 
-            self.ui.Data_Viewer.layout().addWidget(viewer)
+        self._setup_time_remaining_progress()
 
-            # self.ui.pushButton.clicked.connect(self.printstuff)
+        app.re_dispatcher.start()
+        # install_remote_qt_kicker()
 
-            # self.ui.psdDisplay.addChannel(y_channel=f"ca://{self.macros['P']}det1:LiveCountsD0",color='black',symbolSize=5,symbol='o')
+        # re_console = QtReConsoleMonitor(re_client)
+        # re_queue_history = QtRePlanHistory(re_client)
+        # self.ui.RE_Console.layout().addWidget(re_console)
+        # self.ui.RE_Queue_History.layout().addWidget(re_queue_history)
 
+        self.ui.Data_Viewer.layout().addWidget(viewer)
 
-         
+        # self.ui.pushButton.clicked.connect(self.printstuff)
+
+        # self.ui.psdDisplay.addChannel(y_channel=f"ca://{self.macros['P']}det1:LiveCountsD0",color='black',symbolSize=5,symbol='o')
+
+    def _setup_time_remaining_progress(self):
+        old_widget = getattr(self.ui, "PyDMLabel", None)
+        row_layout = getattr(self.ui, "horizontalLayout", None)
+        if old_widget is None or row_layout is None:
+            return
+
+        idx = row_layout.indexOf(old_widget)
+        if idx < 0:
+            return
+
+        self.time_remaining_progress = QtWidgets.QProgressBar(self.ui)
+        self.time_remaining_progress.setMinimumHeight(34)
+        self.time_remaining_progress.setMaximumHeight(34)
+        self.time_remaining_progress.setMinimumWidth(220)
+        self.time_remaining_progress.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Fixed,
+        )
+        progress_font = self.time_remaining_progress.font()
+        progress_font.setPointSize(12)
+        self.time_remaining_progress.setFont(progress_font)
+        self.time_remaining_progress.setStyleSheet(
+            "QProgressBar {"
+            " border: 1px solid rgb(120,120,120);"
+            " border-radius: 4px;"
+            " background: rgb(235,235,235);"
+            " color: rgb(10,10,10);"
+            " text-align: center;"
+            "}"
+            "QProgressBar::chunk {"
+            " background-color: rgb(120, 170, 255);"
+            "}"
+        )
+        self.time_remaining_progress.setTextVisible(True)
+        self.time_remaining_progress.setAlignment(QtCore.Qt.AlignCenter)
+        self.time_remaining_progress.setRange(0, 1000)
+        self.time_remaining_progress.setValue(0)
+        self.time_remaining_progress.setFormat("0.0 s remaining")
+
+        row_layout.removeWidget(old_widget)
+        old_widget.hide()
+        row_layout.insertWidget(idx, self.time_remaining_progress)
+        row_layout.setStretch(idx, 2)
+
+        remaining_address = getattr(old_widget, "channel", None) or old_widget.property("channel")
+        acquire_time_address = self._derive_acquire_time_address(remaining_address)
+
+        if remaining_address:
+            self._time_remaining_channel = PyDMChannel(
+                address=remaining_address,
+                value_slot=self._on_time_remaining_changed,
+            )
+            self._time_remaining_channel.connect()
+
+        if acquire_time_address:
+            self._acquire_time_channel = PyDMChannel(
+                address=acquire_time_address,
+                value_slot=self._on_acquire_time_changed,
+            )
+            self._acquire_time_channel.connect()
+
+    @staticmethod
+    def _derive_acquire_time_address(remaining_address):
+        address = str(remaining_address or "").strip()
+        if not address:
+            return ""
+        return address.replace("AcquireTimeRemaining_RBV", "AcquireTime_RBV")
+
+    def _on_time_remaining_changed(self, value):
+        self._time_remaining_value = self._to_float(value, default=0.0)
+        self._update_time_remaining_progress()
+
+    def _on_acquire_time_changed(self, value):
+        self._acquire_time_total = self._to_float(value, default=0.0)
+        self._update_time_remaining_progress()
+
+    @staticmethod
+    def _to_float(value, default=0.0):
+        try:
+            if isinstance(value, (list, tuple)) and value:
+                value = value[0]
+            return float(value)
+        except Exception:
+            return float(default)
+
+    def _update_time_remaining_progress(self):
+        if not hasattr(self, "time_remaining_progress"):
+            return
+
+        remaining = max(0.0, self._time_remaining_value)
+        total = max(0.0, self._acquire_time_total)
+
+        self.time_remaining_progress.setRange(0, 1000)
+        if total > 0:
+            frac_done = 1.0 - min(1.0, remaining / total)
+            self.time_remaining_progress.setValue(int(round(frac_done * 1000.0)))
+        else:
+            self.time_remaining_progress.setValue(0)
+
+        self.time_remaining_progress.setFormat(f"{remaining:.1f} s remaining")
