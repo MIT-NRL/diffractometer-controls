@@ -1648,24 +1648,7 @@ class MainScreen(display.MITRDisplay):
 
     def _configure_acquire_indicators(self):
         indicator = self.ui.PyDMByteIndicator_2
-
-        if hasattr(indicator, "setCircles"):
-            indicator.setCircles(False)
-        else:
-            indicator.setProperty("circles", False)
-
-        indicator.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
-        indicator.setMinimumSize(50, 50)
-        indicator.setMaximumSize(50, 50)
-        self._set_indicator_on_off_colors()
-        self._set_acquire_indicator_style(False)
         self._set_detector_state_acquire_style(False)
-
-        try:
-            self.ui.horizontalLayout_7.setStretch(0, 0)
-            self.ui.horizontalLayout_7.setStretch(1, 1)
-        except Exception:
-            pass
 
         channel_address = getattr(indicator, "channel", None) or indicator.property("channel")
         if channel_address:
@@ -1674,51 +1657,6 @@ class MainScreen(display.MITRDisplay):
                 value_slot=self._on_acquire_value_changed,
             )
             self._acquire_channel.connect()
-
-    def _set_indicator_on_off_colors(self):
-        indicator = self.ui.PyDMByteIndicator_2
-        on_color = QtGui.QColor(220, 0, 0)
-        off_color = QtGui.QColor(90, 90, 90)
-
-        candidates = [
-            ("setOnColor", on_color),
-            ("setOffColor", off_color),
-            ("setTrueColor", on_color),
-            ("setFalseColor", off_color),
-        ]
-        for method_name, color in candidates:
-            method = getattr(indicator, method_name, None)
-            if callable(method):
-                try:
-                    method(color)
-                except Exception:
-                    pass
-
-        prop_candidates = [
-            ("onColor", on_color),
-            ("offColor", off_color),
-            ("trueColor", on_color),
-            ("falseColor", off_color),
-        ]
-        for prop_name, color in prop_candidates:
-            try:
-                if indicator.metaObject().indexOfProperty(prop_name) >= 0:
-                    indicator.setProperty(prop_name, color)
-            except Exception:
-                pass
-
-    def _set_acquire_indicator_style(self, acquiring):
-        if acquiring:
-            style = (
-                "background-color: rgb(220, 0, 0);"
-                "border: 1px solid black;"
-            )
-        else:
-            style = (
-                "background-color: rgb(90, 90, 90);"
-                "border: 1px solid black;"
-            )
-        self.ui.PyDMByteIndicator_2.setStyleSheet(style)
 
     def _set_detector_state_acquire_style(self, acquiring):
         if acquiring:
@@ -1738,9 +1676,6 @@ class MainScreen(display.MITRDisplay):
             # pinned to the frame's acquisition settings.
             self._pending_next_frame_exposure_s = self._get_current_exposure_time_s()
         self._acquire_was_active = acquiring
-        self._set_acquire_indicator_style(acquiring)
-        self._set_indicator_on_off_colors()
-        self.ui.PyDMByteIndicator_2.update()
         self._set_detector_state_acquire_style(acquiring)
 
     def _install_display_controls(self, image_view):

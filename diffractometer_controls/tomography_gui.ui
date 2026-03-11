@@ -283,6 +283,9 @@
          </item>
          <item>
           <layout class="QHBoxLayout" name="horizontalLayout_7">
+           <property name="spacing">
+            <number>6</number>
+           </property>
            <item>
             <widget class="PyDMByteIndicator" name="PyDMByteIndicator_2">
              <property name="enabled">
@@ -322,6 +325,13 @@
              </property>
              <property name="channel" stdset="0">
               <string>ca://${P}${R}Acquire</string>
+             </property>
+             <property name="onColor" stdset="0">
+              <color>
+               <red>255</red>
+               <green>0</green>
+               <blue>0</blue>
+              </color>
              </property>
              <property name="showLabels" stdset="0">
               <bool>false</bool>
@@ -883,11 +893,6 @@ background-color: rgb(213, 213, 213)</string>
    <header>pydm.widgets.embedded_display</header>
   </customwidget>
   <customwidget>
-   <class>PyDMEnumComboBox</class>
-   <extends>QComboBox</extends>
-   <header>pydm.widgets.enum_combo_box</header>
-  </customwidget>
-  <customwidget>
    <class>PyDMFrame</class>
    <extends>QFrame</extends>
    <header>pydm.widgets.frame</header>
@@ -902,16 +907,6 @@ background-color: rgb(213, 213, 213)</string>
    <class>PyDMLineEdit</class>
    <extends>QLineEdit</extends>
    <header>pydm.widgets.line_edit</header>
-  </customwidget>
-  <customwidget>
-   <class>PyDMPushButton</class>
-   <extends>QPushButton</extends>
-   <header>pydm.widgets.pushbutton</header>
-  </customwidget>
-  <customwidget>
-   <class>PyDMRelatedDisplayButton</class>
-   <extends>QPushButton</extends>
-   <header>pydm.widgets.related_display_button</header>
   </customwidget>
  </customwidgets>
  <resources/>
