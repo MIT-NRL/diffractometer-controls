@@ -1,9 +1,10 @@
 import re
+import textwrap
 import types
 
 from qtpy import QtCore
 from qtpy.QtGui import QPalette
-from qtpy.QtWidgets import QApplication, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QSizePolicy, QTextEdit, QPushButton
+from qtpy.QtWidgets import QApplication, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QSizePolicy, QTextEdit, QPushButton, QToolTip
 from bluesky_widgets.qt.run_engine_client import (
     QtReEnvironmentControls,
     QtReExecutionControls,
@@ -49,6 +50,51 @@ class REControlPanel(display.MITRDisplay):
     def _set_text_if_changed(widget, text):
         if widget.text() != text:
             widget.setText(text)
+
+    @staticmethod
+    def _indicator_palette():
+        return {
+            "muted": ("#6b7280", "#f3f4f6", "#d1d5db", 1),
+            "neutral": ("#334155", "#e2e8f0", "#cbd5e1", 1),
+            "success": ("#065f46", "#d1fae5", "#a7f3d0", 1),
+            "warning": ("#92400e", "#fef3c7", "#fcd34d", 1),
+            "danger": ("#7f1d1d", "#fee2e2", "#fecaca", 1),
+            "error": ("#ffffff", "#e300ff", "#a100b3", 2),
+        }
+
+    def _indicator_badge_style(self, semantic, *, font_px, weight, padding="0px 4px"):
+        fg, bg, border, border_width = self._indicator_palette().get(
+            semantic,
+            self._indicator_palette()["neutral"],
+        )
+        return (
+            f"font-size: {font_px}px; font-weight: {weight}; color: {fg}; "
+            f"background-color: {bg}; border: {border_width}px solid {border}; "
+            f"border-radius: 6px; padding: {padding};"
+        )
+
+    @staticmethod
+    def _ensure_neutral_tooltip_style():
+        app = QApplication.instance()
+        if app is None:
+            return
+        pal = app.palette()
+        is_dark = pal.color(QPalette.Window).lightness() < 128
+        if is_dark:
+            fg = pal.color(QPalette.Active, QPalette.WindowText)
+            bg = pal.color(QPalette.Active, QPalette.Base)
+        else:
+            fg = pal.color(QPalette.Active, QPalette.WindowText)
+            bg = pal.color(QPalette.Active, QPalette.Base)
+
+        tooltip_palette = QPalette(QToolTip.palette())
+        for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
+            tooltip_palette.setColor(group, QPalette.ToolTipText, fg)
+            tooltip_palette.setColor(group, QPalette.ToolTipBase, bg)
+        QToolTip.setPalette(tooltip_palette)
+        tooltip_font = app.font()
+        tooltip_font.setPointSize(max(tooltip_font.pointSize(), 11))
+        QToolTip.setFont(tooltip_font)
 
     def _schedule_restyle(self, *method_names):
         self._pending_restyle_methods.update(method_names)
@@ -185,27 +231,13 @@ class REControlPanel(display.MITRDisplay):
                     self._set_stylesheet_if_changed(label, self._running_plan_badge_style("idle"))
 
     def _running_plan_badge_style(self, state):
-        pal = self._current_palette()
-        is_dark = pal.color(QPalette.Window).lightness() < 128
-        if is_dark:
-            palette = {
-                "paused": ("#fbbf24", "#3f2d09", "#b45309"),
-                "running": ("#f87171", "#3f1114", "#b91c1c"),
-                "idle": ("#cbd5e1", "#1e293b", "#475569"),
-            }
-        else:
-            palette = {
-                "paused": ("#fef3c7", "#92400e", "#fcd34d"),
-                "running": ("#fee2e2", "#7f1d1d", "#fecaca"),
-                "idle": ("#e2e8f0", "#334155", "#cbd5e1"),
-            }
-        bg, fg, border = palette.get(state, palette["idle"])
+        semantic = {
+            "paused": "warning",
+            "running": "danger",
+            "idle": "neutral",
+        }.get(state, "neutral")
         weight = 800 if state in {"paused", "running"} else 700
-        return (
-            f"font-size: 15px; font-weight: {weight}; color: {fg}; "
-            f"background-color: {bg}; border: 1px solid {border}; "
-            "border-radius: 6px; padding: 2px 8px;"
-        )
+        return self._indicator_badge_style(semantic, font_px=14, weight=weight, padding="1px 8px")
 
     @staticmethod
     def _format_running_plan_html(html):
@@ -269,22 +301,15 @@ class REControlPanel(display.MITRDisplay):
 
         short_names = {
             "RE Environment": "Environment",
+            "Worker state": "Worker",
             "Manager state": "Manager",
             "RE state": "Engine",
-            "Items in history": "History",
             "Queue AUTOSTART": "Autostart",
-            "Queue STOP pending": "Stop Pending",
+            "Queue STOP pending": "Pending",
+            "Pending": "Pending",
             "Items in queue": "Queue Items",
             "Queue LOOP mode": "Loop Mode",
         }
-        base_style = (
-            "font-size: 13px; font-weight: 600; padding: 0px 4px; "
-            "border: 1px solid #d1d5db; border-radius: 6px;"
-        )
-        emphasis_style = (
-            "font-size: 14px; font-weight: 700; padding: 0px 4px; "
-            "border: 1px solid #d1d5db; border-radius: 6px;"
-        )
         # RE panel color semantics:
         # - Gray: disconnected, unavailable, or environment closed.
         # - Blue-gray: connected and no queued items remain.
@@ -294,30 +319,36 @@ class REControlPanel(display.MITRDisplay):
         #   close and destroy.
         # - Error/failure color: high-contrast magenta with white text
         #   (#e300ff background, #ffffff text, #a100b3 border).
-        state_styles = {
-            "RUNNING": "color: #7f1d1d; background-color: #fee2e2;",
-            "EXECUTING_QUEUE": "color: #7f1d1d; background-color: #fee2e2;",
-            "PAUSED": "color: #92400e; background-color: #fef3c7;",
-            "OPENING_ENVIRONMENT": "color: #92400e; background-color: #fef3c7;",
-            "CREATING_ENVIRONMENT": "color: #92400e; background-color: #fef3c7;",
-            "INITIALIZING": "color: #92400e; background-color: #fef3c7;",
-            "CLOSING_ENVIRONMENT": "color: #92400e; background-color: #fef3c7;",
-            "DESTROYING_ENVIRONMENT": "color: #92400e; background-color: #fef3c7;",
-            "IDLE": "color: #065f46; background-color: #d1fae5;",
-            "OPEN": "color: #065f46; background-color: #d1fae5;",
-            "CLOSED": "color: #6b7280; background-color: #f3f4f6;",
-            "ON": "color: #065f46; background-color: #d1fae5;",
-            "OFF": "color: #6b7280; background-color: #f3f4f6;",
-            "YES": "color: #7f1d1d; background-color: #fee2e2;",
-            "NO": "color: #065f46; background-color: #d1fae5;",
-            "-": "color: #6b7280; background-color: #f9fafb;",
+        state_semantics = {
+            "RUNNING": "danger",
+            "EXECUTING_QUEUE": "danger",
+            "EXECUTING_PLAN": "danger",
+            "EXECUTING_TASK": "danger",
+            "PAUSED": "warning",
+            "OPENING_ENVIRONMENT": "warning",
+            "CREATING_ENVIRONMENT": "warning",
+            "INITIALIZING": "warning",
+            "CLOSING_ENVIRONMENT": "warning",
+            "CLOSING": "warning",
+            "DESTROYING_ENVIRONMENT": "warning",
+            "IDLE": "success",
+            "OPEN": "success",
+            "CLOSED": "muted",
+            "FAILED": "error",
+            "ON": "success",
+            "OFF": "muted",
+            "YES": "danger",
+            "NO": "success",
+            "-": "muted",
         }
         env_value = raw_status_values.get("RE Environment", raw_status_values.get("Environment", ""))
         manager_value = raw_status_values.get("Manager state", raw_status_values.get("Manager", ""))
         engine_value = raw_status_values.get("RE state", raw_status_values.get("Engine", ""))
+        pending_value = raw_status_values.get("Pending", raw_status_values.get("Queue STOP pending", ""))
         env_closed = env_value == "CLOSED"
         manager_state = manager_value.replace(" ", "_")
         engine_state = engine_value.replace(" ", "_")
+        pending_state = pending_value.replace(" ", "_")
         execution_active = (
             manager_state in {"EXECUTING_QUEUE", "PAUSED"}
             or engine_state in {"RUNNING", "PAUSED"}
@@ -337,11 +368,9 @@ class REControlPanel(display.MITRDisplay):
                 value_key = "-"
                 display_value = "-"
             label_name = short_names.get(prefix, prefix)
-            if label_name in ("Manager", "Engine"):
-                text_style = emphasis_style
-            else:
-                text_style = base_style
-            state_style = state_styles.get(value_key, "color: #111827; background-color: #eef2ff;")
+            font_px = 14
+            weight = 600
+            semantic = state_semantics.get(value_key, "neutral")
             if label_name == "Manager" and (
                 value_key.startswith("CREATING_")
                 or value_key.startswith("OPENING_")
@@ -349,9 +378,16 @@ class REControlPanel(display.MITRDisplay):
                 or value_key.startswith("DESTROYING_")
                 or value_key in {"INITIALIZING", "STARTING"}
             ):
-                state_style = "color: #92400e; background-color: #fef3c7;"
-            if label_name == "Stop Pending" and value_key == "YES":
-                state_style = "color: #92400e; background-color: #fef3c7;"
+                semantic = "warning"
+            if label_name == "Pending":
+                if (not is_connected) or env_closed:
+                    semantic = "muted"
+                elif not execution_active:
+                    semantic = "neutral"
+                elif value_key not in {"NONE", "-", ""}:
+                    semantic = "warning"
+                else:
+                    semantic = "success"
             elif label_name == "Queue Items":
                 try:
                     queue_items = int(raw_value.strip())
@@ -359,13 +395,33 @@ class REControlPanel(display.MITRDisplay):
                     queue_items = None
 
                 if (not is_connected) or env_closed or queue_items is None:
-                    state_style = "color: #6b7280; background-color: #f3f4f6;"
+                    semantic = "muted"
                 elif queue_items <= 0:
-                    state_style = "color: #334155; background-color: #e2e8f0;"
+                    semantic = "neutral"
+                elif manager_state == "PAUSED" or engine_state == "PAUSED":
+                    semantic = "warning"
+                elif "STOP" in pending_state and pending_state not in {"NONE", "-", ""}:
+                    semantic = "warning"
                 elif execution_active:
-                    state_style = "color: #7f1d1d; background-color: #fee2e2;"
+                    semantic = "danger"
                 else:
-                    state_style = "color: #065f46; background-color: #d1fae5;"
+                    semantic = "success"
+            elif label_name == "Loop Mode":
+                if (not is_connected) or env_closed:
+                    semantic = "muted"
+                elif value_key == "OFF":
+                    semantic = "neutral"
+                elif execution_active:
+                    semantic = "danger"
+                else:
+                    semantic = "success"
+            elif label_name == "Autostart":
+                if (not is_connected) or env_closed:
+                    semantic = "muted"
+                elif value_key == "OFF":
+                    semantic = "neutral"
+                else:
+                    semantic = "success"
             if label_name == "Manager":
                 manager_display_overrides = {
                     "OPENING_ENVIRONMENT": "OPENING ENV",
@@ -375,7 +431,10 @@ class REControlPanel(display.MITRDisplay):
                 }
                 display_value = manager_display_overrides.get(value_key, display_value)
             self._set_text_if_changed(label, f"{label_name}: {display_value}")
-            self._set_stylesheet_if_changed(label, f"{text_style} {state_style}")
+            self._set_stylesheet_if_changed(
+                label,
+                self._indicator_badge_style(semantic, font_px=font_px, weight=weight),
+            )
 
     def _compact_re_status_layout(self):
         """Tighten spacing inside status panel to free horizontal space."""
@@ -482,6 +541,7 @@ class REControlPanel(display.MITRDisplay):
             QtCore.QEvent.PaletteChange,
             QtCore.QEvent.ApplicationPaletteChange,
         ):
+            self._ensure_neutral_tooltip_style()
             self._style_re_connection_status_label()
             self._style_re_queue_state_label()
             self._style_re_status_labels()
@@ -532,12 +592,14 @@ class REControlPanel(display.MITRDisplay):
 
         from application import MITRApplication
 
+        self._ensure_neutral_tooltip_style()
         app = MITRApplication.instance()
         re_client = app.re_client
+        self._apply_re_client_exception_compatibility(re_client)
         # re_client = RunEngineClient(zmq_control_addr='tcp://192.168.0.14:60615')
         re_manager = QtReManagerConnection(re_client)
-        re_environment = QtReEnvironmentControls(re_client)
-        re_status = QtReStatusMonitor(re_client)
+        re_environment = _NonBlockingQtReEnvironmentControls(re_client)
+        re_status = _WorkerAwareQtReStatusMonitor(re_client)
         re_running_plan = QtReRunningPlan(re_client)
         re_queue_controls = QtReQueueControls(re_client)
         re_plan_execution = QtReExecutionControls(re_client)
@@ -577,6 +639,210 @@ class REControlPanel(display.MITRDisplay):
         self._style_re_running_plan_widget()
         self._sync_from_model()
 
+    @staticmethod
+    def _apply_re_client_exception_compatibility(re_client):
+        """Bridge API exception-name differences across Queue Server versions."""
+        client_cls = type(getattr(re_client, "_client", None))
+        if client_cls is type(None):
+            return
+        if (not hasattr(client_cls, "RequestError")) and hasattr(client_cls, "RequestFailedError"):
+            client_cls.RequestError = client_cls.RequestFailedError
+        if (not hasattr(client_cls, "ClientError")) and hasattr(client_cls, "HTTPClientError"):
+            client_cls.ClientError = client_cls.HTTPClientError
+
 
     # def printstuff():
     #     print("button pressed")
+
+
+class _NonBlockingQtReEnvironmentControls(QtReEnvironmentControls):
+    """Issue env open/close/destroy requests without blocking the GUI thread."""
+
+    def __init__(self, model, parent=None):
+        super().__init__(model, parent=parent)
+        self._pb_env_open.clicked.disconnect()
+        self._pb_env_open.clicked.connect(self._pb_env_open_clicked)
+        self._pb_env_close.clicked.disconnect()
+        self._pb_env_close.clicked.connect(self._pb_env_close_clicked)
+        self._pb_env_destroy.clicked.disconnect()
+        self._pb_env_destroy.clicked.connect(self._pb_env_destroy_clicked)
+
+    def _refresh_status_soon(self):
+        QtCore.QTimer.singleShot(0, lambda: self.model.load_re_manager_status(unbuffered=True))
+        QtCore.QTimer.singleShot(250, lambda: self.model.load_re_manager_status(unbuffered=True))
+
+    def _pb_env_open_clicked(self):
+        try:
+            self.model._client.environment_open()
+            self.model.activate_env_destroy(False)
+            self._refresh_status_soon()
+        except Exception as ex:
+            print(f"Exception: {ex}")
+
+    def _pb_env_close_clicked(self):
+        try:
+            self.model._client.environment_close()
+            self._refresh_status_soon()
+        except Exception as ex:
+            print(f"Exception: {ex}")
+
+    def _pb_env_destroy_clicked(self):
+        try:
+            if not self.model.env_destroy_activated:
+                raise RuntimeError("'Destroy Environment' operation is not activated and can not be executed")
+            self.model._client.environment_destroy()
+            self.model.activate_env_destroy(False)
+            self._refresh_status_soon()
+        except Exception as ex:
+            print(f"Exception: {ex}")
+
+
+class _WorkerAwareQtReStatusMonitor(QtReStatusMonitor):
+    """Repurpose the history field to show worker environment state."""
+
+    def __init__(self, model, parent=None):
+        super().__init__(model, parent=parent)
+        self._lb_items_in_history_text = "Worker state: "
+        self._lb_items_in_history.setText(self._lb_items_in_history_text + "-")
+        self._lb_queue_stop_pending_text = "Pending: "
+        self._lb_queue_stop_pending.setText(self._lb_queue_stop_pending_text + "-")
+        self._install_indicator_tooltips()
+
+    @staticmethod
+    def _tooltip_text(title, description, readouts):
+        readouts_wrapped = textwrap.fill(
+            " | ".join(readouts),
+            width=40,
+            subsequent_indent="",
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        description_wrapped = textwrap.fill(
+            description,
+            width=48,
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        return f"{title}\n{description_wrapped}\n\nPossible readouts:\n{readouts_wrapped}"
+
+    def _install_indicator_tooltips(self):
+        tooltips = {
+            self._lb_environment_exists: self._tooltip_text(
+                "RE Environment",
+                "Whether the RE Worker environment currently exists.",
+                ["OPEN", "CLOSED"],
+            ),
+            self._lb_items_in_history: self._tooltip_text(
+                "Worker State",
+                "State of the RE Worker environment process.",
+                ["INITIALIZING", "IDLE", "EXECUTING PLAN", "EXECUTING TASK", "CLOSING", "FAILED", "CLOSED"],
+            ),
+            self._lb_manager_state: self._tooltip_text(
+                "Manager State",
+                "State of the Queue Server manager.",
+                [
+                    "INITIALIZING",
+                    "IDLE",
+                    "PAUSED",
+                    "CREATING ENVIRONMENT",
+                    "STARTING QUEUE",
+                    "EXECUTING QUEUE",
+                    "EXECUTING TASK",
+                    "CLOSING ENVIRONMENT",
+                    "DESTROYING ENVIRONMENT",
+                ],
+            ),
+            self._lb_re_state: self._tooltip_text(
+                "RE State",
+                "State of the Bluesky Run Engine inside the worker.",
+                ["IDLE", "RUNNING", "PAUSING", "PAUSED", "STOPPING", "ABORTING", "HALTING", "SUSPENDING", "PANICKED"],
+            ),
+            self._lb_queue_autostart_enabled: self._tooltip_text(
+                "Queue AUTOSTART",
+                "Whether the queue starts the next available item automatically.",
+                ["ON", "OFF", "-"],
+            ),
+            self._lb_queue_stop_pending: self._tooltip_text(
+                "Pending Action",
+                "Local combined indicator for Queue STOP pending and Pause pending.",
+                ["NONE", "PAUSE", "STOP", "PAUSE+STOP", "-"],
+            ),
+            self._lb_queue_loop_mode: self._tooltip_text(
+                "Queue LOOP Mode",
+                "Whether the whole queue is configured to repeat by moving completed items "
+                "to the back.",
+                ["ON", "OFF"],
+            ),
+            self._lb_items_in_queue: self._tooltip_text(
+                "Items in Queue",
+                "Number of queued items still waiting in the plan queue.",
+                ["0", "1", "2", "..."],
+            ),
+        }
+        for widget, tooltip in tooltips.items():
+            widget.setProperty("_dc_tooltip_text", tooltip)
+            widget.setToolTip("")
+            widget.installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        if event.type() == QtCore.QEvent.ToolTip:
+            tooltip_text = watched.property("_dc_tooltip_text")
+            if tooltip_text:
+                QToolTip.showText(event.globalPos(), str(tooltip_text))
+                return True
+            QToolTip.hideText()
+            event.ignore()
+            return True
+        return super().eventFilter(watched, event)
+
+    def slot_update_widgets(self, status):
+        worker_exists = status.get("worker_environment_exists", None)
+        worker_state = status.get("worker_environment_state", None)
+        manager_state = status.get("manager_state", None)
+        re_state = status.get("re_state", None)
+        items_in_queue = status.get("items_in_queue", None)
+        queue_autostart_enabled = bool(status.get("queue_autostart_enabled", False))
+        queue_stop_pending = status.get("queue_stop_pending", None)
+        pause_pending = bool(status.get("pause_pending", False))
+
+        queue_mode = status.get("plan_queue_mode", None)
+        queue_loop_enabled = queue_mode.get("loop", None) if queue_mode else None
+
+        worker_state = worker_state.upper() if isinstance(worker_state, str) else worker_state
+        manager_state = manager_state.upper() if isinstance(manager_state, str) else manager_state
+        re_state = re_state.upper() if isinstance(re_state, str) else re_state
+
+        self._set_label_text(
+            self._lb_environment_exists,
+            self._lb_environment_exists_text,
+            "OPEN" if worker_exists else "CLOSED",
+        )
+        self._set_label_text(self._lb_items_in_history, self._lb_items_in_history_text, worker_state)
+        self._set_label_text(self._lb_manager_state, self._lb_manager_state_text, manager_state)
+        self._set_label_text(self._lb_re_state, self._lb_re_state_text, re_state)
+        self._set_label_text(self._lb_items_in_queue, self._lb_items_in_queue_text, str(items_in_queue))
+        autostart_text = "ON" if queue_autostart_enabled else "OFF"
+        pending_parts = []
+        if pause_pending:
+            pending_parts.append("PAUSE")
+        if queue_stop_pending:
+            pending_parts.append("STOP")
+        pending_text = "+".join(pending_parts) if pending_parts else "NONE"
+        if not worker_exists:
+            autostart_text = "-"
+            pending_text = "-"
+        self._set_label_text(
+            self._lb_queue_autostart_enabled,
+            self._lb_queue_autostart_enabled_text,
+            autostart_text,
+        )
+        self._set_label_text(
+            self._lb_queue_stop_pending,
+            self._lb_queue_stop_pending_text,
+            pending_text,
+        )
+        self._set_label_text(
+            self._lb_queue_loop_mode,
+            self._lb_queue_loop_mode_text,
+            "ON" if queue_loop_enabled else "OFF",
+        )
