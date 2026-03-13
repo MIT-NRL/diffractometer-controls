@@ -259,6 +259,14 @@ class REControlPanel(display.MITRDisplay):
     def _style_re_status_labels(self):
         """Style RE status rows with state-dependent backgrounds."""
         is_connected = bool(getattr(self._re_manager.model, "re_manager_connected", False))
+        raw_status_values = {}
+        for label in self._re_status.findChildren(QLabel):
+            text = label.text().strip()
+            if ":" not in text:
+                continue
+            prefix, raw_value = text.split(":", 1)
+            raw_status_values[prefix.strip()] = raw_value.strip().upper()
+
         short_names = {
             "RE Environment": "Environment",
             "Manager state": "Manager",
@@ -277,10 +285,24 @@ class REControlPanel(display.MITRDisplay):
             "font-size: 14px; font-weight: 700; padding: 0px 4px; "
             "border: 1px solid #d1d5db; border-radius: 6px;"
         )
+        # RE panel color semantics:
+        # - Gray: disconnected, unavailable, or environment closed.
+        # - Blue-gray: connected and no queued items remain.
+        # - Green: queue contains items while idle.
+        # - Red: queue contains items while an active run/queue is executing.
+        # - Amber: transitional states such as environment creation/startup,
+        #   close and destroy.
+        # - Error/failure color: high-contrast magenta with white text
+        #   (#e300ff background, #ffffff text, #a100b3 border).
         state_styles = {
             "RUNNING": "color: #7f1d1d; background-color: #fee2e2;",
             "EXECUTING_QUEUE": "color: #7f1d1d; background-color: #fee2e2;",
             "PAUSED": "color: #92400e; background-color: #fef3c7;",
+            "OPENING_ENVIRONMENT": "color: #92400e; background-color: #fef3c7;",
+            "CREATING_ENVIRONMENT": "color: #92400e; background-color: #fef3c7;",
+            "INITIALIZING": "color: #92400e; background-color: #fef3c7;",
+            "CLOSING_ENVIRONMENT": "color: #92400e; background-color: #fef3c7;",
+            "DESTROYING_ENVIRONMENT": "color: #92400e; background-color: #fef3c7;",
             "IDLE": "color: #065f46; background-color: #d1fae5;",
             "OPEN": "color: #065f46; background-color: #d1fae5;",
             "CLOSED": "color: #6b7280; background-color: #f3f4f6;",
@@ -290,6 +312,16 @@ class REControlPanel(display.MITRDisplay):
             "NO": "color: #065f46; background-color: #d1fae5;",
             "-": "color: #6b7280; background-color: #f9fafb;",
         }
+        env_value = raw_status_values.get("RE Environment", raw_status_values.get("Environment", ""))
+        manager_value = raw_status_values.get("Manager state", raw_status_values.get("Manager", ""))
+        engine_value = raw_status_values.get("RE state", raw_status_values.get("Engine", ""))
+        env_closed = env_value == "CLOSED"
+        manager_state = manager_value.replace(" ", "_")
+        engine_state = engine_value.replace(" ", "_")
+        execution_active = (
+            manager_state in {"EXECUTING_QUEUE", "PAUSED"}
+            or engine_state in {"RUNNING", "PAUSED"}
+        )
         for label in self._re_status.findChildren(QLabel):
             text = label.text().strip()
             if ":" not in text:
@@ -310,8 +342,38 @@ class REControlPanel(display.MITRDisplay):
             else:
                 text_style = base_style
             state_style = state_styles.get(value_key, "color: #111827; background-color: #eef2ff;")
+            if label_name == "Manager" and (
+                value_key.startswith("CREATING_")
+                or value_key.startswith("OPENING_")
+                or value_key.startswith("CLOSING_")
+                or value_key.startswith("DESTROYING_")
+                or value_key in {"INITIALIZING", "STARTING"}
+            ):
+                state_style = "color: #92400e; background-color: #fef3c7;"
             if label_name == "Stop Pending" and value_key == "YES":
                 state_style = "color: #92400e; background-color: #fef3c7;"
+            elif label_name == "Queue Items":
+                try:
+                    queue_items = int(raw_value.strip())
+                except ValueError:
+                    queue_items = None
+
+                if (not is_connected) or env_closed or queue_items is None:
+                    state_style = "color: #6b7280; background-color: #f3f4f6;"
+                elif queue_items <= 0:
+                    state_style = "color: #334155; background-color: #e2e8f0;"
+                elif execution_active:
+                    state_style = "color: #7f1d1d; background-color: #fee2e2;"
+                else:
+                    state_style = "color: #065f46; background-color: #d1fae5;"
+            if label_name == "Manager":
+                manager_display_overrides = {
+                    "OPENING_ENVIRONMENT": "OPENING ENV",
+                    "CREATING_ENVIRONMENT": "CREATING ENV",
+                    "CLOSING_ENVIRONMENT": "CLOSING ENV",
+                    "DESTROYING_ENVIRONMENT": "DESTROYING ENV",
+                }
+                display_value = manager_display_overrides.get(value_key, display_value)
             self._set_text_if_changed(label, f"{label_name}: {display_value}")
             self._set_stylesheet_if_changed(label, f"{text_style} {state_style}")
 
