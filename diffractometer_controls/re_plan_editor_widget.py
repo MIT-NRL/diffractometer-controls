@@ -1484,10 +1484,9 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             has_cur_text = cur_text is not None and bool(str(cur_text).strip())
             if has_cur_text and cur_text in choices:
                 combo.setCurrentIndex(choices.index(cur_text) + 1)
-            elif is_required_param and choices:
-                # Required dropdowns should start with a valid value, not blank/red.
-                combo.setCurrentIndex(1)
             else:
+                # Keep the explicit blank first item selected unless the model
+                # already supplied a concrete current/default value.
                 combo.setCurrentIndex(custom_index)
                 if le is not None:
                     le.setText("" if cur_text is None else str(cur_text))
