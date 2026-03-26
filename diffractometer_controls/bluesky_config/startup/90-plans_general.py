@@ -19,22 +19,25 @@ def _component_walk_name_and_cls(comp_walk):
 
 
 def _collect_movable_names():
-    """Collect movable device names for Queue Server dropdowns."""
+    """Collect movable device names for Queue Server dropdowns.
+
+    Prefer addressable nested movable components when a movable device exposes
+    them. This keeps pseudo-positioners such as ``analyzer1`` from appearing
+    twice when ``analyzer1`` and ``analyzer1.counts`` target the same motion.
+    """
     names = []
     for var, obj in list(globals().items()):
         if var.startswith("_"):
             continue
         try:
-            if isinstance(obj, PositionerBase):
-                names.append(var)
-                continue
+            nested_names = []
             if isinstance(obj, Device):
                 try:
                     for comp_walk in obj.walk_components():
                         try:
                             comp_name, comp_cls = _component_walk_name_and_cls(comp_walk)
                             if comp_cls and issubclass(comp_cls, PositionerBase):
-                                names.append(f"{var}.{comp_name}")
+                                nested_names.append(f"{var}.{comp_name}")
                         except Exception:
                             continue
                 except Exception:
@@ -42,9 +45,13 @@ def _collect_movable_names():
                         try:
                             sub = getattr(obj, attr)
                             if isinstance(sub, PositionerBase):
-                                names.append(f"{var}.{attr}")
+                                nested_names.append(f"{var}.{attr}")
                         except Exception:
                             continue
+            if nested_names:
+                names.extend(nested_names)
+            elif isinstance(obj, PositionerBase):
+                names.append(var)
         except Exception:
             continue
 
