@@ -56,32 +56,23 @@ def _plan_estimation_context():
 def _collect_tomo_motor_names():
     """Collect only tomography motors for the tomo_scan dropdown.
 
-    We create stable aliases in this module's globals so
-    `convert_device_names=True` can resolve them reliably.
+    Restrict the list to the two tomography theta motors while keeping their
+    normal dotted device names.
     """
     g = globals()
-    aliases = []
-    # Prefer stage theta motors for tomography
+    names = []
     candidates = [
-        ("tomo_stage1_theta", "stage1", "theta"),
-        ("tomo_stage2_theta", "stage2", "theta"),
+        ("stage1", "theta"),
+        ("stage2", "theta"),
     ]
-    for alias, parent_name, attr in candidates:
+    for parent_name, attr in candidates:
         parent = g.get(parent_name)
         if parent is None or not hasattr(parent, attr):
             continue
         motor = getattr(parent, attr)
         if isinstance(motor, PositionerBase):
-            # Register several name variants so the motor can be found by
-            # different naming conventions used in RE Worker namespaces.
-            names_to_add = [alias, f"{parent_name}.{attr}", f"{parent_name}_{attr}"]
-            for name in names_to_add:
-                # Avoid overwriting existing globals unintentionally
-                if name not in g:
-                    g[name] = motor
-                if name not in aliases:
-                    aliases.append(name)
-    return aliases
+            names.append(f"{parent_name}.{attr}")
+    return names
 
 def _one_nd_step_repeat(
     detectors,
