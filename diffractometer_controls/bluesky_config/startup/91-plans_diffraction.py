@@ -24,6 +24,23 @@ from functools import partial
 import functools
 import operator
 from cycler import cycler
+from pathlib import Path
+import sys
+from datetime import datetime, timedelta
+
+try:
+    from diffractometer_controls.plan_time_estimation import (
+        build_estimation_context,
+        estimate_plan_runtime,
+    )
+except ModuleNotFoundError:
+    package_root = Path(__file__).resolve().parents[3]
+    if str(package_root) not in sys.path:
+        sys.path.insert(0, str(package_root))
+    from diffractometer_controls.plan_time_estimation import (
+        build_estimation_context,
+        estimate_plan_runtime,
+    )
 
 try:
     # cytools is a drop-in replacement for toolz, implemented in Cython
@@ -63,6 +80,10 @@ def _collect_diffraction_detector_names():
     return out
 
 
+def _plan_estimation_context():
+    return build_estimation_context(caget_func=caget)
+
+
 @parameter_annotation_decorator(
     {
         "parameters": {
@@ -83,8 +104,6 @@ def count_he3(
                 detectors, 
                 acquire_time:float = None,
                 num = 1, 
-                delay = None, 
-                per_shot = None, 
                 md = None
                 
             ):
@@ -99,22 +118,9 @@ def count_he3(
         number of readings to take; default is 1
 
         If None, capture data until canceled
-    delay : iterable or scalar, optional
-        Time delay in seconds between successive readings; default is 0.
-    per_shot : callable, optional
-        hook for customizing action of inner loop (messages per step)
-        Expected signature ::
-
-           def f(detectors: Iterable[OphydObj]) -> Generator[Msg]:
-               ...
 
     md : dict, optional
         metadata
-
-    Notes
-    -----
-    If ``delay`` is an iterable, it must have at least ``num - 1`` entries or
-    the plan will raise a ``ValueError`` during iteration.
     """
     if not isinstance(detectors,list):
         detectors = [detectors]
@@ -127,7 +133,15 @@ def count_he3(
     if acquire_time is not None:
         for det in detectors:
             yield from bps.mov(det.acquire_time, acquire_time)
-    
+
+    estimate = estimate_plan_runtime(
+        "count_he3",
+        kwargs={
+            "acquire_time": detectors[0].acquire_time.get(),
+            "num": num,
+        },
+        context=_plan_estimation_context(),
+    )
 
     _md = {
         "title": title,
@@ -137,7 +151,6 @@ def count_he3(
             "detectors": [det.name for det in detectors],
             "acquire_time": detectors[0].acquire_time.get(),
             "num": num, 
-            "delay": delay
         },
         "det_config": {
             "ophyd_defs":list(map(repr, detectors)),
@@ -147,26 +160,28 @@ def count_he3(
         },
         "num_points": num,
         "num_intervals": num_intervals,
+        "estimated_total_time_s": estimate.get("estimated_total_time_s"),
+        "estimated_total_units": estimate.get("estimated_total_units"),
         "plan_name": "count_he3",
         "hints": {},
     }
     _md.update(md or {})
     _md["hints"].setdefault("dimensions", [(("time",), "primary")])
 
-    # per_shot might define a different stream, so do not predeclare primary
-    predeclare = per_shot is None and os.environ.get("BLUESKY_PREDECLARE", False)
-    if per_shot is None:
-        per_shot = bps.one_shot
+    predeclare = os.environ.get("BLUESKY_PREDECLARE", False)
 
-    @bpp.monitor_during_decorator([detectors[0].counts])
+    # @bpp.monitor_during_decorator([detectors[0].counts])
     @bpp.stage_decorator(detectors)
     @bpp.run_decorator(md=_md)
     def inner_count():
-        if predeclare:
-            yield from bps.declare_stream(*detectors, name="primary")
-        return (yield from bps.repeat(partial(per_shot, detectors), num=num, delay=delay))
-
-        yield from bps.mov(detectors[0].cam.acquire_time, old_acquire_time)
+        try:
+            if predeclare:
+                yield from bps.declare_stream(*detectors, name="primary")
+            return (yield from bps.repeat(partial(bps.one_shot, detectors), num=num))
+        finally:
+            if acquire_time is not None:
+                for det in detectors:
+                    yield from bps.mov(det.acquire_time, old_acquire_time)
 
     return (yield from inner_count())
 
@@ -201,7 +216,8 @@ def scan_he3(
             motor, 
             start_pos:float, 
             stop_pos:float, 
-            step:float,
+            step:float = None,
+            num_steps:int = None,
             acquire_time:float = None,
             return_to_original_position:bool = True,
             md:dict = None
@@ -218,17 +234,54 @@ def scan_he3(
     if acquire_time is not None:
         for det in detectors:
             yield from bps.mov(det.acquire_time, acquire_time)
-    
-    num_steps = int(round((stop_pos-start_pos)/step) + 1)
-    step = (stop_pos-start_pos)/(num_steps-1)
-    total_time = num_steps*detectors[0].acquire_time.get() # in seconds
+
+    if num_steps is not None:
+        if int(num_steps) < 2:
+            raise ValueError("num_steps must be at least 2")
+        positions = np.linspace(start=start_pos, stop=stop_pos, num=int(num_steps), endpoint=True)
+        num_steps_calc = int(num_steps)
+        step_calc = float(positions[1] - positions[0])
+        stop_pos_calc = float(positions[-1])
+    elif step is not None:
+        positions = np.arange(start=start_pos, stop=stop_pos + step / 2.0, step=step)
+        if len(positions) < 2:
+            raise ValueError("step must produce at least 2 scan positions")
+        num_steps_calc = int(len(positions))
+        step_calc = float(step)
+        stop_pos_calc = float(positions[-1])
+    else:
+        raise ValueError("Either step or num_steps must be provided")
+
+    estimate = estimate_plan_runtime(
+        "scan_he3",
+        kwargs={
+            "start_pos": start_pos,
+            "stop_pos": stop_pos_calc,
+            "step": step_calc,
+            "num_steps": num_steps_calc,
+            "acquire_time": detectors[0].acquire_time.get(),
+        },
+        context=_plan_estimation_context(),
+    )
+    total_time = float(estimate.get("estimated_total_time_s") or 0.0)
+    total_units = int(estimate.get("estimated_total_units") or num_steps_calc)
 
     print("#===============#")
-    print(f"Starting scan of {motor.name} from {start_pos} to {stop_pos} \nin {num_steps} steps of {step} {motor.egu}.")
+    if title:
+        print(f"Title: {title}")
+    if sample:
+        print(f"Sample: {sample}")
+    if gauge_volume:
+        print(f"Gauge volume: {gauge_volume}")
+    print(
+        f"Starting scan of {motor.name} from {start_pos} to {stop_pos_calc} "
+        f"\nin {num_steps_calc} steps of {step_calc} {motor.egu}."
+    )
     hours = total_time // 3600
     minutes = (total_time % 3600) // 60
     seconds = total_time % 60
     print(f"The scan time is estimated to be {hours} hours, {minutes} minutes, and {seconds} seconds.")
+    print(f"and finish at {datetime.now() + timedelta(seconds=total_time)}.")
     print("#===============#")
 
 
@@ -239,11 +292,15 @@ def scan_he3(
         "title": title,
         "sample": sample,
         "gauge_volume": gauge_volume,
+        "estimated_total_time_s": float(total_time),
+        "estimated_total_units": int(total_units),
         "plan_args": {
             "detectors": list(map(repr, detectors)),
             "acquire_time": detectors[0].acquire_time.get(),
-            # "num": num,
-            # "args": md_args,
+            "start_pos": start_pos,
+            "stop_pos": stop_pos_calc,
+            "step": step_calc,
+            "num_steps": num_steps_calc,
         },
         "det_config": {
             "ophyd_defs":list(map(repr, detectors)),
@@ -254,7 +311,7 @@ def scan_he3(
         "plan_name": "scan_he3",
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,
-        "plan_pattern_args": dict(motor=motor.name, start_pos=start_pos, stop_pos=stop_pos, step=step, num_steps=num_steps),  # noqa: C408
+        "plan_pattern_args": dict(motor=motor.name, start_pos=start_pos, stop_pos=stop_pos_calc, step=step_calc, num_steps=num_steps_calc),  # noqa: C408
         "motors": motor_names,
     }
     _md.update(md)
@@ -282,7 +339,7 @@ def scan_he3(
         yield from bps.stage(motor)
         
         pos_cache = defaultdict(lambda: None)
-        cycler = plan_patterns.inner_product(num=num_steps, args=[motor, start_pos, stop_pos])
+        cycler = plan_patterns.inner_product(num=num_steps_calc, args=[motor, start_pos, stop_pos_calc])
 
         def inner_scan_nd():
             # yield from bps.declare_stream(motor, *detector, name="primary")
@@ -356,7 +413,16 @@ def scan_parallel_he3(
     # num_steps = int(round((stop_pos-start_pos)/step) + 1)
     step_size1 = (stop_pos1-start_pos1)/(num_steps-1)
     step_size2 = (stop_pos2-start_pos2)/(num_steps-1)
-    total_time = num_steps*detectors[0].acquire_time.get() # in seconds
+    estimate = estimate_plan_runtime(
+        "scan_parallel_he3",
+        kwargs={
+            "num_steps": num_steps,
+            "acquire_time": acquire_time,
+        },
+        context=_plan_estimation_context(),
+    )
+    total_time = float(estimate.get("estimated_total_time_s") or 0.0)
+    total_units = int(estimate.get("estimated_total_units") or num_steps)
 
     print("#===============#")
     print(f"Starting scan of {motor1.name} from {start_pos1} to {stop_pos1} \nin {num_steps} steps of {step_size1} {motor1.egu}.")
@@ -375,6 +441,8 @@ def scan_parallel_he3(
         "title": title,
         "sample": sample,
         "gauge_volume": gauge_volume,
+        "estimated_total_time_s": float(total_time),
+        "estimated_total_units": int(total_units),
         "plan_args": {
             "detectors": [det.name for det in detector],
             "acquire_time": detector[0].acquire_time.get(),
@@ -482,7 +550,16 @@ def scan_list_he3(
             yield from bps.mov(det.acquire_time, acquire_time)
 
     num_steps = len(position_list)
-    total_time = num_steps*detectors[0].acquire_time.get() # in seconds
+    estimate = estimate_plan_runtime(
+        "scan_list_he3",
+        kwargs={
+            "position_list": position_list,
+            "acquire_time": acquire_time,
+        },
+        context=_plan_estimation_context(),
+    )
+    total_time = float(estimate.get("estimated_total_time_s") or 0.0)
+    total_units = int(estimate.get("estimated_total_units") or num_steps)
 
     print("#===============#")
     print(f"Starting scan of {motor.name} through the following positions:")
@@ -504,6 +581,8 @@ def scan_list_he3(
         "title": title,
         "sample": sample,
         "gauge_volume": gauge_volume,
+        "estimated_total_time_s": float(total_time),
+        "estimated_total_units": int(total_units),
         "plan_args": {
             "detectors": [det.name for det in detectors],
             "acquire_time": detectors[0].acquire_time.get(),
@@ -623,7 +702,21 @@ def scan2D_he3(
     step_inner = (stop_pos_inner-start_pos_inner)/(num_steps_inner-1)
 
     total_steps = num_steps_outer*num_steps_inner
-    total_time = total_steps*detectors[0].acquire_time.get()
+    estimate = estimate_plan_runtime(
+        "scan2D_he3",
+        kwargs={
+            "start_pos_outer": start_pos_outer,
+            "stop_pos_outer": stop_pos_outer,
+            "step_outer": step_outer,
+            "start_pos_inner": start_pos_inner,
+            "stop_pos_inner": stop_pos_inner,
+            "step_inner": step_inner,
+            "acquire_time": acquire_time,
+        },
+        context=_plan_estimation_context(),
+    )
+    total_time = float(estimate.get("estimated_total_time_s") or 0.0)
+    total_units = int(estimate.get("estimated_total_units") or total_steps)
 
     print("#===============#")
     print(f"Starting 2D outer scan of with \n{motor_outer.name} from {start_pos_outer} to {stop_pos_outer} \nin {num_steps_outer} steps of {step_outer} {motor_outer.egu}.")
@@ -647,6 +740,8 @@ def scan2D_he3(
         "title": title,
         "sample": sample,
         "gauge_volume": gauge_volume,
+        "estimated_total_time_s": float(total_time),
+        "estimated_total_units": int(total_units),
         "plan_args": {
             "detectors": [det.name for det in detectors],
             "acquire_time": detectors[0].acquire_time.get(),

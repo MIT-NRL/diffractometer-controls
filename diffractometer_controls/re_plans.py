@@ -10,22 +10,21 @@ from bluesky_widgets.qt.run_engine_client import (
     QtReExecutionControls,
     QtReManagerConnection,
     QtRePlanHistory,
-    QtRePlanQueue,
     QtReQueueControls,
     QtReRunningPlan,
     QtReStatusMonitor,
 )
 try:
     from diffractometer_controls.re_plan_editor_widget import RePlanEditorWidget
+    from diffractometer_controls.re_queue_widget import QtRePlanQueueEstimated
 except Exception:
     from re_plan_editor_widget import RePlanEditorWidget
+    from re_queue_widget import QtRePlanQueueEstimated
 
 from bluesky_widgets.models.run_engine_client import RunEngineClient
 import display
 
 class REPlans(display.MITRDisplay):
-    _QUEUE_PARAMS_PER_LINE = 2
-
     def __init__(self, parent=None, args=None, macros=None, ui_filename='re_plans.ui'):
         super().__init__(parent, args, macros, ui_filename)
         # print("REScreen here")
@@ -47,42 +46,17 @@ class REPlans(display.MITRDisplay):
                     pass
 
     @staticmethod
-    def _wrap_parameter_text(text):
-        text = str(text or "").strip()
-        if not text:
-            return ""
-
-        text = " ".join(text.split())
-        parts = []
-        for chunk in text.split(", "):
-            if ": " in chunk:
-                key, value = chunk.split(": ", 1)
-                parts.append(f"{key}: {value}")
-            else:
-                parts.append(chunk)
-
-        if len(parts) <= 1:
-            return parts[0] if parts else text
-
-        lines = []
-        step = max(int(REPlans._QUEUE_PARAMS_PER_LINE), 1)
-        for index in range(0, len(parts), step):
-            lines.append(" | ".join(parts[index:index + step]))
-        return "\n".join(lines)
-
-    @staticmethod
     def _refresh_queue_table_layout(queue_widget):
         table = getattr(queue_widget, "_table", None)
         labels = getattr(queue_widget, "_table_column_labels", ())
-        items = getattr(queue_widget, "_plan_queue_items", ())
-        model = getattr(queue_widget, "model", None)
-        if table is None or not labels or model is None:
+        if table is None or not labels:
             return
 
         try:
             type_col = labels.index("")
             name_col = labels.index("Name")
             parameters_col = labels.index("Parameters")
+            estimate_col = labels.index("Est. Time")
             user_col = labels.index("USER")
             group_col = labels.index("GROUP")
         except ValueError:
@@ -93,6 +67,7 @@ class REPlans(display.MITRDisplay):
         header.setSectionResizeMode(type_col, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(name_col, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(parameters_col, QHeaderView.Interactive)
+        header.setSectionResizeMode(estimate_col, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(user_col, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(group_col, QHeaderView.ResizeToContents)
 
@@ -102,27 +77,10 @@ class REPlans(display.MITRDisplay):
 
         fm = table.fontMetrics()
         params_header_width = fm.horizontalAdvance("Parameters") + 28
-        params_width = params_header_width
-
-        for row, item in enumerate(items):
-            try:
-                raw_text = model.get_item_value_for_label(item=item, label="Parameters")
-            except Exception:
-                raw_text = ""
-            wrapped_text = REPlans._wrap_parameter_text(raw_text)
-            table_item = table.item(row, parameters_col)
-            if table_item is None:
-                continue
-            table_item.setText(wrapped_text)
-            table_item.setToolTip(raw_text)
-            table_item.setTextAlignment(int(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop))
-
-            line_width = 0
-            for line in wrapped_text.splitlines() or [""]:
-                line_width = max(line_width, fm.horizontalAdvance(line))
-            params_width = max(params_width, line_width + 20)
-
-        table.setColumnWidth(parameters_col, params_width)
+        current_width = table.columnWidth(parameters_col)
+        table.setColumnWidth(parameters_col, max(params_header_width, current_width))
+        est_header_width = fm.horizontalAdvance("Est. Time") + 28
+        table.setColumnWidth(estimate_col, est_header_width)
         table.resizeRowsToContents()
 
     @staticmethod
@@ -205,6 +163,10 @@ class REPlans(display.MITRDisplay):
     @staticmethod
     def _style_queue_widget(queue_widget):
         """Apply clearer styling and larger text to Plan Queue panel."""
+        pal = queue_widget.palette()
+        title_color = pal.color(QtGui.QPalette.Active, QtGui.QPalette.WindowText).name()
+        muted_color = pal.color(QtGui.QPalette.Active, QtGui.QPalette.Mid).name()
+
         # Match the centered, larger title style used on other RE widgets.
         for group_box in queue_widget.findChildren(QGroupBox):
             group_box.setStyleSheet(
@@ -216,9 +178,13 @@ class REPlans(display.MITRDisplay):
         for label in queue_widget.findChildren(QLabel):
             text = label.text().strip()
             if text == "QUEUE":
-                label.setStyleSheet("font-size: 14px; font-weight: 700; color: #111827;")
+                label.setStyleSheet(f"font-size: 14px; font-weight: 700; color: {title_color};")
+            if text.startswith("Total Est. Time:"):
+                label.setStyleSheet(f"font-size: 13px; font-weight: 700; color: {title_color};")
+            if text.startswith("Est. Completion:"):
+                label.setStyleSheet(f"font-size: 13px; font-weight: 700; color: {title_color};")
             if text in {"Move", "Mode", "Selection", "Edit"}:
-                label.setStyleSheet("font-size: 13px; font-weight: 700; color: #334155;")
+                label.setStyleSheet(f"font-size: 13px; font-weight: 700; color: {muted_color};")
 
         for button in queue_widget.findChildren(QPushButton):
             # Match default button styling used in the rest of bluesky widgets.
@@ -241,7 +207,7 @@ class REPlans(display.MITRDisplay):
         app = MITRApplication.instance()
         re_client = app.re_client
 
-        re_queue = QtRePlanQueue(re_client)
+        re_queue = QtRePlanQueueEstimated(re_client)
         re_plan_editor = RePlanEditorWidget(re_client)
         self.ui.RE_Queue.layout().addWidget(re_queue)
         self.ui.RE_Plan_Editor.layout().addWidget(re_plan_editor)

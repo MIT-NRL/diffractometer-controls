@@ -26,8 +26,31 @@ from ophyd.device import DeviceStatus
 from ophyd.status import Status, SubscriptionStatus
 from epics import caput, caget, cainfo
 from functools import partial
+from pathlib import Path
+import sys
+
+try:
+    from diffractometer_controls.plan_time_estimation import (
+        build_estimation_context,
+        estimate_plan_runtime,
+    )
+except ModuleNotFoundError:
+    package_root = Path(__file__).resolve().parents[3]
+    if str(package_root) not in sys.path:
+        sys.path.insert(0, str(package_root))
+    from diffractometer_controls.plan_time_estimation import (
+        build_estimation_context,
+        estimate_plan_runtime,
+    )
 
 transfer_time_per_bytes = 4.1203007518796994e-08 # transfer speed in seconds per byte testing on the ASI294MM Pro
+
+
+def _plan_estimation_context():
+    return build_estimation_context(
+        caget_func=caget,
+        transfer_time_per_bytes=transfer_time_per_bytes,
+    )
 
 
 def _collect_tomo_motor_names():
@@ -391,13 +414,21 @@ def tomo_scan(file_name:str,
             num_projections_calc = int((stop_angle-start_angle)/angle_step)
             actual_stop_angle = stop_angle - angle_step
 
-    image_bytes = caget("4dh4:cam1:ArraySize_RBV")
-    transfer_time_per_image = image_bytes * transfer_time_per_bytes
-
-    total_time = (
-        num_exposures * num_projections_calc * detector[0].cam.acquire_time.get()
-        + num_exposures * num_projections_calc * transfer_time_per_image
-    )  # in seconds
+    estimate = estimate_plan_runtime(
+        "tomo_scan",
+        kwargs={
+            "exposure_time": exposure_time,
+            "num_projections": num_projections_calc,
+            "angle_step": angle_step_calc,
+            "start_angle": start_angle,
+            "stop_angle": actual_stop_angle,
+            "num_exposures": num_exposures,
+            "include_stop_angle": include_stop_angle,
+        },
+        context=_plan_estimation_context(),
+    )
+    total_time = float(estimate.get("estimated_total_time_s") or 0.0)
+    total_units = int(estimate.get("estimated_total_units") or (num_exposures * num_projections_calc))
 
     
 
@@ -423,7 +454,7 @@ def tomo_scan(file_name:str,
         "file_name": file_name,
         "file_dir": file_dir,
         "estimated_total_time_s": float(total_time),
-        "estimated_total_units": int(num_exposures * num_projections_calc),
+        "estimated_total_units": int(total_units),
         "plan_args": {
             "detectors": list(map(repr, detector)),
             # "num": num,
@@ -470,7 +501,7 @@ def tomo_scan(file_name:str,
     @bpp.run_decorator(md=_md)
     def main_plan():
         progress = _ProgressEstimator(
-            total_units=num_exposures * num_projections_calc,
+            total_units=total_units,
             initial_total_time_s=total_time,
         )
         def _on_step_start():
@@ -573,13 +604,16 @@ def imaging(
         for det in detector:
             yield from bps.mov(det.cam.acquire_time, exposure_time)
 
-    image_bytes = caget("4dh4:cam1:ArraySize_RBV")
-    transfer_time_per_image = image_bytes * transfer_time_per_bytes
-
-    total_time = (
-        num_exposures * detector[0].cam.acquire_time.get()
-        + num_exposures * transfer_time_per_image
-    )  # in seconds
+    estimate = estimate_plan_runtime(
+        "imaging",
+        kwargs={
+            "exposure_time": exposure_time,
+            "num_exposures": num_exposures,
+        },
+        context=_plan_estimation_context(),
+    )
+    total_time = float(estimate.get("estimated_total_time_s") or 0.0)
+    total_units = int(estimate.get("estimated_total_units") or num_exposures)
 
     print("#===============#")
     print(f"Starting imaging with {num_exposures} exposures.")
@@ -605,7 +639,7 @@ def imaging(
         "file_name": file_name,
         "file_dir": file_dir,
         "estimated_total_time_s": float(total_time),
-        "estimated_total_units": int(num_exposures),
+        "estimated_total_units": int(total_units),
         "plan_args": {
             "detectors": list(map(repr, detector)),
             # "num": num,
@@ -630,7 +664,7 @@ def imaging(
     @bpp.run_decorator(md=_md)
     def main_plan():
         progress = _ProgressEstimator(
-            total_units=num_exposures,
+            total_units=total_units,
             initial_total_time_s=total_time,
         )
         yield from _reset_detector_array_counter(detector)
@@ -727,13 +761,20 @@ def imaging_scan(
         step_cal = step
         stop_pos_calc = positions[-1]
 
-    image_bytes = caget("4dh4:cam1:ArraySize_RBV")
-    transfer_time_per_image = image_bytes * transfer_time_per_bytes
-
-    total_time = (
-        num_exposures * num_steps_calc * detector[0].cam.acquire_time.get()
-        + num_exposures * num_steps_calc * transfer_time_per_image
-    )  # in seconds
+    estimate = estimate_plan_runtime(
+        "imaging_scan",
+        kwargs={
+            "start_pos": start_pos,
+            "stop_pos": stop_pos_calc,
+            "step": step_cal,
+            "num_steps": num_steps_calc,
+            "exposure_time": exposure_time,
+            "num_exposures": num_exposures,
+        },
+        context=_plan_estimation_context(),
+    )
+    total_time = float(estimate.get("estimated_total_time_s") or 0.0)
+    total_units = int(estimate.get("estimated_total_units") or (num_exposures * num_steps_calc))
 
     print("#===============#")
     print(f"Starting scan of {motor.name} from {start_pos} to {stop_pos_calc} \nin {num_steps_calc} steps of {step_cal} {motor.egu} with {num_exposures} exposures at each position.")
@@ -752,7 +793,7 @@ def imaging_scan(
         "file_name": file_name,
         "file_dir": file_dir,
         "estimated_total_time_s": float(total_time),
-        "estimated_total_units": int(num_exposures * num_steps_calc),
+        "estimated_total_units": int(total_units),
         "plan_args": {
             # "detectors": list(map(repr, detector)),
             # "num": num,
@@ -790,7 +831,7 @@ def imaging_scan(
     @bpp.run_decorator(md=_md)
     def main_plan():
         progress = _ProgressEstimator(
-            total_units=num_exposures * num_steps_calc,
+            total_units=total_units,
             initial_total_time_s=total_time,
         )
         def _on_step_start():

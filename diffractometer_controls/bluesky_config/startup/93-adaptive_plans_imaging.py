@@ -9,6 +9,22 @@ from collections import deque
 import threading
 import time
 import uuid
+from pathlib import Path
+import sys
+
+try:
+    from diffractometer_controls.plan_time_estimation import (
+        build_estimation_context,
+        estimate_plan_runtime,
+    )
+except ModuleNotFoundError:
+    package_root = Path(__file__).resolve().parents[3]
+    if str(package_root) not in sys.path:
+        sys.path.insert(0, str(package_root))
+    from diffractometer_controls.plan_time_estimation import (
+        build_estimation_context,
+        estimate_plan_runtime,
+    )
 
 
 def _collect_focus_motor_names():
@@ -158,6 +174,14 @@ def _adaptive_focus_to_int(value, default=None):
         return default
 
 
+def _plan_estimation_context():
+    transfer_rate = float(globals().get("transfer_time_per_bytes", 4.1203007518796994e-08))
+    return build_estimation_context(
+        caget_func=caget,
+        transfer_time_per_bytes=transfer_rate,
+    )
+
+
 @parameter_annotation_decorator(
     {
         "parameters": {
@@ -237,19 +261,20 @@ def adaptive_imaging_focus_scan(
     )
     step_calc = float(positions[1] - positions[0]) if num_steps_calc > 1 else np.nan
 
-    # Keep timing estimate pattern consistent with imaging_scan.
-    transfer_rate = float(globals().get("transfer_time_per_bytes", 4.1203007518796994e-08))
-    image_bytes = caget("4dh4:cam1:ArraySize_RBV")
-    try:
-        image_bytes = float(image_bytes)
-    except Exception:
-        image_bytes = 0.0
-    transfer_time_per_image = float(image_bytes) * transfer_rate
-    total_units = int(num_steps_calc)
-    total_time = (
-        float(num_steps_calc) * detector[0].cam.acquire_time.get()
-        + float(num_steps_calc) * transfer_time_per_image
+    estimate = estimate_plan_runtime(
+        "adaptive_imaging_focus_scan",
+        kwargs={
+            "focus_guess": focus_guess,
+            "scan_half_range": scan_half_range,
+            "num_steps": num_steps_calc,
+            "start_pos": start_pos_calc,
+            "stop_pos": stop_pos_calc,
+            "exposure_time": exposure_time,
+        },
+        context=_plan_estimation_context(),
     )
+    total_units = int(estimate.get("estimated_total_units") or num_steps_calc)
+    total_time = float(estimate.get("estimated_total_time_s") or 0.0)
     session_id = _focus_adaptive_create_session(
         initial_state={
             "plan": "adaptive_imaging_focus_scan",
