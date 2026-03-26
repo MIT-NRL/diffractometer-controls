@@ -196,6 +196,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         self._file_dir_combos = weakref.WeakSet()
         self._file_dir_cached_choices = []
         self._file_dir_cache_ts = 0.0
+        self._file_dir_initial_snapshot_requested = False
         ttl_env = str(os.environ.get("MITR_FILE_DIR_CACHE_TTL_S", "2")).strip()
         try:
             self._file_dir_cache_ttl_s = max(2.0, float(ttl_env))
@@ -698,7 +699,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         if self._file_dir_query_mode == "local":
             return self._fallback_local_file_dirs(max_items=512, max_depth=3)
         if self._file_dir_query_mode == "stream":
-            return []
+            return self._query_worker_file_dirs()
         return self._query_worker_file_dirs()
 
     def _ensure_file_dir_query_thread(self):
@@ -732,6 +733,10 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             self._start_file_dir_stream_subscriber()
             if self._file_dir_cached_choices:
                 self._apply_file_dir_choices_to_combos(self._file_dir_cached_choices)
+            elif not self._file_dir_initial_snapshot_requested:
+                self._file_dir_initial_snapshot_requested = True
+                self._ensure_file_dir_query_thread()
+                self._file_dir_request_event.set()
             return
         if not force and self._file_dir_cached_choices:
             age = time.monotonic() - float(self._file_dir_cache_ts)
