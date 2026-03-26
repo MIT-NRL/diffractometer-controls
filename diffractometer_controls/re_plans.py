@@ -1,10 +1,9 @@
 import sys
-
 from pydm.display import Display
 from qtpy import QtCore, QtGui
 from qtpy.QtWidgets import (QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QScrollArea, QFrame,
-    QApplication, QWidget, QLabel, QTableWidget)
+    QApplication, QWidget, QLabel, QTableWidget, QHeaderView)
 from bluesky_widgets.qt.run_engine_client import (
     QtReConsoleMonitor,
     QtReEnvironmentControls,
@@ -25,6 +24,8 @@ from bluesky_widgets.models.run_engine_client import RunEngineClient
 import display
 
 class REPlans(display.MITRDisplay):
+    _QUEUE_PARAMS_PER_LINE = 2
+
     def __init__(self, parent=None, args=None, macros=None, ui_filename='re_plans.ui'):
         super().__init__(parent, args, macros, ui_filename)
         # print("REScreen here")
@@ -44,6 +45,85 @@ class REPlans(display.MITRDisplay):
                     shutdown(wait=True, timeout=0.25)
                 except Exception:
                     pass
+
+    @staticmethod
+    def _wrap_parameter_text(text):
+        text = str(text or "").strip()
+        if not text:
+            return ""
+
+        text = " ".join(text.split())
+        parts = []
+        for chunk in text.split(", "):
+            if ": " in chunk:
+                key, value = chunk.split(": ", 1)
+                parts.append(f"{key}: {value}")
+            else:
+                parts.append(chunk)
+
+        if len(parts) <= 1:
+            return parts[0] if parts else text
+
+        lines = []
+        step = max(int(REPlans._QUEUE_PARAMS_PER_LINE), 1)
+        for index in range(0, len(parts), step):
+            lines.append(" | ".join(parts[index:index + step]))
+        return "\n".join(lines)
+
+    @staticmethod
+    def _refresh_queue_table_layout(queue_widget):
+        table = getattr(queue_widget, "_table", None)
+        labels = getattr(queue_widget, "_table_column_labels", ())
+        items = getattr(queue_widget, "_plan_queue_items", ())
+        model = getattr(queue_widget, "model", None)
+        if table is None or not labels or model is None:
+            return
+
+        try:
+            type_col = labels.index("")
+            name_col = labels.index("Name")
+            parameters_col = labels.index("Parameters")
+            user_col = labels.index("USER")
+            group_col = labels.index("GROUP")
+        except ValueError:
+            return
+
+        header = table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(type_col, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(name_col, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(parameters_col, QHeaderView.Interactive)
+        header.setSectionResizeMode(user_col, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(group_col, QHeaderView.ResizeToContents)
+
+        vertical_header = table.verticalHeader()
+        vertical_header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        vertical_header.setMinimumSectionSize(max(table.fontMetrics().height() + 8, 28))
+
+        fm = table.fontMetrics()
+        params_header_width = fm.horizontalAdvance("Parameters") + 28
+        params_width = params_header_width
+
+        for row, item in enumerate(items):
+            try:
+                raw_text = model.get_item_value_for_label(item=item, label="Parameters")
+            except Exception:
+                raw_text = ""
+            wrapped_text = REPlans._wrap_parameter_text(raw_text)
+            table_item = table.item(row, parameters_col)
+            if table_item is None:
+                continue
+            table_item.setText(wrapped_text)
+            table_item.setToolTip(raw_text)
+            table_item.setTextAlignment(int(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop))
+
+            line_width = 0
+            for line in wrapped_text.splitlines() or [""]:
+                line_width = max(line_width, fm.horizontalAdvance(line))
+            params_width = max(params_width, line_width + 20)
+
+        table.setColumnWidth(parameters_col, params_width)
+        table.resizeRowsToContents()
 
     @staticmethod
     def _reorganize_queue_toolbar(queue_widget):
@@ -148,13 +228,12 @@ class REPlans(display.MITRDisplay):
         for table in queue_widget.findChildren(QTableWidget):
             table.setStyleSheet(
                 "QTableWidget { font-size: 13px; } "
+                "QTableWidget::item { padding: 3px 4px 1px 4px; } "
                 "QHeaderView::section { font-size: 13px; font-weight: 700; padding: 4px; }"
             )
-            table.setWordWrap(True)
+            table.setWordWrap(False)
             table.setTextElideMode(QtCore.Qt.ElideNone)
-            # Approximate two lines of text for long parameter cells.
-            row_height = max(table.fontMetrics().height() * 2 + 8, 34)
-            table.verticalHeader().setDefaultSectionSize(row_height)
+            table.verticalHeader().setDefaultSectionSize(max(table.fontMetrics().height() + 8, 28))
 
     def customize_ui(self):
         from application import MITRApplication
@@ -170,6 +249,7 @@ class REPlans(display.MITRDisplay):
         # Rebuild queue toolbar into grouped two-row controls.
         QtCore.QTimer.singleShot(0, lambda: self._reorganize_queue_toolbar(re_queue))
         QtCore.QTimer.singleShot(0, lambda: self._style_queue_widget(re_queue))
+        re_queue.signal_plan_queue_changed.connect(lambda *_: self._refresh_queue_table_layout(re_queue))
         QtCore.QTimer.singleShot(0, lambda: re_queue.slot_update_widgets(bool(re_client.re_manager_connected)))
         QtCore.QTimer.singleShot(
             0,
@@ -178,3 +258,4 @@ class REPlans(display.MITRDisplay):
                 list(getattr(re_client, "selected_queue_item_uids", []) or []),
             ),
         )
+        QtCore.QTimer.singleShot(0, lambda: self._refresh_queue_table_layout(re_queue))
