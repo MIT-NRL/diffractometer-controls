@@ -197,6 +197,9 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         self._file_dir_cached_choices = []
         self._file_dir_cache_ts = 0.0
         self._file_dir_initial_snapshot_requested = False
+        self._file_dir_snapshot_in_flight = False
+        self._file_dir_snapshot_warning_logged = False
+        self._file_dir_snapshot_lock = threading.Lock()
         ttl_env = str(os.environ.get("MITR_FILE_DIR_CACHE_TTL_S", "2")).strip()
         try:
             self._file_dir_cache_ttl_s = max(2.0, float(ttl_env))
@@ -206,6 +209,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         mode = str(os.environ.get("MITR_FILE_DIR_QUERY_MODE", "stream")).strip().lower()
         self._file_dir_query_mode = mode if mode in ("local", "worker", "stream") else "stream"
         self._file_dir_stream_addr = str(os.environ.get("MITR_FILE_DIR_STREAM_ADDR", "")).strip()
+        self._file_dir_snapshot_addr = str(os.environ.get("MITR_FILE_DIR_SNAPSHOT_ADDR", "")).strip()
         self._file_dir_stream_topic = str(
             os.environ.get("MITR_FILE_DIR_STREAM_TOPIC", "file_dir_choices")
         ).strip() or "file_dir_choices"
@@ -419,6 +423,19 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         if host in ("*", "0.0.0.0", "::"):
             host = "localhost"
         return f"tcp://{host}:5569"
+
+    def _default_file_dir_snapshot_addr(self):
+        if self._file_dir_snapshot_addr:
+            return self._file_dir_snapshot_addr
+        api = self._get_re_manager_api()
+        if api is None:
+            return "tcp://localhost:5570"
+        control_addr = self._get_api_control_addr(api)
+        m = re.match(r"^tcp://([^:]+):\d+$", control_addr)
+        host = m.group(1) if m else "localhost"
+        if host in ("*", "0.0.0.0", "::"):
+            host = "localhost"
+        return f"tcp://{host}:5570"
 
     def _start_file_dir_stream_subscriber(self):
         if self._file_dir_stream_thread is not None:
@@ -694,12 +711,47 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         # Queue Server is reachable but returned no choices.
         return []
 
+    def _query_stream_snapshot_file_dirs(self):
+        if zmq is None:
+            raise RuntimeError("file_dir snapshot mode requested, but pyzmq is unavailable")
+
+        addr = self._default_file_dir_snapshot_addr()
+        ctx = None
+        sock = None
+        try:
+            ctx = zmq.Context()
+            sock = ctx.socket(zmq.REQ)
+            sock.setsockopt(zmq.LINGER, 0)
+            sock.setsockopt(zmq.RCVTIMEO, 1500)
+            sock.setsockopt(zmq.SNDTIMEO, 1500)
+            sock.connect(addr)
+            sock.send_json({"op": "get_file_dir_cache"})
+            payload = sock.recv_json()
+        except Exception as ex:
+            raise RuntimeError(f"snapshot RPC failed at {addr}: {ex}") from ex
+        finally:
+            try:
+                if sock is not None:
+                    sock.close(0)
+            except Exception:
+                pass
+            try:
+                if ctx is not None:
+                    ctx.term()
+            except Exception:
+                pass
+
+        if isinstance(payload, dict) and (payload.get("ok", True) is False):
+            msg = str(payload.get("error") or payload.get("message") or "snapshot RPC failed")
+            raise RuntimeError(msg)
+        return self._extract_file_dir_choices(payload)
+
     def _query_file_dirs(self):
         # Local mode may be enabled explicitly with MITR_FILE_DIR_QUERY_MODE=local.
         if self._file_dir_query_mode == "local":
             return self._fallback_local_file_dirs(max_items=512, max_depth=3)
         if self._file_dir_query_mode == "stream":
-            return self._query_worker_file_dirs()
+            return self._query_stream_snapshot_file_dirs()
         return self._query_worker_file_dirs()
 
     def _ensure_file_dir_query_thread(self):
@@ -723,6 +775,10 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                 choices = self._query_file_dirs()
             except Exception as ex:
                 err = str(ex)
+            finally:
+                if self._file_dir_query_mode == "stream":
+                    with self._file_dir_snapshot_lock:
+                        self._file_dir_snapshot_in_flight = False
             if not self._emit_file_dir_choices_ready(choices, err):
                 break
 
@@ -733,10 +789,17 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             self._start_file_dir_stream_subscriber()
             if self._file_dir_cached_choices:
                 self._apply_file_dir_choices_to_combos(self._file_dir_cached_choices)
-            elif not self._file_dir_initial_snapshot_requested:
-                self._file_dir_initial_snapshot_requested = True
-                self._ensure_file_dir_query_thread()
-                self._file_dir_request_event.set()
+            else:
+                queue_snapshot = False
+                with self._file_dir_snapshot_lock:
+                    if (not self._file_dir_initial_snapshot_requested) and (not self._file_dir_snapshot_in_flight):
+                        self._file_dir_initial_snapshot_requested = True
+                        self._file_dir_snapshot_in_flight = True
+                        self._file_dir_snapshot_warning_logged = False
+                        queue_snapshot = True
+                if queue_snapshot:
+                    self._ensure_file_dir_query_thread()
+                    self._file_dir_request_event.set()
             return
         if not force and self._file_dir_cached_choices:
             age = time.monotonic() - float(self._file_dir_cache_ts)
@@ -750,12 +813,22 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         if self._file_dir_stream_stop.is_set():
             return
         if error and (not choices):
-            _LOG.warning("file_dir choices update failed: %s", str(error))
+            if self._file_dir_query_mode == "stream":
+                with self._file_dir_snapshot_lock:
+                    self._file_dir_initial_snapshot_requested = False
+                if not self._file_dir_snapshot_warning_logged:
+                    _LOG.warning("file_dir choices snapshot fetch failed: %s", str(error))
+                    self._file_dir_snapshot_warning_logged = True
+            else:
+                _LOG.warning("file_dir choices update failed: %s", str(error))
             return
         if not isinstance(choices, list):
             return
+        if error:
+            self._file_dir_snapshot_warning_logged = False
         if not choices:
             return
+        self._file_dir_snapshot_warning_logged = False
         self._file_dir_cached_choices = list(choices)
         self._file_dir_cache_ts = time.monotonic()
         self._apply_file_dir_choices_to_combos(self._file_dir_cached_choices)

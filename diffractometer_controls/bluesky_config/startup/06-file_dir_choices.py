@@ -12,10 +12,12 @@ _FILE_DIR_CACHE = {
     "directories": [],
     "roots": [],
 }
+_FILE_DIR_CACHE_LOCK = threading.Lock()
 
 _FILE_DIR_STREAM_STATE = {
     "started": False,
     "thread": None,
+    "snapshot_thread": None,
     "stop": threading.Event(),
     "observer": None,
 }
@@ -121,6 +123,31 @@ def _re_busy_for_file_scan(state: str) -> bool:
     return s in busy_states
 
 
+def _get_file_dir_cache_payload(*, cached=True, **extra):
+    with _FILE_DIR_CACHE_LOCK:
+        payload = {
+            "ok": True,
+            "directories": list(_FILE_DIR_CACHE["directories"]),
+            "roots": list(_FILE_DIR_CACHE["roots"]),
+            "cached": bool(cached),
+        }
+    if extra:
+        payload.update(extra)
+    return payload
+
+
+def _update_file_dir_cache(*, ts, directories, roots):
+    with _FILE_DIR_CACHE_LOCK:
+        _FILE_DIR_CACHE["ts"] = float(ts)
+        _FILE_DIR_CACHE["directories"] = list(directories)
+        _FILE_DIR_CACHE["roots"] = list(roots)
+
+
+def _file_dir_cache_is_empty():
+    with _FILE_DIR_CACHE_LOCK:
+        return not bool(_FILE_DIR_CACHE["directories"])
+
+
 def list_imaging_file_dirs(
     max_items: int = 256,
     max_depth: int = 3,
@@ -150,7 +177,7 @@ def list_imaging_file_dirs(
     cur_thread_name = str(threading.current_thread().name)
     re_state = _get_re_state()
     re_busy = _re_busy_for_file_scan(re_state)
-    if cur_thread_name != "file-dir-choices-stream":
+    if cur_thread_name not in ("file-dir-choices-stream", "file-dir-choices-snapshot"):
         _rate_limited_print(
             "last_non_stream_print_ts",
             "[file_dir_choices] non-stream invocation "
@@ -185,24 +212,18 @@ def list_imaging_file_dirs(
                 "[file_dir_choices] stream scan skipped while RE is active "
                 f"(state='{re_state}'); publishing cached directories only"
             )
-        return {
-            "ok": True,
-            "directories": list(_FILE_DIR_CACHE["directories"]),
-            "roots": list(_FILE_DIR_CACHE["roots"]),
-            "cached": True,
-            "skipped_for_active_run": True,
-            "re_state": re_state,
-        }
+        return _get_file_dir_cache_payload(
+            cached=True,
+            skipped_for_active_run=True,
+            re_state=re_state,
+        )
     if was_blocked:
         _FILE_DIR_MONITOR["stream_skip_busy_active"] = False
 
-    if (not force_refresh) and (now_mono - float(_FILE_DIR_CACHE["ts"]) < 2.0):
-        return {
-            "ok": True,
-            "directories": list(_FILE_DIR_CACHE["directories"]),
-            "roots": list(_FILE_DIR_CACHE["roots"]),
-            "cached": True,
-        }
+    with _FILE_DIR_CACHE_LOCK:
+        cache_age_s = now_mono - float(_FILE_DIR_CACHE["ts"])
+    if (not force_refresh) and (cache_age_s < 2.0):
+        return _get_file_dir_cache_payload(cached=True)
 
     scan_t0 = time.monotonic()
     roots = _resolve_imaging_roots()
@@ -246,9 +267,7 @@ def list_imaging_file_dirs(
                 stack.append(child)
 
     directories = sorted(names, key=str.lower)[:max_items]
-    _FILE_DIR_CACHE["ts"] = now_mono
-    _FILE_DIR_CACHE["directories"] = list(directories)
-    _FILE_DIR_CACHE["roots"] = list(resolved_roots)
+    _update_file_dir_cache(ts=now_mono, directories=directories, roots=resolved_roots)
 
     scan_dt = max(0.0, float(time.monotonic() - scan_t0))
     try:
@@ -292,6 +311,9 @@ def _start_file_dir_choices_stream():
     addr = str(os.environ.get("MITR_FILE_DIR_STREAM_ADDR", "tcp://*:5569")).strip()
     if not addr:
         addr = "tcp://*:5569"
+    snapshot_addr = str(os.environ.get("MITR_FILE_DIR_SNAPSHOT_ADDR", "tcp://*:5570")).strip()
+    if not snapshot_addr:
+        snapshot_addr = "tcp://*:5570"
     topic = str(os.environ.get("MITR_FILE_DIR_STREAM_TOPIC", "file_dir_choices")).strip()
     if not topic:
         topic = "file_dir_choices"
@@ -350,11 +372,78 @@ def _start_file_dir_choices_stream():
     stop_event.clear()
 
     topic_b = topic.encode("utf-8", errors="ignore")
+    def _snapshot_loop():
+        ctx = None
+        sock = None
+        try:
+            if _file_dir_cache_is_empty():
+                list_imaging_file_dirs(
+                    max_items=max_items,
+                    max_depth=max_depth,
+                    include_hidden=False,
+                    force_refresh=True,
+                )
+            ctx = zmq.Context()
+            sock = ctx.socket(zmq.REP)
+            sock.setsockopt(zmq.LINGER, 0)
+            sock.bind(snapshot_addr)
+            print(f"[file_dir_choices] snapshot RPC started addr='{snapshot_addr}'")
+            poller = zmq.Poller()
+            poller.register(sock, zmq.POLLIN)
+            while not stop_event.is_set():
+                try:
+                    events = dict(poller.poll(100))
+                except Exception:
+                    continue
+                if sock not in events:
+                    continue
+                try:
+                    raw = sock.recv(flags=zmq.NOBLOCK)
+                except Exception:
+                    continue
+                try:
+                    request = json.loads(raw.decode("utf-8", errors="ignore"))
+                except Exception:
+                    request = {}
+                op = str((request or {}).get("op", "")).strip().lower()
+                if op not in ("get_file_dir_cache", "snapshot", "get"):
+                    payload = {
+                        "ok": False,
+                        "error": f"Unsupported operation: {op or 'unknown'}",
+                        "directories": [],
+                        "roots": [],
+                        "cached": True,
+                    }
+                else:
+                    payload = _get_file_dir_cache_payload(cached=True)
+                payload["published_ts"] = float(time.time())
+                try:
+                    sock.send_json(payload, flags=zmq.NOBLOCK)
+                except Exception:
+                    continue
+        except Exception as ex:
+            print(
+                "[file_dir_choices] snapshot RPC stopped: "
+                f"addr='{snapshot_addr}' error={ex}"
+            )
+        finally:
+            try:
+                if sock is not None:
+                    sock.close(0)
+            except Exception:
+                pass
+            try:
+                if ctx is not None:
+                    ctx.term()
+            except Exception:
+                pass
+            _FILE_DIR_STREAM_STATE["snapshot_thread"] = None
 
     def _pub_loop():
         ctx = None
         sock = None
         observer = None
+        initial_payload = _get_file_dir_cache_payload(cached=True)
         try:
             # Dedicated context for this publisher thread avoids global-context
             # teardown races on interpreter shutdown/restart.
@@ -412,13 +501,7 @@ def _start_file_dir_choices_stream():
                     return False
 
             def _publish_cached_heartbeat():
-                payload = {
-                    "ok": True,
-                    "directories": list(_FILE_DIR_CACHE.get("directories", [])),
-                    "roots": list(_FILE_DIR_CACHE.get("roots", [])),
-                    "cached": True,
-                    "heartbeat": True,
-                }
+                payload = _get_file_dir_cache_payload(cached=True, heartbeat=True)
                 _publish_payload(payload, force=True)
 
             if stream_mode == "watchdog":
@@ -585,9 +668,7 @@ def _start_file_dir_choices_stream():
                     def _cache_payload_from_set():
                         dirs = sorted(cache_dirs, key=str.lower)[: int(max_items)]
                         roots = list(cache_roots)
-                        _FILE_DIR_CACHE["ts"] = time.monotonic()
-                        _FILE_DIR_CACHE["directories"] = list(dirs)
-                        _FILE_DIR_CACHE["roots"] = list(roots)
+                        _update_file_dir_cache(ts=time.monotonic(), directories=dirs, roots=roots)
                         return {
                             "ok": True,
                             "directories": dirs,
@@ -680,10 +761,14 @@ def _start_file_dir_choices_stream():
                             next_heartbeat = now + heartbeat_s
                         stop_event.wait(0.1)
                 else:
+                    initial_payload = _scan_payload()
+                    _publish_payload(initial_payload, force=True)
                     while not stop_event.is_set():
                         _publish_payload(_scan_payload(), force=True)
                         stop_event.wait(interval_s)
             else:
+                initial_payload = _scan_payload()
+                _publish_payload(initial_payload, force=True)
                 while not stop_event.is_set():
                     _publish_payload(_scan_payload(), force=True)
                     stop_event.wait(interval_s)
@@ -712,6 +797,12 @@ def _start_file_dir_choices_stream():
             _FILE_DIR_STREAM_STATE["thread"] = None
             _FILE_DIR_STREAM_STATE["started"] = False
 
+    snapshot_th = threading.Thread(
+        target=_snapshot_loop, name="file-dir-choices-snapshot", daemon=True
+    )
+    _FILE_DIR_STREAM_STATE["snapshot_thread"] = snapshot_th
+    snapshot_th.start()
+
     th = threading.Thread(target=_pub_loop, name="file-dir-choices-stream", daemon=True)
     _FILE_DIR_STREAM_STATE["thread"] = th
     _FILE_DIR_STREAM_STATE["started"] = True
@@ -720,6 +811,7 @@ def _start_file_dir_choices_stream():
 
 def _stop_file_dir_choices_stream():
     th = _FILE_DIR_STREAM_STATE.get("thread", None)
+    snapshot_th = _FILE_DIR_STREAM_STATE.get("snapshot_thread", None)
     try:
         _FILE_DIR_STREAM_STATE["stop"].set()
     except Exception:
@@ -732,6 +824,12 @@ def _stop_file_dir_choices_stream():
     except Exception:
         pass
     _FILE_DIR_STREAM_STATE["observer"] = None
+    try:
+        if snapshot_th is not None and snapshot_th.is_alive() and (threading.current_thread() is not snapshot_th):
+            snapshot_th.join(timeout=1.0)
+    except Exception:
+        pass
+    _FILE_DIR_STREAM_STATE["snapshot_thread"] = None
     if th is None:
         _FILE_DIR_STREAM_STATE["started"] = False
         return
