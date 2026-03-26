@@ -1,16 +1,21 @@
 import numpy as np
 from ophyd import (Device, Component as Cpt,FormattedComponent as FCpt,
                    EpicsSignal, EpicsSignalRO, EpicsSignalWithRBV, 
-                   EpicsMotor, Signal, DerivedSignal)
+                   EpicsMotor, DerivedSignal)
 from ophyd.device import DeviceStatus
 from ophyd.status import Status, SubscriptionStatus
 
 
-class PositionSignal(DerivedSignal):
-    def forward(self, value):
-        return np.linspace(-209.21799055746422,209.21799055746422,value)
+HE3PSD_POSITION_MIN = -209.21799055746422
+HE3PSD_POSITION_MAX = 209.21799055746422
 
+
+class PositionSignal(DerivedSignal):
     def inverse(self, value):
+        nbins = max(1, int(round(float(value))))
+        return np.linspace(HE3PSD_POSITION_MIN, HE3PSD_POSITION_MAX, nbins)
+
+    def forward(self, value):
         return len(value)
 
 
@@ -21,8 +26,7 @@ class HE3PSD(Device):
     nbins = Cpt(EpicsSignalWithRBV, "NBins",kind='config')
     soft_lld = Cpt(EpicsSignalWithRBV, "SoftLLD",kind='config')
 
-    # position_x = Cpt(PositionSignal,derived_from="nbins",kind="hinted")
-    position_x = Cpt(Signal,value=np.linspace(-209.21799055746422,209.21799055746422,350),kind="hinted")
+    position_x = Cpt(PositionSignal, derived_from="nbins", kind="hinted")
 
     counts = FCpt(EpicsSignalRO, "{prefix}{_det_num}:LiveCounts",name="counts",kind="hinted")
 
