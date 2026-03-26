@@ -11,6 +11,7 @@ from ophyd.areadetector import (AreaDetector, SingleTrigger, SimDetector,
                                 DetectorBase)
 from ophyd.areadetector.filestore_mixins import FileStoreTIFFIterativeWrite, FileStoreHDF5IterativeWrite
 from ophyd import cam
+from bluesky_queueserver import register_device
 from epics import caput, caget, cainfo
 import uuid
 from datetime import datetime, timedelta
@@ -267,6 +268,7 @@ class SimAreaDetector(SingleTriggerPause, SimDetector):
 # Enable when using the ZWO camera
 if 1:
     cam1 = MyZWODetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total'])
+    register_device("cam1", depth=2)
     cam1.cam.nd_attributes_file.set("/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml") 
     # caput("4dh4:TIFF1:CreateDirectory", -3)
     caput("4dh4:TIFF1:AutoSave", 0) #Ensure the TIFF plugin does not auto save to prevent overwriting

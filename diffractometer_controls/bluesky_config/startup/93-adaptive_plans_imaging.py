@@ -168,7 +168,7 @@ def _adaptive_focus_to_int(value, default=None):
             },
             "motor": {
                 "annotation": "typing.Union[str, Motors]",
-                "default": "cam_focus",
+                "default": "cam1.focus",
                 "description": "Focus motor to scan (must be movable)",
                 "devices": {"Motors": _collect_focus_motor_names()},
                 "convert_device_names": True,
@@ -179,7 +179,7 @@ def _adaptive_focus_to_int(value, default=None):
 def adaptive_imaging_focus_scan(
     file_name: str,
     file_dir: str,
-    motor=cam_focus,
+    motor=cam1.focus,
     focus_guess: float = None,
     scan_half_range: float = None,
     num_steps: int = 15,

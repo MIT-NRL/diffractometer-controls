@@ -4,11 +4,24 @@ from ophyd import Device
 from ophyd.positioner import PositionerBase
 
 
+def _component_walk_name_and_cls(comp_walk):
+    """
+    Normalize ``Device.walk_components()`` output across ophyd versions.
+
+    Recent ophyd returns ``ComponentWalk`` objects with ``dotted_name`` and ``item``.
+    Older versions yielded ``(name, component)`` tuples.
+    """
+    comp_name = getattr(comp_walk, "dotted_name", None)
+    comp = getattr(comp_walk, "item", comp_walk)
+    if comp_name is None:
+        comp_name, comp = comp_walk
+    return comp_name, getattr(comp, "cls", None)
+
+
 def _collect_movable_names():
     """Collect movable device names for Queue Server dropdowns."""
     names = []
-    g = globals()
-    for var, obj in list(g.items()):
+    for var, obj in list(globals().items()):
         if var.startswith("_"):
             continue
         try:
@@ -17,9 +30,9 @@ def _collect_movable_names():
                 continue
             if isinstance(obj, Device):
                 try:
-                    for comp_name, comp in obj.walk_components():
+                    for comp_walk in obj.walk_components():
                         try:
-                            comp_cls = getattr(comp, "cls", None)
+                            comp_name, comp_cls = _component_walk_name_and_cls(comp_walk)
                             if comp_cls and issubclass(comp_cls, PositionerBase):
                                 names.append(f"{var}.{comp_name}")
                         except Exception:
