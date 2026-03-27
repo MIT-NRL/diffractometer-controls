@@ -396,9 +396,9 @@
              </property>
              <property name="macros" stdset="0">
               <stringlist>
-               <string>R=he3PSD,DN=0</string>
-               <string>R=he3PSD,DN=7</string>
-               <string>R=he3PSD</string>
+               <string>R=he3PSD:,DN=0</string>
+               <string>R=he3PSD:,DN=7</string>
+               <string>R=he3PSD:</string>
               </stringlist>
              </property>
              <property name="openInNewWindow" stdset="0">
