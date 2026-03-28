@@ -25,6 +25,15 @@ try:
     from diffractometer_controls.diffraction_live_plot import DiffractionLivePlot, DiffractionPlotWidget
 except Exception:
     from diffraction_live_plot import DiffractionLivePlot, DiffractionPlotWidget
+try:
+    from diffractometer_controls.diffraction_live_plot_pyqtgraph import (
+        DiffractionPlotWidgetPyQtGraph,
+    )
+except Exception:
+    try:
+        from diffraction_live_plot_pyqtgraph import DiffractionPlotWidgetPyQtGraph
+    except Exception:
+        DiffractionPlotWidgetPyQtGraph = None
 
 # from bluesky_widgets.qt.figures import QtFigure, QtFigures
 # from bluesky_widgets.models.auto_plot_builders import AutoLines, AutoPlotter, AutoImages
@@ -81,7 +90,10 @@ class MainScreen(display.MITRDisplay):
         # viewer = QtFigure(figModel.figure)
         # app.re_dispatcher.subscribe(stream_documents_into_runs(figModel.add_run))
 
-        viewer = DiffractionPlotWidget()
+        if DiffractionPlotWidgetPyQtGraph is not None:
+            viewer = DiffractionPlotWidgetPyQtGraph()
+        else:
+            viewer = DiffractionPlotWidget()
         self._diffraction_live_plot = DiffractionLivePlot(viewer, re_client=re_client)
         app.re_dispatcher.subscribe(self._diffraction_live_plot.on_document)
 

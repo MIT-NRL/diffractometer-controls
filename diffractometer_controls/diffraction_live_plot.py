@@ -165,8 +165,9 @@ class DiffractionPlotWidget(QWidget):
         _initialize_matplotlib()
         super().__init__(parent)
 
-        self.figure = matplotlib.figure.Figure(constrained_layout=True)
+        self.figure = matplotlib.figure.Figure()
         self.profile_axes, self.summary_axes, self.peak_axes = self._create_axes()
+        self._apply_static_layout()
 
         canvas = FigureCanvas(self.figure)
         canvas.setMinimumWidth(640)
@@ -175,6 +176,7 @@ class DiffractionPlotWidget(QWidget):
         canvas.setParent(self)
         self._canvas = canvas
         self._toolbar = NavigationToolbar(canvas, parent=self)
+        self._canvas.mpl_connect("button_press_event", self._on_mouse_press)
 
         layout = QVBoxLayout()
         layout.addWidget(canvas)
@@ -195,6 +197,9 @@ class DiffractionPlotWidget(QWidget):
         self._peak_x = {}
         self._peak_y = {}
         self._peak_yerr = {}
+        self._profile_x_limits = None
+        self._summary_x_limits = None
+        self._peak_x_limits = None
         self.reset()
 
     def sizeHint(self):
@@ -215,6 +220,16 @@ class DiffractionPlotWidget(QWidget):
         peak_axes = self.figure.add_subplot(grid_spec[1, 1])
         return profile_axes, summary_axes, peak_axes
 
+    def _apply_static_layout(self):
+        self.figure.subplots_adjust(
+            left=0.08,
+            right=0.98,
+            bottom=0.09,
+            top=0.92,
+            hspace=0.34,
+            wspace=0.24,
+        )
+
     @QtCore.Slot(object)
     def reset(self, config=None):
         config = dict(config or {})
@@ -227,9 +242,13 @@ class DiffractionPlotWidget(QWidget):
         summary_x_label = str(config.get("summary_x_label", "Point") or "Point")
         summary_y_label = str(config.get("summary_y_label", "Total Counts") or "Total Counts")
         peak_y_label = str(config.get("peak_y_label", "Peak Position") or "Peak Position")
+        profile_x_limits = self._normalize_axis_limits(config.get("profile_x_limits"))
+        summary_x_limits = self._normalize_axis_limits(config.get("summary_x_limits"))
+        peak_x_limits = self._normalize_axis_limits(config.get("peak_x_limits"))
 
         self.figure.clf()
         self.profile_axes, self.summary_axes, self.peak_axes = self._create_axes()
+        self._apply_static_layout()
         self.profile_axes.grid(alpha=0.25)
         self.summary_axes.grid(alpha=0.25)
         self.peak_axes.grid(alpha=0.25)
@@ -247,6 +266,12 @@ class DiffractionPlotWidget(QWidget):
         self.peak_axes.set_ylabel(peak_y_label)
         self.figure.suptitle(run_title)
         self._apply_theme_from_palette()
+        self._profile_x_limits = profile_x_limits
+        self._summary_x_limits = summary_x_limits
+        self._peak_x_limits = peak_x_limits
+        self._set_axis_x_limits(self.profile_axes, self._profile_x_limits)
+        self._set_axis_x_limits(self.summary_axes, self._summary_x_limits)
+        self._set_axis_x_limits(self.peak_axes, self._peak_x_limits)
 
         self._profile_history.clear()
         self._live_profile_lines.clear()
@@ -273,7 +298,7 @@ class DiffractionPlotWidget(QWidget):
         if x_arr.shape != y_arr.shape:
             return
 
-        self._remove_live_profile_line(detector_name)
+        had_live_preview = self._remove_live_profile_line(detector_name) is not None
         history = self._profile_history.setdefault(detector_name, [])
         color_map = self._profile_colormaps.get(detector_name)
         if color_map is None:
@@ -292,10 +317,19 @@ class DiffractionPlotWidget(QWidget):
             label=str(detector_name),
         )
         history.append(line)
-        self._restyle_profile_history(detector_name)
+        if had_live_preview:
+            self._style_profile_history_line(
+                line,
+                color_map=color_map,
+                total=len(history),
+                index=len(history) - 1,
+                is_latest=True,
+            )
+        else:
+            self._restyle_profile_history(detector_name)
 
-        self.profile_axes.relim()
-        self.profile_axes.autoscale_view()
+        self._sync_axis_x_limits(self.profile_axes, x_arr, fixed_limits=self._profile_x_limits)
+        self._autoscale_y(self.profile_axes)
         self._update_legends()
         self._redraw()
 
@@ -324,8 +358,12 @@ class DiffractionPlotWidget(QWidget):
         else:
             line.set_data(series_x, series_y)
 
-        self.summary_axes.relim()
-        self.summary_axes.autoscale_view()
+        self._sync_axis_x_limits(
+            self.summary_axes,
+            series_x,
+            fixed_limits=self._summary_x_limits,
+        )
+        self._autoscale_y(self.summary_axes)
         self._update_legends()
         self._redraw()
 
@@ -356,8 +394,12 @@ class DiffractionPlotWidget(QWidget):
             line.set_data(draw_x, draw_y)
             line.set_color(color)
 
-        self.summary_axes.relim()
-        self.summary_axes.autoscale_view()
+        self._sync_axis_x_limits(
+            self.summary_axes,
+            draw_x,
+            fixed_limits=self._summary_x_limits,
+        )
+        self._autoscale_y(self.summary_axes)
         self._redraw()
 
     @QtCore.Slot(str, object, object)
@@ -376,6 +418,7 @@ class DiffractionPlotWidget(QWidget):
 
         line = self._live_profile_lines.get(detector_name)
         if line is None:
+            self._restyle_profile_history(detector_name, preview_new=True)
             (line,) = self.profile_axes.plot(
                 x_arr,
                 y_arr,
@@ -390,12 +433,19 @@ class DiffractionPlotWidget(QWidget):
                 label="_nolegend_",
             )
             self._live_profile_lines[detector_name] = line
+            self._style_profile_history_line(
+                line,
+                color_map=color_map,
+                total=max(1, len(self._profile_history.get(detector_name, [])) + 1),
+                index=max(0, len(self._profile_history.get(detector_name, []))),
+                is_latest=True,
+            )
         else:
             line.set_data(x_arr, y_arr)
             line.set_color(color_map(0.9))
 
-        self.profile_axes.relim()
-        self.profile_axes.autoscale_view()
+        self._sync_axis_x_limits(self.profile_axes, x_arr, fixed_limits=self._profile_x_limits)
+        self._autoscale_y(self.profile_axes)
         self._redraw()
 
     @QtCore.Slot(str, float, float, object)
@@ -441,8 +491,12 @@ class DiffractionPlotWidget(QWidget):
         else:
             self._peak_lines.pop(detector_name, None)
 
-        self.peak_axes.relim()
-        self.peak_axes.autoscale_view()
+        self._sync_axis_x_limits(
+            self.peak_axes,
+            series_x,
+            fixed_limits=self._peak_x_limits,
+        )
+        self._autoscale_y(self.peak_axes)
         self._update_legends()
         self._redraw()
 
@@ -484,11 +538,12 @@ class DiffractionPlotWidget(QWidget):
     def _remove_live_profile_line(self, detector_name):
         line = self._live_profile_lines.pop(detector_name, None)
         if line is None:
-            return
+            return None
         try:
             line.remove()
         except Exception:
             pass
+        return line
 
     def _remove_live_summary_line(self, detector_name):
         line = self._summary_live_lines.pop(detector_name, None)
@@ -502,12 +557,14 @@ class DiffractionPlotWidget(QWidget):
     @QtCore.Slot()
     def clear_live_previews(self):
         for detector_name in tuple(self._live_profile_lines.keys()):
-            self._remove_live_profile_line(detector_name)
+            removed_line = self._remove_live_profile_line(detector_name)
+            if removed_line is not None:
+                self._restyle_profile_history(detector_name)
         for detector_name in tuple(self._summary_live_lines.keys()):
             self._remove_live_summary_line(detector_name)
         self._redraw()
 
-    def _restyle_profile_history(self, detector_name):
+    def _restyle_profile_history(self, detector_name, *, preview_new=False):
         history = self._profile_history.get(detector_name, [])
         if not history:
             return
@@ -516,19 +573,59 @@ class DiffractionPlotWidget(QWidget):
         if color_map is None:
             color_map = self._select_profile_colormap(detector_name)
             self._profile_colormaps[detector_name] = color_map
-        total = len(history)
+        total = len(history) + (1 if preview_new else 0)
         for index, line in enumerate(history):
-            if total <= 1:
-                age = 1.0
-                color_pos = 0.9
-            else:
-                age = index / (total - 1)
-                color_pos = 0.15 + (0.75 * age)
-            is_latest = index == (total - 1)
-            line.set_color(color_map(color_pos))
-            line.set_alpha(0.95 if is_latest else 0.35 + (0.15 * color_pos))
-            line.set_linewidth(1.5 if is_latest else 0.8 + (0.3 * age))
-            line.set_marker("o" if is_latest else "None")
+            is_latest = (not preview_new) and index == (len(history) - 1)
+            self._style_profile_history_line(
+                line,
+                color_map=color_map,
+                total=total,
+                index=index,
+                is_latest=is_latest,
+            )
+
+    @staticmethod
+    def _style_profile_history_line(line, *, color_map, total, index, is_latest):
+        color_pos = DiffractionPlotWidget._profile_history_color_position(total=total, index=index)
+        if total <= 1:
+            age = 1.0
+        else:
+            age = index / (total - 1)
+        line.set_color(color_map(color_pos))
+        line.set_alpha(0.95 if is_latest else 0.35 + (0.15 * color_pos))
+        line.set_linewidth(1.5 if is_latest else 0.8 + (0.3 * age))
+        line.set_marker("o" if is_latest else "None")
+
+    @staticmethod
+    def _profile_history_color_position(*, total, index):
+        recent_rank = max(0, int(total) - 1 - int(index))
+        recent_slots = np.asarray([0.90, 0.76, 0.62, 0.48, 0.34, 0.22, 0.15], dtype=float)
+        slot_index = min(recent_rank, recent_slots.size - 1)
+        return float(recent_slots[slot_index])
+
+    def _on_mouse_press(self, event):
+        if event is None or not getattr(event, "dblclick", False):
+            return
+        if getattr(event, "button", None) != 1:
+            return
+        axes = getattr(event, "inaxes", None)
+        if axes is None:
+            return
+        if axes is self.profile_axes:
+            self._reset_axis_view(self.profile_axes, fixed_limits=self._profile_x_limits)
+        elif axes is self.summary_axes:
+            self._reset_axis_view(self.summary_axes, fixed_limits=self._summary_x_limits)
+        elif axes is self.peak_axes:
+            self._reset_axis_view(self.peak_axes, fixed_limits=self._peak_x_limits)
+
+    def _reset_axis_view(self, axes, *, fixed_limits=None):
+        axes.relim()
+        if fixed_limits is None:
+            axes.autoscale_view(scalex=True, scaley=True)
+        else:
+            axes.autoscale_view(scalex=False, scaley=True)
+            axes.set_xlim(*fixed_limits)
+        self._redraw()
 
     def _select_profile_colormap(self, detector_name):
         names = ("viridis", "plasma", "cividis", "magma", "turbo")
@@ -569,7 +666,6 @@ class DiffractionPlotWidget(QWidget):
 
         self.figure.patch.set_facecolor(figure_bg.name())
         self.figure.patch.set_edgecolor(figure_bg.name())
-        self.figure.set_constrained_layout(True)
 
         for axes in (self.profile_axes, self.summary_axes, self.peak_axes):
             axes.set_facecolor(axes_bg.name())
@@ -633,6 +729,64 @@ class DiffractionPlotWidget(QWidget):
                     artist.remove()
                 except Exception:
                     pass
+
+    @staticmethod
+    def _normalize_axis_limits(value):
+        if value is None:
+            return None
+        try:
+            low, high = value
+        except Exception:
+            return None
+        low = _coerce_number(low)
+        high = _coerce_number(high)
+        if low is None or high is None:
+            return None
+        if high < low:
+            low, high = high, low
+        if math.isclose(low, high):
+            pad = max(abs(low) * 0.05, 1.0)
+            low -= pad
+            high += pad
+        return float(low), float(high)
+
+    @staticmethod
+    def _set_axis_x_limits(axes, limits):
+        if limits is None:
+            return
+        axes.set_xlim(*DiffractionPlotWidget._expand_limits_for_view(limits))
+
+    def _sync_axis_x_limits(self, axes, x_values, *, fixed_limits=None):
+        if fixed_limits is not None:
+            return
+        x_arr = _coerce_array(x_values)
+        if x_arr is None or x_arr.size == 0:
+            return
+        finite = x_arr[np.isfinite(x_arr)]
+        if finite.size == 0:
+            return
+        low = float(np.min(finite))
+        high = float(np.max(finite))
+        if math.isclose(low, high):
+            pad = max(abs(low) * 0.05, 1.0)
+        else:
+            pad = max((high - low) * 0.02, 1e-9)
+        axes.set_xlim(low - pad, high + pad)
+
+    @staticmethod
+    def _expand_limits_for_view(limits):
+        low = float(limits[0])
+        high = float(limits[1])
+        if math.isclose(low, high):
+            pad = max(abs(low) * 0.05, 1.0)
+        else:
+            pad = max((high - low) * 0.02, 0.25)
+        return low - pad, high + pad
+
+    @staticmethod
+    def _autoscale_y(axes):
+        axes.relim()
+        axes.autoscale_view(scalex=False, scaley=True)
 
     def _style_toolbar(self, palette):
         bg = palette.color(QtGui.QPalette.Window).name()
@@ -722,6 +876,7 @@ class DiffractionLivePlot(QtCore.QObject):
         self._detector_axis_cache = {}
         self._detector_axis_bounds = {}
         self._live_subscriptions = {}
+        self._live_total_counts = {}
         self._armed_live_detectors = ()
         self._planned_summary_x = []
 
@@ -798,6 +953,7 @@ class DiffractionLivePlot(QtCore.QObject):
         self._summary_path_last_point = None
         self._summary_path_distance = 0.0
         self._planned_summary_x = []
+        self._live_total_counts.clear()
 
         det_config = dict(doc.get("det_config", {}) or {})
         axis_min = det_config.get("position_x_min", -209.21799055746422)
@@ -827,6 +983,9 @@ class DiffractionLivePlot(QtCore.QObject):
                 "summary_x_label": self._summary_x_label,
                 "summary_y_label": "Total Counts",
                 "peak_y_label": "Peak Position",
+                "profile_x_limits": (axis_min, axis_max),
+                "summary_x_limits": self._build_summary_x_limits(doc),
+                "peak_x_limits": self._build_summary_x_limits(doc),
             }
         )
 
@@ -946,33 +1105,59 @@ class DiffractionLivePlot(QtCore.QObject):
             return
 
         for detector_name in unique_names:
-            pv_name = self._get_live_counts_pv(detector_name)
-            if not pv_name:
-                continue
-            try:
-                pv = PV(pv_name, auto_monitor=True)
-                callback_index = pv.add_callback(
-                    lambda pvname=None, value=None, char_value=None, _det=detector_name, **kwargs: (
-                        self._handle_live_counts_update(_det, value)
-                    )
-                )
-            except Exception:
-                continue
-            self._live_subscriptions[detector_name] = {
-                "pv": pv,
-                "callback_index": callback_index,
-            }
+            detector_subscriptions = []
 
-    def _disarm_live_subscriptions(self):
-        for subscription in self._live_subscriptions.values():
-            pv = subscription.get("pv")
-            callback_index = subscription.get("callback_index")
-            if pv is not None and callback_index is not None:
+            counts_pv_name = self._get_live_counts_pv(detector_name)
+            if counts_pv_name:
                 try:
-                    pv.remove_callback(callback_index)
+                    counts_pv = PV(counts_pv_name, auto_monitor=True)
+                    counts_callback_index = counts_pv.add_callback(
+                        lambda pvname=None, value=None, char_value=None, _det=detector_name, **kwargs: (
+                            self._handle_live_counts_update(_det, value)
+                        )
+                    )
+                    detector_subscriptions.append(
+                        {
+                            "pv": counts_pv,
+                            "callback_index": counts_callback_index,
+                        }
+                    )
                 except Exception:
                     pass
+
+            total_counts_pv_name = self._get_live_total_counts_pv(detector_name)
+            if total_counts_pv_name:
+                try:
+                    total_counts_pv = PV(total_counts_pv_name, auto_monitor=True)
+                    total_counts_callback_index = total_counts_pv.add_callback(
+                        lambda pvname=None, value=None, char_value=None, _det=detector_name, **kwargs: (
+                            self._handle_live_total_counts_update(_det, value)
+                        )
+                    )
+                    detector_subscriptions.append(
+                        {
+                            "pv": total_counts_pv,
+                            "callback_index": total_counts_callback_index,
+                        }
+                    )
+                except Exception:
+                    pass
+
+            if detector_subscriptions:
+                self._live_subscriptions[detector_name] = detector_subscriptions
+
+    def _disarm_live_subscriptions(self):
+        for subscription_group in self._live_subscriptions.values():
+            for subscription in subscription_group:
+                pv = subscription.get("pv")
+                callback_index = subscription.get("callback_index")
+                if pv is not None and callback_index is not None:
+                    try:
+                        pv.remove_callback(callback_index)
+                    except Exception:
+                        pass
         self._live_subscriptions.clear()
+        self._live_total_counts.clear()
         self._armed_live_detectors = ()
 
     def _handle_live_counts_update(self, detector_name, value):
@@ -988,9 +1173,14 @@ class DiffractionLivePlot(QtCore.QObject):
 
         self._detector_axis_cache[detector_name] = position_x
         self._live_profile_updated.emit(str(detector_name), position_x, counts)
-        total_counts = _coerce_number(np.nansum(counts))
+        should_emit_summary = True
+        total_counts = _coerce_number(self._live_total_counts.get(detector_name))
+        if total_counts is None:
+            total_counts = _coerce_number(np.nansum(counts))
+        elif self._get_live_total_counts_pv(detector_name):
+            should_emit_summary = False
         summary_x = self._estimate_live_summary_x()
-        if total_counts is not None and summary_x is not None:
+        if should_emit_summary and total_counts is not None and summary_x is not None:
             self._live_summary_point_updated.emit(
                 str(detector_name),
                 float(summary_x),
@@ -1004,6 +1194,28 @@ class DiffractionLivePlot(QtCore.QObject):
             "he3psd7": "4dh4:he3PSD:Det7:LiveCounts",
         }
         return mapping.get(str(detector_name))
+
+    @staticmethod
+    def _get_live_total_counts_pv(detector_name):
+        mapping = {
+            "he3psd0": "4dh4:he3PSD:Det0:LiveTotalCounts",
+            "he3psd7": "4dh4:he3PSD:Det7:LiveTotalCounts",
+        }
+        return mapping.get(str(detector_name))
+
+    def _handle_live_total_counts_update(self, detector_name, value):
+        total_counts = _coerce_number(value)
+        if total_counts is None:
+            return
+        self._live_total_counts[detector_name] = float(total_counts)
+        summary_x = self._estimate_live_summary_x()
+        if summary_x is None:
+            return
+        self._live_summary_point_updated.emit(
+            str(detector_name),
+            float(summary_x),
+            float(total_counts),
+        )
 
     def _estimate_live_summary_x(self):
         if self._summary_mode == "exposure":
@@ -1034,6 +1246,20 @@ class DiffractionLivePlot(QtCore.QObject):
         if num_steps == 1:
             return [float(start_pos)]
         return list(np.linspace(float(start_pos), float(stop_pos), int(num_steps)))
+
+    def _build_summary_x_limits(self, start_doc):
+        if self._planned_summary_x:
+            low = min(self._planned_summary_x)
+            high = max(self._planned_summary_x)
+            return DiffractionPlotWidget._normalize_axis_limits((low, high))
+
+        try:
+            num_points = int(start_doc.get("num_points"))
+        except Exception:
+            num_points = None
+        if num_points is not None and num_points > 0:
+            return DiffractionPlotWidget._normalize_axis_limits((1.0, float(num_points)))
+        return None
 
     def _is_primary_descriptor(self, descriptor_uid):
         stream = self._descriptor_stream.get(str(descriptor_uid), "")
@@ -1082,7 +1308,7 @@ class DiffractionLivePlot(QtCore.QObject):
 
     def _choose_summary_config(self):
         if self._plan_name == "count_he3":
-            return "exposure", "Exposure", "Total Counts vs Exposure"
+            return "exposure", "Acquisition Number", "Total Counts vs Acquisition Number"
         if len(self._motor_names) == 1:
             return "motor", self._motor_names[0], "Total Counts vs Position"
         if len(self._motor_names) > 1:
@@ -1091,7 +1317,7 @@ class DiffractionLivePlot(QtCore.QObject):
 
     def _choose_peak_title(self):
         if self._summary_mode == "exposure":
-            return "Fitted Peak Position vs Exposure"
+            return "Fitted Peak Position vs Acquisition Number"
         if self._summary_mode == "motor":
             return "Fitted Peak Position vs Motor Position"
         if self._summary_mode == "path":
