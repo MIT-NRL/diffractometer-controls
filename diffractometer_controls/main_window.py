@@ -6,6 +6,7 @@ import math
 import sys
 import os
 import threading
+import importlib.util
 from pathlib import Path
 
 import qtawesome as qta
@@ -37,6 +38,25 @@ from bluesky_widgets.models.run_engine_client import RunEngineClient
 from pydm.widgets import PyDMByteIndicator, PyDMRelatedDisplayButton
 from bluesky_queueserver_api.zmq import REManagerAPI
 from pydm.widgets.channel import PyDMChannel
+
+def _load_bluesky_mode_helpers():
+    module_path = Path(__file__).resolve().with_name("bluesky_mode.py")
+    spec = importlib.util.spec_from_file_location("mitr_bluesky_mode", module_path)
+    if spec is None or spec.loader is None:
+        raise ModuleNotFoundError(f"Unable to load bluesky mode helper from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_bluesky_mode = _load_bluesky_mode_helpers()
+BLUESKY_MODE_PRODUCTION = _bluesky_mode.BLUESKY_MODE_PRODUCTION
+BLUESKY_MODE_TEST = _bluesky_mode.BLUESKY_MODE_TEST
+get_bluesky_mode = _bluesky_mode.get_bluesky_mode
+get_bluesky_active_mode = _bluesky_mode.get_bluesky_active_mode
+get_bluesky_mode_display = _bluesky_mode.get_bluesky_mode_display
+normalize_bluesky_mode = _bluesky_mode.normalize_bluesky_mode
+save_bluesky_mode_state = _bluesky_mode.save_bluesky_mode_state
 
 log = logging.getLogger(__name__)
 WF_NORM_FILTER_SETTINGS_KEY = "analysis/wf_norm_filter_method"
@@ -82,6 +102,11 @@ class MITRMainWindow(PyDMMainWindow):
         self._run_progress_font_px = 15
         self._run_is_dark_mode = False
         self._themed_icon_targets = []
+        self._bluesky_mode_actions = {}
+        self._bluesky_mode_label = None
+        self._bluesky_mode_requested = get_bluesky_mode()
+        self._bluesky_mode_active = get_bluesky_active_mode()
+        self._bluesky_mode_channels = []
         self._focus_online_proc = None
         self._focus_online_session_id = None
         self._focus_online_run_uid = None
@@ -112,7 +137,9 @@ class MITRMainWindow(PyDMMainWindow):
             heartbeat_indicator = PyDMByteIndicator(init_channel=f"ca://{self.macros['P']}HEARTBEAT")
             heartbeat_indicator.labels = ['IOC Heartbeat']
             heartbeat_indicator.labelPosition = 2
+            self._setup_bluesky_mode_indicator(bar)
             bar.addPermanentWidget(heartbeat_indicator)
+            self._setup_bluesky_mode_channels()
 
         gear_icon = self._make_themed_icon('fa6s.gear')
         # controls = PyDMRelatedDisplayButton(filename="/home/mitr_4dh4/EPICS/IOCs/4dh4/4dh4App/op/adl/ioc_motors.adl")
@@ -267,6 +294,22 @@ class MITRMainWindow(PyDMMainWindow):
         # Add separator before suspender actions
         bluesky_menu.addSeparator()
 
+        bluesky_mode_menu = bluesky_menu.addMenu("Mode")
+        bluesky_mode_action_group = QtGui.QActionGroup(bluesky_mode_menu)
+        bluesky_mode_action_group.setExclusive(True)
+        self._bluesky_mode_action_group = bluesky_mode_action_group
+        for label, mode, tip in (
+            ("Production Mode", BLUESKY_MODE_PRODUCTION, "Use the production scan-history counter and production catalog after the next RE environment restart."),
+            ("Test Mode", BLUESKY_MODE_TEST, "Use the separate test scan-history counter and save to testdb after the next RE environment restart."),
+        ):
+            action = bluesky_mode_menu.addAction(label)
+            action.setCheckable(True)
+            action.setToolTip(tip)
+            bluesky_mode_action_group.addAction(action)
+            action.triggered.connect(lambda checked=False, m=mode: self._set_bluesky_mode(m))
+            self._bluesky_mode_actions[mode] = action
+        self._sync_bluesky_mode_actions()
+
         # Add a "Suspender" submenu under "Bluesky Controls"
         suspender_menu = bluesky_menu.addMenu("Suspender")
 
@@ -371,6 +414,123 @@ class MITRMainWindow(PyDMMainWindow):
         except Exception:
             pass
 
+    def _setup_bluesky_mode_indicator(self, container):
+        label = QLabel(container)
+        label.setAlignment(Qt.AlignCenter)
+        label.setMinimumWidth(112)
+        label.setMinimumHeight(16)
+        label.setMaximumHeight(16)
+        label.setMargin(0)
+        label.setToolTip("Actual Bluesky mode in the worker. Changing the requested mode still requires an RE environment restart.")
+        self._bluesky_mode_label = label
+        add_permanent = getattr(container, "addPermanentWidget", None)
+        if callable(add_permanent):
+            add_permanent(label)
+        else:
+            container.addWidget(label)
+        self._refresh_bluesky_mode_indicator()
+
+    def _setup_bluesky_mode_channels(self):
+        if getattr(self, "_bluesky_mode_channels", None):
+            return
+        prefix = self.macros.get("P", "")
+        channels = [
+            PyDMChannel(address=f"ca://{prefix}Bluesky:Mode", value_slot=self._on_bluesky_mode_requested_changed),
+            PyDMChannel(address=f"ca://{prefix}Bluesky:ActiveMode", value_slot=self._on_bluesky_mode_active_changed),
+        ]
+        self._bluesky_mode_channels = channels
+        for ch in channels:
+            ch.connect()
+
+    def _normalize_bluesky_mode_value(self, value, fallback):
+        if value is None:
+            return fallback
+        try:
+            return BLUESKY_MODE_TEST if int(value) == 1 else BLUESKY_MODE_PRODUCTION
+        except Exception:
+            return normalize_bluesky_mode(value)
+
+    def _on_bluesky_mode_requested_changed(self, value):
+        self._bluesky_mode_requested = self._normalize_bluesky_mode_value(value, self._bluesky_mode_requested)
+        self._sync_bluesky_mode_actions()
+        self._refresh_bluesky_mode_indicator()
+
+    def _on_bluesky_mode_active_changed(self, value):
+        self._bluesky_mode_active = self._normalize_bluesky_mode_value(value, self._bluesky_mode_active)
+        self._refresh_bluesky_mode_indicator()
+
+    def _bluesky_mode_style(self, mode):
+        dark_mode = self._is_dark_theme_active_from_app(QApplication.instance())
+        if mode == BLUESKY_MODE_TEST:
+            bg = "#7a4b00" if dark_mode else "#ffe29a"
+            border = "#c98900" if dark_mode else "#b97700"
+            fg = "#fff4d6" if dark_mode else "#4b2b00"
+        else:
+            bg = "#1f5f46" if dark_mode else "#d8f3e4"
+            border = "#2f8f6b" if dark_mode else "#2d6a4f"
+            fg = "#ebfff5" if dark_mode else "#163828"
+        return (
+            "QLabel {"
+            f"background-color: {bg};"
+            f"border: 1px solid {border};"
+            "border-radius: 7px;"
+            f"color: {fg};"
+            "font-weight: 700;"
+            "font-size: 11px;"
+            "padding: 0 6px;"
+            "}"
+        )
+
+    def _refresh_bluesky_mode_indicator(self):
+        label = getattr(self, "_bluesky_mode_label", None)
+        if label is None:
+            return
+        requested_mode = getattr(self, "_bluesky_mode_requested", get_bluesky_mode())
+        active_mode = getattr(self, "_bluesky_mode_active", get_bluesky_active_mode())
+        active_display = get_bluesky_mode_display(active_mode)
+        requested_display = get_bluesky_mode_display(requested_mode)
+        text = f"Bluesky: {active_display}"
+        if requested_mode != active_mode:
+            text = f"{text} (req {requested_display})"
+        label.setText(text)
+        label.setStyleSheet(self._bluesky_mode_style(active_mode))
+        label.setToolTip(
+            f"Actual worker mode: {active_display}. "
+            f"Requested mode: {requested_display}. "
+            "If these differ, restart the RE environment to apply the requested mode."
+        )
+
+    def _set_bluesky_mode(self, mode):
+        mode = str(mode).strip().lower()
+        if mode not in {BLUESKY_MODE_PRODUCTION, BLUESKY_MODE_TEST}:
+            mode = BLUESKY_MODE_PRODUCTION
+        previous_mode = getattr(self, "_bluesky_mode_requested", get_bluesky_mode())
+        save_bluesky_mode_state(mode)
+        self._bluesky_mode_requested = mode
+        self._sync_bluesky_mode_actions()
+        self._refresh_bluesky_mode_indicator()
+        if mode == previous_mode:
+            message = (
+                f"Requested Bluesky mode remains {get_bluesky_mode_display(mode)}. "
+                "Restart the RE environment to reapply it."
+            )
+        else:
+            message = (
+                f"Requested Bluesky mode set to {get_bluesky_mode_display(mode)}. "
+                "Restart the RE environment to apply it."
+            )
+        try:
+            self.statusBar().showMessage(message, 5000)
+        except Exception:
+            pass
+
+    def _sync_bluesky_mode_actions(self):
+        current_mode = getattr(self, "_bluesky_mode_requested", get_bluesky_mode())
+        for mode, action in getattr(self, "_bluesky_mode_actions", {}).items():
+            was_blocked = action.blockSignals(True)
+            action.setChecked(mode == current_mode)
+            action.blockSignals(was_blocked)
+
     def _get_or_create_menu(self, title):
         wanted = str(title).replace("&", "").strip().lower()
         for action in self.menuBar().actions():
@@ -468,6 +628,7 @@ class MITRMainWindow(PyDMMainWindow):
             QtCore.QEvent.ApplicationPaletteChange,
         ):
             self._refresh_themed_icons()
+            self._refresh_bluesky_mode_indicator()
 
     def _setup_run_status_widget(self, toolbar):
         prefix = f"{self.macros.get('P', '')}Bluesky:Run:"
