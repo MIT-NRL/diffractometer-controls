@@ -249,6 +249,13 @@ def _estimate_scan2d_he3(params: Mapping[str, Any], context: Mapping[str, Any]) 
     return _known_estimate(float(total_steps) * float(acquire_time), total_steps)
 
 
+def _estimate_wait_seconds(params: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, float | int | None]:
+    seconds = _as_float(params.get("seconds"), None)
+    if seconds is None:
+        return _unknown_estimate(1)
+    return _known_estimate(max(0.0, float(seconds)), 1)
+
+
 _ESTIMATORS = {
     "count_he3": _estimate_count_he3,
     "imaging": _estimate_imaging,
@@ -259,6 +266,7 @@ _ESTIMATORS = {
     "scan_parallel_he3": _estimate_scan_parallel_he3,
     "scan_list_he3": _estimate_scan_list_he3,
     "scan2D_he3": _estimate_scan2d_he3,
+    "wait_seconds": _estimate_wait_seconds,
 }
 
 

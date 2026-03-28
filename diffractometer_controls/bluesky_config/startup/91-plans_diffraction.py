@@ -27,6 +27,7 @@ from cycler import cycler
 from pathlib import Path
 import sys
 from datetime import datetime, timedelta
+import time
 
 try:
     from diffractometer_controls.plan_time_estimation import (
@@ -142,6 +143,8 @@ def count_he3(
         },
         context=_plan_estimation_context(),
     )
+    total_time = float(estimate.get("estimated_total_time_s") or 0.0)
+    total_units = int(estimate.get("estimated_total_units") or (num or 0))
 
     _md = {
         "title": title,
@@ -160,8 +163,8 @@ def count_he3(
         },
         "num_points": num,
         "num_intervals": num_intervals,
-        "estimated_total_time_s": estimate.get("estimated_total_time_s"),
-        "estimated_total_units": estimate.get("estimated_total_units"),
+        "estimated_total_time_s": total_time,
+        "estimated_total_units": total_units,
         "experiment_type": "diffraction",
         "plan_name": "count_he3",
         "hints": {},
@@ -175,10 +178,27 @@ def count_he3(
     @bpp.stage_decorator(detectors)
     @bpp.run_decorator(md=_md)
     def inner_count():
+        progress = _ProgressEstimator(
+            total_units=total_units,
+            initial_total_time_s=total_time,
+        )
         try:
             if predeclare:
                 yield from bps.declare_stream(*detectors, name="primary")
-            return (yield from bps.repeat(partial(bps.one_shot, detectors), num=num))
+            if num is None:
+                i = 0
+                while True:
+                    yield from bps.checkpoint()
+                    yield from progress.on_unit_start(i)
+                    yield from bps.one_shot(detectors)
+                    yield from progress.on_unit_success(i)
+                    i += 1
+            else:
+                for i in range(num):
+                    yield from bps.checkpoint()
+                    yield from progress.on_unit_start(i)
+                    yield from bps.one_shot(detectors)
+                    yield from progress.on_unit_success(i)
         finally:
             if acquire_time is not None:
                 for det in detectors:
@@ -335,6 +355,10 @@ def scan_he3(
     # @bpp.monitor_during_decorator([detector[0]])
     @bpp.run_decorator(md=_md)
     def main_plan():
+        progress = _ProgressEstimator(
+            total_units=total_units,
+            initial_total_time_s=total_time,
+        )
 
         for det in detectors:
             yield from bps.stage(det)
@@ -346,7 +370,13 @@ def scan_he3(
         def inner_scan_nd():
             # yield from bps.declare_stream(motor, *detector, name="primary")
             for step in list(cycler):
+                step_t0 = time.monotonic()
+                yield from progress.mark_started()
                 yield from bps.one_nd_step(detectors, step, pos_cache)
+                yield from progress.on_units_success(
+                    unit_count=1,
+                    elapsed_s=max(0.0, time.monotonic() - step_t0),
+                )
 
         yield from inner_scan_nd()
 
@@ -446,8 +476,8 @@ def scan_parallel_he3(
         "estimated_total_time_s": float(total_time),
         "estimated_total_units": int(total_units),
         "plan_args": {
-            "detectors": [det.name for det in detector],
-            "acquire_time": detector[0].acquire_time.get(),
+            "detectors": [det.name for det in detectors],
+            "acquire_time": detectors[0].acquire_time.get(),
         },
         "det_config": {
             "ophyd_defs":list(map(repr, detectors)),
@@ -465,7 +495,8 @@ def scan_parallel_he3(
     _md.update(md)
 
     x_fields = []
-    x_fields.extend(utils.get_hinted_fields([motor1,motor2]))
+    x_fields.extend(utils.get_hinted_fields(motor1))
+    x_fields.extend(utils.get_hinted_fields(motor2))
 
     default_dimensions = [(x_fields, "primary")]
 
@@ -481,6 +512,10 @@ def scan_parallel_he3(
     # @bpp.monitor_during_decorator([detectors[0]])
     @bpp.run_decorator(md=_md)
     def main_plan():
+        progress = _ProgressEstimator(
+            total_units=total_units,
+            initial_total_time_s=total_time,
+        )
 
         for det in detectors:
             yield from bps.stage(det)
@@ -495,9 +530,15 @@ def scan_parallel_he3(
             # yield from bps.declare_stream(motor, *detectors, name="primary")
             for step1, step2 in list(zip(cycler1,cycler2)):
                 # yield from bps.one_nd_step(detectors, step, pos_cache)
+                step_t0 = time.monotonic()
+                yield from progress.mark_started()
                 yield from bps.move_per_step(step1, pos_cache)
                 yield from bps.move_per_step(step2, pos_cache)
                 yield from bps.trigger_and_read(list(detectors) + list([motor1, motor2]))
+                yield from progress.on_units_success(
+                    unit_count=1,
+                    elapsed_s=max(0.0, time.monotonic() - step_t0),
+                )
 
         yield from inner_scan_nd()
 
@@ -575,8 +616,6 @@ def scan_list_he3(
 
     original_pos = motor.position
 
-    if not isinstance(detector,list):
-        detector = [detector]
     # md_args = list(chain(*((repr(motor), start, stop) for motor, start_angle, stop_angle)))
     motor_names = motor.name
     md = md or {}
@@ -622,8 +661,12 @@ def scan_list_he3(
     # @bpp.monitor_during_decorator([detector[0].counts])
     @bpp.run_decorator(md=_md)
     def main_plan():
+        progress = _ProgressEstimator(
+            total_units=total_units,
+            initial_total_time_s=total_time,
+        )
 
-        for det in detector:
+        for det in detectors:
             yield from bps.stage(det)
         yield from bps.stage(motor)
         
@@ -633,7 +676,13 @@ def scan_list_he3(
         def inner_scan_nd():
             # yield from bps.declare_stream(motor, *detector, name="primary")
             for step in list(cycler):
+                step_t0 = time.monotonic()
+                yield from progress.mark_started()
                 yield from bps.one_nd_step(detectors, step, pos_cache)
+                yield from progress.on_units_success(
+                    unit_count=1,
+                    elapsed_s=max(0.0, time.monotonic() - step_t0),
+                )
 
         yield from inner_scan_nd()
 
@@ -784,10 +833,15 @@ def scan2D_he3(
     # @bpp.monitor_during_decorator([detector[0].counts])
     @bpp.run_decorator(md=_md)
     def main_plan():
+        progress = _ProgressEstimator(
+            total_units=total_units,
+            initial_total_time_s=total_time,
+        )
 
         for det in detectors:
             yield from bps.stage(det)
-        yield from bps.stage(motor)
+        yield from bps.stage(motor_outer)
+        yield from bps.stage(motor_inner)
         
         pos_cache = defaultdict(lambda: None)
         cycler = plan_patterns.outer_product(args=[motor_outer, start_pos_outer, stop_pos_outer, num_steps_outer, motor_inner, start_pos_inner, stop_pos_inner, num_steps_inner])
@@ -795,7 +849,13 @@ def scan2D_he3(
         def inner_scan_nd():
             # yield from bps.declare_stream(motor, *detector, name="primary")
             for step in list(cycler):
+                step_t0 = time.monotonic()
+                yield from progress.mark_started()
                 yield from bps.one_nd_step(detectors, step, pos_cache)
+                yield from progress.on_units_success(
+                    unit_count=1,
+                    elapsed_s=max(0.0, time.monotonic() - step_t0),
+                )
 
         yield from inner_scan_nd()
 
