@@ -162,6 +162,7 @@ def count_he3(
         "num_intervals": num_intervals,
         "estimated_total_time_s": estimate.get("estimated_total_time_s"),
         "estimated_total_units": estimate.get("estimated_total_units"),
+        "experiment_type": "diffraction",
         "plan_name": "count_he3",
         "hints": {},
     }
@@ -308,6 +309,7 @@ def scan_he3(
             "nbins": detectors[0].nbins.get(),
             "soft_lld": detectors[0].soft_lld.get()
         },
+        "experiment_type": "diffraction",
         "plan_name": "scan_he3",
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,
@@ -453,6 +455,7 @@ def scan_parallel_he3(
             "nbins": detectors[0].nbins.get(),
             "soft_lld": detectors[0].soft_lld.get()
         },
+        "experiment_type": "diffraction",
         "plan_name": "scan_parallel_he3",
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,
@@ -593,6 +596,7 @@ def scan_list_he3(
             "nbins": detectors[0].nbins.get(),
             "soft_lld": detectors[0].soft_lld.get()
         },
+        "experiment_type": "diffraction",
         "plan_name": "scan_list_he3",
         "plan_pattern": "inner_list_product",
         "plan_pattern_module": plan_patterns.__name__,
@@ -752,6 +756,7 @@ def scan2D_he3(
             "nbins": detectors[0].nbins.get(),
             "soft_lld": detectors[0].soft_lld.get()
         },
+        "experiment_type": "diffraction",
         "plan_name": "scan2D_he3",
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,

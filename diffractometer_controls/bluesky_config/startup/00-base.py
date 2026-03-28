@@ -1,16 +1,39 @@
 
 import os
+import importlib.util
 from bluesky import RunEngine
 from bluesky.utils import PersistentDict
 from bluesky.callbacks.zmq import Publisher
 
 from pathlib import Path
 
+def _load_bluesky_mode_helpers():
+    module_path = Path(__file__).resolve().parents[2] / "bluesky_mode.py"
+    spec = importlib.util.spec_from_file_location("mitr_bluesky_mode", module_path)
+    if spec is None or spec.loader is None:
+        raise ModuleNotFoundError(f"Unable to load bluesky mode helper from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_bluesky_mode = _load_bluesky_mode_helpers()
+BLUESKY_MODE_TEST = _bluesky_mode.BLUESKY_MODE_TEST
+get_bluesky_history_path = _bluesky_mode.get_bluesky_history_path
+get_bluesky_mode = _bluesky_mode.get_bluesky_mode
+publish_bluesky_active_mode = _bluesky_mode.publish_bluesky_active_mode
+
+BLUESKY_MODE = get_bluesky_mode()
+publish_bluesky_active_mode(BLUESKY_MODE)
+BLUESKY_HISTORY_PATH = get_bluesky_history_path(BLUESKY_MODE)
 RE = RunEngine({})
-RE.md = PersistentDict(str(Path("~/.bluesky_history").expanduser()))
+RE.md = PersistentDict(str(BLUESKY_HISTORY_PATH))
+RE.md["bluesky_mode"] = BLUESKY_MODE
 
 publisher = Publisher('localhost:5567')
 RE.subscribe(publisher)
+
+print(f"Bluesky startup mode: {BLUESKY_MODE} (scan history: {BLUESKY_HISTORY_PATH})")
 
 # Add default metadata
 RE.md['facility'] = 'MITR'
@@ -23,19 +46,61 @@ RE.preprocessors.append(sd)
 
 # Set up a Broker.
 from databroker import Broker
+try:
+    from bluesky_tiled_plugins import TiledWriter
+except ImportError:
+    from bluesky.callbacks.tiled_writer import TiledWriter
 from tiled.client import from_uri
 
 key = os.environ["TILED_API_KEY"]
 client = from_uri("http://localhost:8000", api_key=key)
 
-# Use persistent database backed by MongoDB
-# db = Broker(client['4dh4_imaging'])
-db = Broker(client['4dh4_diffraction'])
-# db = Broker(client['testdb'])
+def _catalog_exists(container, name):
+    try:
+        if name in container:
+            return True
+    except Exception:
+        pass
+    try:
+        container[name]
+    except Exception:
+        return False
+    return True
 
-# db = Broker.named("temp")
-# and subscribe it to the RunEngine
-RE.subscribe(db.insert)
+
+def _resolve_catalog_name(container, preferred_names):
+    for name in preferred_names:
+        if _catalog_exists(container, name):
+            return name
+    return preferred_names[0]
+
+
+if BLUESKY_MODE == BLUESKY_MODE_TEST:
+    BLUESKY_CATALOG_PREFERRED_NAMES = ["testdb"]
+else:
+    BLUESKY_CATALOG_PREFERRED_NAMES = [
+        "4dh4",
+        "4dh4_imaging",
+        "4dh4_diffraction",
+        "4dh4Collection",
+    ]
+
+BLUESKY_CATALOG_NAME = _resolve_catalog_name(client, BLUESKY_CATALOG_PREFERRED_NAMES)
+BLUESKY_CATALOG = client[BLUESKY_CATALOG_NAME]
+RE.md["bluesky_catalog"] = BLUESKY_CATALOG_NAME
+if BLUESKY_CATALOG_NAME in {"4dh4", "testdb"}:
+    db = BLUESKY_CATALOG
+    RE.subscribe(TiledWriter(BLUESKY_CATALOG, max_array_size=512))
+else:
+    db = Broker(BLUESKY_CATALOG)
+    RE.subscribe(db.insert)
+print(f"Bluesky data catalog: {BLUESKY_CATALOG_NAME}")
+if BLUESKY_CATALOG_NAME != BLUESKY_CATALOG_PREFERRED_NAMES[0]:
+    print(
+        "Requested preferred catalog "
+        f"{BLUESKY_CATALOG_PREFERRED_NAMES[0]!r} was not available; "
+        f"using {BLUESKY_CATALOG_NAME!r} instead."
+    )
 
 
 # from bluesky.magics import BlueskyMagics
