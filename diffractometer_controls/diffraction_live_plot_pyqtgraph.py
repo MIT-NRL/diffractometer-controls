@@ -1,11 +1,17 @@
 import math
 
-import matplotlib.cm as cm
-import matplotlib.colors as mcolors
 import numpy as np
 import pyqtgraph as pg
 from qtpy import QtCore, QtGui
 from qtpy.QtWidgets import QGridLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+
+_PROFILE_COLOR_STOPS = {
+    "viridis": [(68, 1, 84), (58, 82, 139), (32, 144, 140), (94, 201, 98), (253, 231, 37)],
+    "plasma": [(13, 8, 135), (84, 3, 160), (182, 55, 121), (251, 136, 97), (240, 249, 33)],
+    "cividis": [(0, 32, 76), (40, 83, 107), (101, 129, 120), (170, 181, 115), (253, 234, 69)],
+    "magma": [(0, 0, 4), (60, 15, 112), (140, 41, 129), (221, 73, 104), (252, 253, 191)],
+    "turbo": [(48, 18, 59), (40, 120, 142), (70, 190, 111), (247, 209, 61), (165, 0, 38)],
+}
 
 
 def _coerce_array(value):
@@ -50,8 +56,77 @@ def _normalize_axis_limits(value):
     return float(low), float(high)
 
 
+def _coerce_rgba(color):
+    if isinstance(color, QtGui.QColor):
+        return (
+            color.redF(),
+            color.greenF(),
+            color.blueF(),
+            color.alphaF(),
+        )
+    if isinstance(color, str):
+        text = color.strip()
+        if text.startswith("#"):
+            if len(text) == 7:
+                return (
+                    int(text[1:3], 16) / 255.0,
+                    int(text[3:5], 16) / 255.0,
+                    int(text[5:7], 16) / 255.0,
+                    1.0,
+                )
+            if len(text) == 9:
+                return (
+                    int(text[1:3], 16) / 255.0,
+                    int(text[3:5], 16) / 255.0,
+                    int(text[5:7], 16) / 255.0,
+                    int(text[7:9], 16) / 255.0,
+                )
+    try:
+        values = list(color)
+    except Exception:
+        return (0.29, 0.56, 0.89, 1.0)
+    if len(values) == 3:
+        values.append(1.0)
+    if len(values) < 4:
+        return (0.29, 0.56, 0.89, 1.0)
+    return tuple(max(0.0, min(1.0, float(v))) for v in values[:4])
+
+
+def _rgba_to_hex(rgba):
+    r, g, b, _a = _coerce_rgba(rgba)
+    return "#{:02x}{:02x}{:02x}".format(
+        int(r * 255.0),
+        int(g * 255.0),
+        int(b * 255.0),
+    )
+
+
+def _interp_rgb(color_a, color_b, fraction):
+    fraction = max(0.0, min(1.0, float(fraction)))
+    return tuple(
+        (float(a) + ((float(b) - float(a)) * fraction)) / 255.0
+        for a, b in zip(color_a, color_b)
+    ) + (1.0,)
+
+
+def _make_profile_colormap(name):
+    stops = list(_PROFILE_COLOR_STOPS.get(str(name), _PROFILE_COLOR_STOPS["viridis"]))
+
+    def _color_map(position):
+        pos = max(0.0, min(1.0, float(position)))
+        if len(stops) == 1:
+            return tuple(float(v) / 255.0 for v in stops[0]) + (1.0,)
+        scaled = pos * (len(stops) - 1)
+        low_index = int(math.floor(scaled))
+        high_index = min(len(stops) - 1, low_index + 1)
+        frac = scaled - low_index
+        return _interp_rgb(stops[low_index], stops[high_index], frac)
+
+    return _color_map
+
+
 def _color_to_qcolor(color, alpha=1.0):
-    rgba = mcolors.to_rgba(color)
+    rgba = _coerce_rgba(color)
     qcolor = QtGui.QColor(
         int(round(rgba[0] * 255.0)),
         int(round(rgba[1] * 255.0)),
@@ -74,6 +149,8 @@ def _plot_data_finite_y(item):
 class DiffractionPlotWidgetPyQtGraph(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._applying_theme = False
+        self._last_title_style = None
 
         self._title_label = QLabel(self)
         self._title_label.setAlignment(QtCore.Qt.AlignCenter)
@@ -444,61 +521,69 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
         self._peak_plot_item.setLabel("bottom", self._summary_x_label)
 
     def _apply_theme_from_palette(self):
-        pal = self._palette()
-        figure_bg = pal.color(QtGui.QPalette.Window)
-        axes_bg = pal.color(QtGui.QPalette.Base)
-        text = pal.color(QtGui.QPalette.WindowText)
-        axis_text = pal.color(QtGui.QPalette.Text)
-        grid = pal.color(QtGui.QPalette.Mid)
-        edge = pal.color(QtGui.QPalette.Mid)
-        legend_bg = pal.color(QtGui.QPalette.Base)
+        if self._applying_theme:
+            return
+        self._applying_theme = True
+        try:
+            pal = self._palette()
+            figure_bg = pal.color(QtGui.QPalette.Window)
+            axes_bg = pal.color(QtGui.QPalette.Base)
+            text = pal.color(QtGui.QPalette.WindowText)
+            axis_text = pal.color(QtGui.QPalette.Text)
+            edge = pal.color(QtGui.QPalette.Mid)
+            legend_bg = pal.color(QtGui.QPalette.Base)
 
-        self._title_label.setStyleSheet(
-            f"color: {text.name()}; background-color: {figure_bg.name()}; padding: 2px 4px;"
-        )
-        self.setAutoFillBackground(True)
+            title_style = (
+                f"color: {text.name()}; background-color: {figure_bg.name()}; padding: 2px 4px;"
+            )
+            if title_style != self._last_title_style:
+                self._title_label.setStyleSheet(title_style)
+                self._last_title_style = title_style
+            self.setAutoFillBackground(True)
 
-        for plot_widget, plot_item, title in (
-            (self._profile_plot, self._profile_plot_item, self._profile_title),
-            (self._summary_plot, self._summary_plot_item, self._summary_title),
-            (self._peak_plot, self._peak_plot_item, self._peak_title),
-        ):
-            plot_widget.setBackground((axes_bg.red(), axes_bg.green(), axes_bg.blue()))
-            plot_item.showGrid(x=True, y=True, alpha=0.25)
-            plot_item.getViewBox().setBorder(
-                pg.mkPen(edge.red(), edge.green(), edge.blue(), width=1)
-            )
-            plot_item.getAxis("left").setTextPen(
-                pg.mkPen(axis_text.red(), axis_text.green(), axis_text.blue(), width=1)
-            )
-            plot_item.getAxis("bottom").setTextPen(
-                pg.mkPen(axis_text.red(), axis_text.green(), axis_text.blue(), width=1)
-            )
-            plot_item.getAxis("left").setPen(
-                pg.mkPen(edge.red(), edge.green(), edge.blue(), width=1)
-            )
-            plot_item.getAxis("bottom").setPen(
-                pg.mkPen(edge.red(), edge.green(), edge.blue(), width=1)
-            )
-            plot_item.getAxis("left").setGrid(35)
-            plot_item.getAxis("bottom").setGrid(35)
-            plot_item.setTitle(title, color=text.name(), size="11pt")
+            for plot_widget, plot_item, title in (
+                (self._profile_plot, self._profile_plot_item, self._profile_title),
+                (self._summary_plot, self._summary_plot_item, self._summary_title),
+                (self._peak_plot, self._peak_plot_item, self._peak_title),
+            ):
+                plot_widget.setBackground((axes_bg.red(), axes_bg.green(), axes_bg.blue()))
+                plot_item.showGrid(x=True, y=True, alpha=0.25)
+                plot_item.getViewBox().setBorder(
+                    pg.mkPen(edge.red(), edge.green(), edge.blue(), width=1)
+                )
+                plot_item.getAxis("left").setTextPen(
+                    pg.mkPen(axis_text.red(), axis_text.green(), axis_text.blue(), width=1)
+                )
+                plot_item.getAxis("bottom").setTextPen(
+                    pg.mkPen(axis_text.red(), axis_text.green(), axis_text.blue(), width=1)
+                )
+                plot_item.getAxis("left").setPen(
+                    pg.mkPen(edge.red(), edge.green(), edge.blue(), width=1)
+                )
+                plot_item.getAxis("bottom").setPen(
+                    pg.mkPen(edge.red(), edge.green(), edge.blue(), width=1)
+                )
+                plot_item.getAxis("left").setGrid(35)
+                plot_item.getAxis("bottom").setGrid(35)
+                plot_item.setTitle(title, color=text.name(), size="11pt")
 
-        label_style = {"color": text.name()}
-        self._profile_plot_item.setLabel("left", "Counts", **label_style)
-        self._profile_plot_item.setLabel("bottom", "Detector Position", **label_style)
-        self._summary_plot_item.setLabel("left", self._summary_y_label, **label_style)
-        self._summary_plot_item.setLabel("bottom", self._summary_x_label, **label_style)
-        self._peak_plot_item.setLabel("left", self._peak_y_label, **label_style)
-        self._peak_plot_item.setLabel("bottom", self._summary_x_label, **label_style)
+            label_style = {"color": text.name()}
+            self._profile_plot_item.setLabel("left", "Counts", **label_style)
+            self._profile_plot_item.setLabel("bottom", "Detector Position", **label_style)
+            self._summary_plot_item.setLabel("left", self._summary_y_label, **label_style)
+            self._summary_plot_item.setLabel("bottom", self._summary_x_label, **label_style)
+            self._peak_plot_item.setLabel("left", self._peak_y_label, **label_style)
+            self._peak_plot_item.setLabel("bottom", self._summary_x_label, **label_style)
 
-        for legend in (self._profile_legend, self._summary_legend, self._peak_legend):
-            self._style_legend(
-                legend,
-                background=legend_bg,
-                edge=edge,
-                text_color=axis_text,
-            )
+            for legend in (self._profile_legend, self._summary_legend, self._peak_legend):
+                self._style_legend(
+                    legend,
+                    background=legend_bg,
+                    edge=edge,
+                    text_color=axis_text,
+                )
+        finally:
+            self._applying_theme = False
 
     def _style_legend(self, legend, *, background, edge, text_color):
         if legend is None:
@@ -762,7 +847,7 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
         if detector_name not in self._detector_order:
             self._detector_order.append(detector_name)
         index = self._detector_order.index(detector_name)
-        return cm.get_cmap(names[index % len(names)])
+        return _make_profile_colormap(names[index % len(names)])
 
     def _get_detector_series_color(self, detector_name):
         color = self._detector_series_colors.get(detector_name)
@@ -774,7 +859,7 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
             color_map = self._select_profile_colormap(detector_name)
             self._profile_colormaps[detector_name] = color_map
         rgba = color_map(0.82)
-        color = mcolors.to_hex(rgba, keep_alpha=False)
+        color = _rgba_to_hex(rgba)
         self._detector_series_colors[detector_name] = color
         return color
 
