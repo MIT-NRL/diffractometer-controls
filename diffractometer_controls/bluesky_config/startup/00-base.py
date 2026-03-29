@@ -52,7 +52,7 @@ except ImportError:
     from bluesky.callbacks.tiled_writer import TiledWriter
 from tiled.client import from_uri
 
-key = os.environ["TILED_API_KEY"]
+key = os.environ.get("TILED_WRITER_API_KEY") or os.environ["TILED_API_KEY"]
 client = from_uri("http://localhost:8000", api_key=key)
 
 def _catalog_exists(container, name):
