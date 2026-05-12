@@ -296,7 +296,10 @@ def adaptive_imaging_focus_scan(
         "file_dir": file_dir,
         "estimated_total_time_s": float(total_time),
         "estimated_total_units": int(total_units),
-        "plan_args": {},
+        "detectors": [det.name for det in detector],
+        "plan_args": {
+            "detectors": [det.name for det in detector],
+        },
         "det_config": {
             "exposure_time": detector[0].cam.acquire_time.get(),
             "gain": detector[0].cam.gain.get(),
