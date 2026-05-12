@@ -71,7 +71,7 @@ def _resolve_imaging_roots():
             pass
 
     # Beamline default path.
-    roots.append(Path(now.strftime("/home/mitr_4dh4/Data/%Y")).expanduser())
+    roots.append(Path(now.strftime("/home/mitr_4dh4/Data/Imaging/%Y")).expanduser())
 
     # Safe fallback default for current year under the worker user's home.
     roots.append(Path(now.strftime("~/Data/%Y")).expanduser())

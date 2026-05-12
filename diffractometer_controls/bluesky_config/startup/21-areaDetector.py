@@ -215,8 +215,8 @@ class MyZWODetector(SingleTriggerPause, ZWODetector):
     tiff1 = Cpt(
         MyTIFFPlugin,
         "TIFF1:",
-        write_path_template="/home/mitr_4dh4/Data/%Y/",
-        read_path_template="/home/mitr_4dh4/Data/%Y/",
+        write_path_template="/home/mitr_4dh4/Data/Imaging/%Y/",
+        read_path_template="/home/mitr_4dh4/Data/Imaging/%Y/",
     )
 
     
@@ -237,8 +237,8 @@ class MyQHYDetector(SingleTriggerPause, QHYDetector):
         "TIFF1:",
         # write_path_template="/home/mitr_4dh4/Data/%Y/PSI_Experiment/",
         # read_path_template="/home/mitr_4dh4/Data/%Y/PSI_Experiment/",
-        write_path_template="/home/mitr_4dh4/Data/%Y/",
-        read_path_template="/home/mitr_4dh4/Data/%Y/",
+        write_path_template="/home/mitr_4dh4/Data/Imaging/%Y/",
+        read_path_template="/home/mitr_4dh4/Data/Imaging/%Y/",
     )
     # hdf1 = Cpt(
     #     MyHDF5Plugin,
