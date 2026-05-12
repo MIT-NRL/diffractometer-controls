@@ -150,6 +150,7 @@ def count_he3(
         "title": title,
         "sample": sample,
         "gauge_volume": gauge_volume,
+        "detectors": [det.name for det in detectors],
         "plan_args": {
             "detectors": [det.name for det in detectors],
             "acquire_time": detectors[0].acquire_time.get(),
@@ -315,8 +316,9 @@ def scan_he3(
         "gauge_volume": gauge_volume,
         "estimated_total_time_s": float(total_time),
         "estimated_total_units": int(total_units),
+        "detectors": [det.name for det in detectors],
         "plan_args": {
-            "detectors": list(map(repr, detectors)),
+            "detectors": [det.name for det in detectors],
             "acquire_time": detectors[0].acquire_time.get(),
             "start_pos": start_pos,
             "stop_pos": stop_pos_calc,
@@ -475,6 +477,7 @@ def scan_parallel_he3(
         "gauge_volume": gauge_volume,
         "estimated_total_time_s": float(total_time),
         "estimated_total_units": int(total_units),
+        "detectors": [det.name for det in detectors],
         "plan_args": {
             "detectors": [det.name for det in detectors],
             "acquire_time": detectors[0].acquire_time.get(),
@@ -625,6 +628,7 @@ def scan_list_he3(
         "gauge_volume": gauge_volume,
         "estimated_total_time_s": float(total_time),
         "estimated_total_units": int(total_units),
+        "detectors": [det.name for det in detectors],
         "plan_args": {
             "detectors": [det.name for det in detectors],
             "acquire_time": detectors[0].acquire_time.get(),
@@ -795,6 +799,7 @@ def scan2D_he3(
         "gauge_volume": gauge_volume,
         "estimated_total_time_s": float(total_time),
         "estimated_total_units": int(total_units),
+        "detectors": [det.name for det in detectors],
         "plan_args": {
             "detectors": [det.name for det in detectors],
             "acquire_time": detectors[0].acquire_time.get(),
