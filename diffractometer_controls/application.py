@@ -322,9 +322,14 @@ class MITRApplication(PyDMApplication):
 
         # Create the RunEngineClient as part of the application attributes
         # These attributes need to be defined before the super().__init__ call so that the main window can access them
+        zmq_public_key = os.environ.get("QSERVER_ZMQ_PUBLIC_KEY") or None
         self.re_client = RunEngineClient(zmq_control_addr=f'tcp://{ipaddress}:60615', zmq_info_addr=f'tcp://{ipaddress}:60625')
         self.re_dispatcher = RemoteDispatcher(f'{ipaddress}:5568')
-        self.re_manager_api = REManagerAPI(zmq_control_addr=f'tcp://{ipaddress}:60615', zmq_info_addr=f'tcp://{ipaddress}:60625')
+        self.re_manager_api = REManagerAPI(
+            zmq_control_addr=f'tcp://{ipaddress}:60615',
+            zmq_info_addr=f'tcp://{ipaddress}:60625',
+            zmq_public_key=zmq_public_key,
+        )
         self._ipaddress = str(ipaddress)
         self._startup_ui_file = ui_file
         self._patch_bluesky_model_event_disconnects()

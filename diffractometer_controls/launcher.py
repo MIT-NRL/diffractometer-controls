@@ -13,6 +13,26 @@ from pathlib import Path
 from qtpy import QtCore, QtGui
 
 
+def _load_simple_env_file(path):
+    try:
+        lines = Path(path).expanduser().read_text().splitlines()
+    except FileNotFoundError:
+        return
+
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+
+
 def _configure_qt_highdpi():
     if hasattr(QtCore.Qt, "AA_EnableHighDpiScaling"):
         QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
@@ -34,6 +54,7 @@ def main():
     handler.setLevel("INFO")
     _configure_qt_highdpi()
     os.environ["QT_STYLE_OVERRIDE"] = "Fusion"
+    _load_simple_env_file("~/.config/bluesky-queueserver/client-zmq.env")
 
     from pydm import config
 
