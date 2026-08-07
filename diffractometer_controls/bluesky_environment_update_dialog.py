@@ -195,6 +195,7 @@ class BlueskyEnvironmentUpdateDialog(QtWidgets.QDialog):
             "XAUTHORITY",
             "DBUS_SESSION_BUS_ADDRESS",
             "XDG_RUNTIME_DIR",
+            "MITR_ALLOW_LOCAL_MAINTENANCE",
         ):
             value = os.environ.get(key)
             if value:

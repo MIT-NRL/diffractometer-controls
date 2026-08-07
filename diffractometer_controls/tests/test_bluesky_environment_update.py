@@ -2,6 +2,9 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
+
+import diffractometer_controls.bluesky_environment_update as environment_update
 
 from diffractometer_controls.bluesky_environment_update import (
     extract_json_document,
@@ -16,6 +19,33 @@ from diffractometer_controls.bluesky_environment_update import (
 
 
 class BlueskyEnvironmentUpdateTests(unittest.TestCase):
+    def test_main_rejects_unapproved_host_before_update_check(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "run"
+            with (
+                mock.patch.object(
+                    environment_update,
+                    "local_maintenance_allowed",
+                    return_value=False,
+                ),
+                mock.patch.object(environment_update.UpdateContext, "check") as check,
+            ):
+                result = environment_update.main(
+                    [
+                        "check",
+                        "--run-dir",
+                        str(run_dir),
+                        "--repo-root",
+                        str(Path(directory)),
+                    ]
+                )
+
+            self.assertEqual(result, 1)
+            check.assert_not_called()
+            state = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["status"], "failed")
+            self.assertIn("Local maintenance is disabled", state["message"])
+
     def test_summarizes_mamba_transaction(self):
         payload = {
             "actions": {

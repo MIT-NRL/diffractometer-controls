@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import fcntl
 import hashlib
 import json
 import os
@@ -25,6 +24,22 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - the updater is deliberately Linux-only
+    fcntl = None
+
+try:
+    from diffractometer_controls.local_maintenance import (
+        LOCAL_MAINTENANCE_DISABLED_MESSAGE,
+        local_maintenance_allowed,
+    )
+except ImportError:
+    from local_maintenance import (
+        LOCAL_MAINTENANCE_DISABLED_MESSAGE,
+        local_maintenance_allowed,
+    )
 
 
 ENVIRONMENT_NAME = "bluesky-server"
@@ -959,6 +974,8 @@ class UpdateContext:
 
 
 def acquire_update_lock(run_dir: Path):
+    if fcntl is None:
+        raise UpdateFailure("The Bluesky environment updater requires Linux.")
     lock_dir = Path.home() / ".local" / "state" / "diffractometer-controls"
     lock_dir.mkdir(parents=True, exist_ok=True)
     lock_handle = (lock_dir / "bluesky-environment-update.lock").open("w")
@@ -988,6 +1005,8 @@ def main(argv: list[str] | None = None) -> int:
     context = UpdateContext(args.run_dir, args.repo_root)
     lock_handle = None
     try:
+        if not local_maintenance_allowed():
+            raise UpdateFailure(LOCAL_MAINTENANCE_DISABLED_MESSAGE)
         lock_handle = acquire_update_lock(context.run_dir)
         if args.mode == "check":
             context.check()
@@ -1013,7 +1032,8 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if lock_handle is not None:
             try:
-                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+                if fcntl is not None:
+                    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
                 lock_handle.close()
             except Exception:
                 pass

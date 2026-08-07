@@ -39,6 +39,16 @@ try:
     )
 except Exception:
     from bluesky_environment_update_dialog import BlueskyEnvironmentUpdateDialog
+try:
+    from diffractometer_controls.local_maintenance import (
+        LOCAL_MAINTENANCE_DISABLED_MESSAGE,
+        local_maintenance_allowed,
+    )
+except Exception:
+    from local_maintenance import (
+        LOCAL_MAINTENANCE_DISABLED_MESSAGE,
+        local_maintenance_allowed,
+    )
 from pydm.widgets import PyDMByteIndicator
 from bluesky_queueserver_api.zmq import REManagerAPI
 from pydm.widgets.channel import PyDMChannel
@@ -298,6 +308,7 @@ class MITRMainWindow(PyDMMainWindow):
         bluesky_update.setToolTip(
             "Preview and apply a backed-up update of the bluesky-server environment"
         )
+        self._configure_local_maintenance_action(bluesky_update)
 
         # add line to the menu
         bluesky_menu.addSeparator()
@@ -307,6 +318,7 @@ class MITRMainWindow(PyDMMainWindow):
         bluesky_RE_reset.triggered.connect(lambda: self.reset_process("queue-server"))
         self._set_themed_action_icon(bluesky_RE_reset, 'fa5s.redo')
         bluesky_RE_reset.setToolTip("Reset the Bluesky Run Engine Manager")
+        self._configure_local_maintenance_action(bluesky_RE_reset)
         bluesky_menu.addAction(bluesky_RE_reset)
 
         # Add actions to the "Bluesky Controls" submenu
@@ -314,12 +326,14 @@ class MITRMainWindow(PyDMMainWindow):
         bluesky_proxy_reset.triggered.connect(lambda: self.reset_process("bluesky-proxy"))
         self._set_themed_action_icon(bluesky_proxy_reset, 'fa5s.redo')
         bluesky_proxy_reset.setToolTip("Reset the Bluesky Run Engine Proxy")
+        self._configure_local_maintenance_action(bluesky_proxy_reset)
         bluesky_menu.addAction(bluesky_proxy_reset)
 
         tiled_server_reset = bluesky_menu.addAction("Tiled Server Reset")
         tiled_server_reset.triggered.connect(lambda: self.reset_process("tiled-server"))
         self._set_themed_action_icon(tiled_server_reset, 'fa5s.redo')
         tiled_server_reset.setToolTip("Reset the Tiled server")
+        self._configure_local_maintenance_action(tiled_server_reset)
         bluesky_menu.addAction(tiled_server_reset)
 
         # Add Bluesky GUI reset action to the "Bluesky Controls" submenu
@@ -327,6 +341,7 @@ class MITRMainWindow(PyDMMainWindow):
         bluesky_gui_reset.triggered.connect(lambda: self.control_servers("4dh4gui", "restart"))
         self._set_themed_action_icon(bluesky_gui_reset, 'fa5s.redo')
         bluesky_gui_reset.setToolTip("Reset the Bluesky GUI")
+        self._configure_local_maintenance_action(bluesky_gui_reset)
         bluesky_menu.addAction(bluesky_gui_reset)
 
         # Add separator before suspender actions
@@ -392,6 +407,7 @@ class MITRMainWindow(PyDMMainWindow):
         epics_ioc_start.triggered.connect(lambda: self.control_servers("4dh4ioc", "start"))
         self._set_themed_action_icon(epics_ioc_start, 'fa5s.play')
         epics_ioc_start.setToolTip("Start the EPICS IOC")
+        self._configure_local_maintenance_action(epics_ioc_start)
         epics_menu.addAction(epics_ioc_start)
 
         # Add actions to the "EPICS Controls" submenu
@@ -399,6 +415,7 @@ class MITRMainWindow(PyDMMainWindow):
         epics_ioc_reset.triggered.connect(lambda: self.control_servers("4dh4ioc", "restart"))
         self._set_themed_action_icon(epics_ioc_reset, 'fa5s.redo')
         epics_ioc_reset.setToolTip("Reset the EPICS IOC")
+        self._configure_local_maintenance_action(epics_ioc_reset)
         epics_menu.addAction(epics_ioc_reset)
 
         # Add stop action to the "EPICS Controls" submenu
@@ -406,6 +423,7 @@ class MITRMainWindow(PyDMMainWindow):
         epics_ioc_stop.triggered.connect(lambda: self.control_servers("4dh4ioc", "stop"))
         self._set_themed_action_icon(epics_ioc_stop, 'fa5s.stop')
         epics_ioc_stop.setToolTip("Stop the EPICS IOC")
+        self._configure_local_maintenance_action(epics_ioc_stop)
         epics_menu.addAction(epics_ioc_stop)
 
         # Add the "Controls" action to the menu bar
@@ -1357,6 +1375,26 @@ class MITRMainWindow(PyDMMainWindow):
                 pass
         self._bluesky_mode_channels = []
 
+    def _configure_local_maintenance_action(self, action):
+        """Disable a host-management action unless this is the control host."""
+        if local_maintenance_allowed():
+            return
+        action.setEnabled(False)
+        existing = action.toolTip().strip()
+        separator = "\n\n" if existing else ""
+        action.setToolTip(existing + separator + LOCAL_MAINTENANCE_DISABLED_MESSAGE)
+
+    def _require_local_maintenance(self, operation):
+        """Protect handlers as well as their normally-disabled menu actions."""
+        if local_maintenance_allowed():
+            return True
+        QMessageBox.warning(
+            self,
+            "Local Maintenance Disabled",
+            f"{operation} was not run.\n\n{LOCAL_MAINTENANCE_DISABLED_MESSAGE}",
+        )
+        return False
+
     def reset_process(self, process_name):
         """
         Resets a given process using systemctl.
@@ -1364,6 +1402,8 @@ class MITRMainWindow(PyDMMainWindow):
         Parameters:
             process_name (str): The name of the process to reset.
         """
+        if not self._require_local_maintenance(f"Restarting {process_name}"):
+            return
         try:
             # Run the systemctl command to restart the service
             subprocess.run(
@@ -1390,6 +1430,8 @@ class MITRMainWindow(PyDMMainWindow):
             )
 
     def launch_bluesky_environment_update(self):
+        if not self._require_local_maintenance("The Bluesky environment updater"):
+            return
         dialog = self._bluesky_environment_update_dialog
         if dialog is not None and dialog.isVisible():
             dialog.raise_()
@@ -1431,6 +1473,8 @@ class MITRMainWindow(PyDMMainWindow):
             server_name (str): The name of the server to control.
             command (str): The command to execute (e.g., "restart", "start", "stop").
         """
+        if not self._require_local_maintenance(f"Running {server_name} {command}"):
+            return
         try:
             # Construct the full command
             full_command = f"{server_name} {command}"
