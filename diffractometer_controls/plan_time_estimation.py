@@ -71,10 +71,28 @@ def _known_estimate(total_time_s: float, total_units: int | None = None) -> dict
     }
 
 
-def _num_steps_from_step_scan(start: float, stop: float, step: float) -> int | None:
-    if step == 0:
+def _num_steps_from_step_size_scan(
+    start: float,
+    stop: float,
+    step_size: float,
+    *,
+    include_stop: bool = True,
+) -> int | None:
+    if step_size == 0:
         return None
-    return int(round((stop - start) / step) + 1)
+    if (stop - start) * step_size < 0:
+        return None
+    try:
+        raw_stop = stop + (0.5 * step_size if include_stop else 0.0)
+        positions = np.arange(start=start, stop=raw_stop, step=step_size)
+    except Exception:
+        return None
+    tol = max(abs(step_size), abs(stop - start), 1.0) * 1e-12
+    if step_size > 0:
+        positions = positions[positions <= stop + tol]
+    else:
+        positions = positions[positions >= stop - tol]
+    return int(len(positions))
 
 
 def _transfer_time_per_image(context: Mapping[str, Any]) -> float:
@@ -97,12 +115,14 @@ def _estimate_imaging(params: Mapping[str, Any], context: Mapping[str, Any]) -> 
 def _estimate_imaging_scan(params: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, float | int | None]:
     num_steps = _as_int(params.get("num_steps"), None)
     if num_steps is None:
-        step = _as_float(params.get("step"), None)
+        step_size = _as_float(params.get("step_size", params.get("step")), None)
         start_pos = _as_float(params.get("start_pos"), None)
         stop_pos = _as_float(params.get("stop_pos"), None)
-        if step is None or start_pos is None or stop_pos is None:
+        if step_size is None or start_pos is None or stop_pos is None:
             return _unknown_estimate()
-        num_steps = len(np.arange(start=start_pos, stop=stop_pos + step / 2.0, step=step))
+        num_steps = _num_steps_from_step_size_scan(start_pos, stop_pos, step_size)
+        if num_steps is None:
+            return _unknown_estimate()
     num_steps = max(1, int(num_steps))
     num_exposures = max(1, _as_int(params.get("num_exposures"), 1) or 1)
     exposure_time = _as_float(params.get("exposure_time"), None)
@@ -120,14 +140,18 @@ def _estimate_tomo_scan(params: Mapping[str, Any], context: Mapping[str, Any]) -
     stop_angle = _as_float(params.get("stop_angle"), 360.0) or 360.0
     include_stop_angle = bool(params.get("include_stop_angle", False))
     num_projections = _as_int(params.get("num_projections"), None)
-    angle_step = _as_float(params.get("angle_step"), None)
+    angle_step_size = _as_float(params.get("angle_step_size", params.get("angle_step")), None)
     if num_projections is not None:
         num_projections_calc = int(num_projections)
-    elif angle_step is not None:
-        if include_stop_angle:
-            num_projections_calc = int((stop_angle - start_angle) / angle_step) + 1
-        else:
-            num_projections_calc = int((stop_angle - start_angle) / angle_step)
+    elif angle_step_size is not None:
+        num_projections_calc = _num_steps_from_step_size_scan(
+            start_angle,
+            stop_angle,
+            angle_step_size,
+            include_stop=include_stop_angle,
+        )
+        if num_projections_calc is None:
+            return _unknown_estimate()
     else:
         return _unknown_estimate()
     if num_projections_calc <= 0:
@@ -167,10 +191,10 @@ def _estimate_scan_he3(params: Mapping[str, Any], context: Mapping[str, Any]) ->
     if num_steps is None:
         start_pos = _as_float(params.get("start_pos"), None)
         stop_pos = _as_float(params.get("stop_pos"), None)
-        step = _as_float(params.get("step"), None)
-        if start_pos is None or stop_pos is None or step is None:
+        step_size = _as_float(params.get("step_size", params.get("step")), None)
+        if start_pos is None or stop_pos is None or step_size is None:
             return _unknown_estimate()
-        num_steps = _num_steps_from_step_scan(start_pos, stop_pos, step)
+        num_steps = _num_steps_from_step_size_scan(start_pos, stop_pos, step_size)
         if num_steps is None or num_steps <= 0:
             return _unknown_estimate()
     else:
@@ -225,14 +249,14 @@ def _estimate_scan_list_he3(params: Mapping[str, Any], context: Mapping[str, Any
 def _estimate_scan2d_he3(params: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, float | int | None]:
     start_outer = _as_float(params.get("start_pos_outer"), None)
     stop_outer = _as_float(params.get("stop_pos_outer"), None)
-    step_outer = _as_float(params.get("step_outer"), None)
+    step_size_outer = _as_float(params.get("step_size_outer", params.get("step_outer")), None)
     start_inner = _as_float(params.get("start_pos_inner"), None)
     stop_inner = _as_float(params.get("stop_pos_inner"), None)
-    step_inner = _as_float(params.get("step_inner"), None)
-    if None in (start_outer, stop_outer, step_outer, start_inner, stop_inner, step_inner):
+    step_size_inner = _as_float(params.get("step_size_inner", params.get("step_inner")), None)
+    if None in (start_outer, stop_outer, step_size_outer, start_inner, stop_inner, step_size_inner):
         return _unknown_estimate()
-    num_steps_outer = _num_steps_from_step_scan(float(start_outer), float(stop_outer), float(step_outer))
-    num_steps_inner = _num_steps_from_step_scan(float(start_inner), float(stop_inner), float(step_inner))
+    num_steps_outer = _num_steps_from_step_size_scan(float(start_outer), float(stop_outer), float(step_size_outer))
+    num_steps_inner = _num_steps_from_step_size_scan(float(start_inner), float(stop_inner), float(step_size_inner))
     if (
         num_steps_outer is None
         or num_steps_inner is None

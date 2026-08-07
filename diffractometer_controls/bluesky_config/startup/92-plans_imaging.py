@@ -177,7 +177,7 @@ def _repeater_with_checkpoints(
                 if cb is not None:
                     yield from cb
 
-def _inner_product_custom(args, num:int = None, step:float = None, offset:float = 0, endpoint=True):
+def _inner_product_custom(args, num:int = None, step_size:float = None, offset:float = 0, endpoint=True):
     """Scan over one multi-motor trajectory.
 
     Parameters
@@ -203,10 +203,10 @@ def _inner_product_custom(args, num:int = None, step:float = None, offset:float 
     ) in partition(3, args):
         if num is not None:
             steps = np.linspace(start + offset, stop, num=num, endpoint=endpoint)
-        elif step is not None:
-            steps = np.arange(start + offset, stop + step/2*endpoint, step)
+        elif step_size is not None:
+            steps = np.arange(start + offset, stop + step_size/2*endpoint, step_size)
         else:
-            raise ValueError("Must provide either 'num' or 'step'")
+            raise ValueError("Must provide either 'num' or 'step_size'")
         c = cycler(motor, steps)
         cyclers.append(c)
     return functools.reduce(operator.add, cyclers)
@@ -290,7 +290,7 @@ def tomo_scan(file_name:str,
               detector=cam1,
               exposure_time:float = None,
               num_projections:int = None,
-              angle_step:float = None,
+              angle_step_size:float = None,
               start_angle:float = 0, 
               stop_angle:float = 360,
               num_exposures:int = 1,
@@ -300,7 +300,7 @@ def tomo_scan(file_name:str,
               check_180_deg:bool = True,
               md:dict = None):
     '''
-    Tomography scan that defaults to 360-step degrees.
+    Tomography scan that defaults to a 360-degree range.
     '''
     file_name = str(file_name).strip().replace(" ","_").replace("__","_")
     file_dir = str(file_dir).strip().replace(" ","_").replace("__","_")
@@ -317,29 +317,22 @@ def tomo_scan(file_name:str,
         for det in detector:
             yield from bps.mov(det.cam.acquire_time, exposure_time)
 
-    if num_projections is not None:
-        num_projections_calc = num_projections
-        if include_stop_angle:
-            angle_step_calc = (stop_angle-start_angle)/(num_projections-1)
-            actual_stop_angle = stop_angle
-        else:
-            angle_step_calc = (stop_angle-start_angle)/num_projections
-            actual_stop_angle = stop_angle - angle_step_calc
-    elif angle_step is not None:
-        angle_step_calc = angle_step
-        if include_stop_angle:
-            num_projections_calc = int((stop_angle-start_angle)/angle_step) + 1
-            actual_stop_angle = stop_angle
-        else:
-            num_projections_calc = int((stop_angle-start_angle)/angle_step)
-            actual_stop_angle = stop_angle - angle_step
+    positions, num_projections_calc, angle_step_size_calc, actual_stop_angle = (
+        _tomo_positions_from_num_or_step_size(
+            start_angle,
+            stop_angle,
+            num_projections=num_projections,
+            angle_step_size=angle_step_size,
+            include_stop=include_stop_angle,
+        )
+    )
 
     estimate = estimate_plan_runtime(
         "tomo_scan",
         kwargs={
             "exposure_time": exposure_time,
             "num_projections": num_projections_calc,
-            "angle_step": angle_step_calc,
+            "angle_step_size": angle_step_size_calc,
             "start_angle": start_angle,
             "stop_angle": actual_stop_angle,
             "num_exposures": num_exposures,
@@ -353,7 +346,7 @@ def tomo_scan(file_name:str,
     
 
     print("#===============#")
-    print(f"Starting tomography scan from {start_angle} to {actual_stop_angle} \nin {num_projections_calc} steps of {angle_step_calc} degrees with {num_exposures} exposured per step.")
+    print(f"Starting tomography scan from {start_angle} to {actual_stop_angle} \nin {num_projections_calc} steps of {angle_step_size_calc} degrees with {num_exposures} exposured per step.")
     hours = total_time // 3600
     minutes = (total_time % 3600) // 60
     seconds = total_time % 60
@@ -364,11 +357,10 @@ def tomo_scan(file_name:str,
     caput("4dh4:TS:RotationStart",start_angle)
     caput("4dh4:TS:RotationStop",actual_stop_angle)
     caput("4dh4:TS:NumAngles",num_projections_calc)
-    caput("4dh4:TS:RotationStep", angle_step_calc)
+    caput("4dh4:TS:RotationStep", angle_step_size_calc)
 
 
     # md_args = list(chain(*((repr(motor), start, stop) for motor, start_angle, stop_angle)))
-    motor_names = motor.name
     md = md or {}
     _md = {
         "file_name": file_name,
@@ -391,24 +383,11 @@ def tomo_scan(file_name:str,
         "plan_name": "tomo_scan",
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,
-        "plan_pattern_args": dict(motor=motor.name, start_angle=start_angle, stop_angle=actual_stop_angle, num_projections=num_projections, angle_step=angle_step, include_stop_angle=include_stop_angle),  # noqa: C408
-        "motors": motor_names,
+        "plan_pattern_args": dict(motor=motor.name, start_angle=start_angle, stop_angle=actual_stop_angle, num_projections=num_projections_calc, angle_step_size=angle_step_size_calc, include_stop_angle=include_stop_angle),  # noqa: C408
+        "motors": [motor.name],
     }
     _md.update(md)
-
-    x_fields = []
-    x_fields.extend(utils.get_hinted_fields(motor))
-
-    default_dimensions = [(x_fields, "primary")]
-
-    default_hints = {}
-    if len(x_fields) > 0:
-        default_hints.update(dimensions=default_dimensions)
-
-    # now add default_hints and override any hints from the original md (if
-    # exists)
-    _md["hints"] = default_hints
-    _md["hints"].update(md.get("hints", {}) or {})
+    x_fields = _set_scan_motor_metadata(_md, [motor])
     
 
     # def background_exposure(frame_type: str="dark"):
@@ -437,8 +416,7 @@ def tomo_scan(file_name:str,
         for det in detector:
             det.tiff1.file_name.put(file_name)
             det.tiff1.folder_name.put(file_dir)
-            yield from bps.stage(det)
-        yield from bps.stage(motor)
+        yield from _stage_devices_once(detector + [motor])
 
         # print("Close shutter then press Resume to take the dark field")
         # yield from bps.checkpoint()
@@ -455,15 +433,14 @@ def tomo_scan(file_name:str,
         
         pos_cache = defaultdict(lambda: None)
         # if num_projections is not None:
-        cycler = _inner_product_custom(num=num_projections, step=angle_step, endpoint=include_stop_angle, args=[motor, start_angle, stop_angle])
-        positions = [step[motor] for step in list(cycler)]
-        if 180 not in positions and check_180_deg:
+        scan_cycler = cycler(motor, positions)
+        if not np.any(np.isclose(positions, 180.0)) and check_180_deg:
             raise RuntimeError("\n\n****Warning****: 180 degrees not in the scan positions. Ending the scan. Please check the scan parameters or disable the check_180_deg parameter.\n\n")
                         
 
         def inner_scan_nd():
             # yield from bps.declare_stream(motor, *detector, name="primary")
-            for step in list(cycler):
+            for step in list(scan_cycler):
                 yield from _one_nd_step_repeat(
                     detector,
                     step,
@@ -596,7 +573,7 @@ def imaging(
         for det in detector:
             det.tiff1.file_name.put(file_name)
             det.tiff1.folder_name.put(file_dir)
-            yield from bps.stage(det)                 
+        yield from _stage_devices_once(detector)
 
         yield from _repeater_with_checkpoints(
             num_exposures,
@@ -634,7 +611,7 @@ def imaging_scan(
             motor, 
             start_pos:float, 
             stop_pos:float,
-            step:float = None,
+            step_size:float = None,
             num_steps:int = None,
             detector=cam1, 
             exposure_time:float = None,
@@ -674,23 +651,19 @@ def imaging_scan(
         for det in detector:
             yield from bps.mov(det.cam.offset, offset)
 
-    if num_steps is not None:
-        positions = np.linspace(start=start_pos, stop=stop_pos, num=num_steps, endpoint=True)
-        num_steps_calc = num_steps
-        step_cal = positions[1] - positions[0]
-        stop_pos_calc = positions[-1]
-    elif step is not None:
-        positions = np.arange(start=start_pos, stop=stop_pos + step/2, step=step)
-        num_steps_calc = len(positions)
-        step_cal = step
-        stop_pos_calc = positions[-1]
+    positions, num_steps_calc, step_size_calc, stop_pos_calc = _scan_positions_from_num_or_step_size(
+        start_pos,
+        stop_pos,
+        num_steps=num_steps,
+        step_size=step_size,
+    )
 
     estimate = estimate_plan_runtime(
         "imaging_scan",
         kwargs={
             "start_pos": start_pos,
             "stop_pos": stop_pos_calc,
-            "step": step_cal,
+            "step_size": step_size_calc,
             "num_steps": num_steps_calc,
             "exposure_time": exposure_time,
             "num_exposures": num_exposures,
@@ -701,7 +674,7 @@ def imaging_scan(
     total_units = int(estimate.get("estimated_total_units") or (num_exposures * num_steps_calc))
 
     print("#===============#")
-    print(f"Starting scan of {motor.name} from {start_pos} to {stop_pos_calc} \nin {num_steps_calc} steps of {step_cal} {motor.egu} with {num_exposures} exposures at each position.")
+    print(f"Starting scan of {motor.name} from {start_pos} to {stop_pos_calc} \nin {num_steps_calc} steps of {step_size_calc} {motor.egu} with {num_exposures} exposures at each position.")
     hours = total_time // 3600
     minutes = (total_time % 3600) // 60
     seconds = total_time % 60
@@ -711,7 +684,6 @@ def imaging_scan(
 
 
     # md_args = list(chain(*((repr(motor), start, stop) for motor, start_angle, stop_angle)))
-    motor_names = motor.name
     md = md or {}
     _md = {
         "file_name": file_name,
@@ -734,24 +706,11 @@ def imaging_scan(
         "plan_name": "imaging_scan",
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,
-        "plan_pattern_args": dict(motor=motor.name, start_pos=start_pos, stop_pos=stop_pos, step=step, num_steps=num_steps, num_exposures=num_exposures),  # noqa: C408
-        "motors": motor_names,
+        "plan_pattern_args": dict(motor=motor.name, start_pos=start_pos, stop_pos=stop_pos_calc, step_size=step_size_calc, num_steps=num_steps_calc, num_exposures=num_exposures),  # noqa: C408
+        "motors": [motor.name],
     }
     _md.update(md)
-
-    x_fields = []
-    x_fields.extend(utils.get_hinted_fields(motor))
-
-    default_dimensions = [(x_fields, "primary")]
-
-    default_hints = {}
-    if len(x_fields) > 0:
-        default_hints.update(dimensions=default_dimensions)
-
-    # now add default_hints and override any hints from the original md (if
-    # exists)
-    _md["hints"] = default_hints
-    _md["hints"].update(md.get("hints", {}) or {})
+    x_fields = _set_scan_motor_metadata(_md, [motor])
     
 
     @bpp.run_decorator(md=_md)
@@ -771,17 +730,14 @@ def imaging_scan(
         for det in detector:
             det.tiff1.file_name.put(file_name)
             det.tiff1.folder_name.put(file_dir)
-            yield from bps.stage(det)
-        yield from bps.stage(motor)
+        yield from _stage_devices_once(detector + [motor])
         
         pos_cache = defaultdict(lambda: None)
-        # cycler = plan_patterns.inner_product(num=num_steps, args=[motor, start_pos, stop_pos])
-        cycler = _inner_product_custom(step=step, num=num_steps, args=[motor, start_pos, stop_pos])
-        print(cycler)
+        scan_cycler = cycler(motor, positions)
 
         def inner_scan_nd():
             # yield from bps.declare_stream(motor, *detector, name="primary")
-            for step in list(cycler):
+            for step in list(scan_cycler):
                 yield from _one_nd_step_repeat(
                     detector,
                     step,

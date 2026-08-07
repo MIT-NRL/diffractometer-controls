@@ -238,7 +238,7 @@ def scan_he3(
             motor, 
             start_pos:float, 
             stop_pos:float, 
-            step:float = None,
+            step_size:float = None,
             num_steps:int = None,
             acquire_time:float = None,
             return_to_original_position:bool = True,
@@ -257,29 +257,19 @@ def scan_he3(
         for det in detectors:
             yield from bps.mov(det.acquire_time, acquire_time)
 
-    if num_steps is not None:
-        if int(num_steps) < 2:
-            raise ValueError("num_steps must be at least 2")
-        positions = np.linspace(start=start_pos, stop=stop_pos, num=int(num_steps), endpoint=True)
-        num_steps_calc = int(num_steps)
-        step_calc = float(positions[1] - positions[0])
-        stop_pos_calc = float(positions[-1])
-    elif step is not None:
-        positions = np.arange(start=start_pos, stop=stop_pos + step / 2.0, step=step)
-        if len(positions) < 2:
-            raise ValueError("step must produce at least 2 scan positions")
-        num_steps_calc = int(len(positions))
-        step_calc = float(step)
-        stop_pos_calc = float(positions[-1])
-    else:
-        raise ValueError("Either step or num_steps must be provided")
+    positions, num_steps_calc, step_size_calc, stop_pos_calc = _scan_positions_from_num_or_step_size(
+        start_pos,
+        stop_pos,
+        num_steps=num_steps,
+        step_size=step_size,
+    )
 
     estimate = estimate_plan_runtime(
         "scan_he3",
         kwargs={
             "start_pos": start_pos,
             "stop_pos": stop_pos_calc,
-            "step": step_calc,
+            "step_size": step_size_calc,
             "num_steps": num_steps_calc,
             "acquire_time": detectors[0].acquire_time.get(),
         },
@@ -297,7 +287,7 @@ def scan_he3(
         print(f"Gauge volume: {gauge_volume}")
     print(
         f"Starting scan of {motor.name} from {start_pos} to {stop_pos_calc} "
-        f"\nin {num_steps_calc} steps of {step_calc} {motor.egu}."
+        f"\nin {num_steps_calc} steps of {step_size_calc} {motor.egu}."
     )
     hours = total_time // 3600
     minutes = (total_time % 3600) // 60
@@ -308,7 +298,6 @@ def scan_he3(
 
 
     # md_args = list(chain(*((repr(motor), start, stop) for motor, start_angle, stop_angle)))
-    motor_names = motor.name
     md = md or {}
     _md = {
         "title": title,
@@ -322,7 +311,7 @@ def scan_he3(
             "acquire_time": detectors[0].acquire_time.get(),
             "start_pos": start_pos,
             "stop_pos": stop_pos_calc,
-            "step": step_calc,
+            "step_size": step_size_calc,
             "num_steps": num_steps_calc,
         },
         "det_config": {
@@ -335,24 +324,11 @@ def scan_he3(
         "plan_name": "scan_he3",
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,
-        "plan_pattern_args": dict(motor=motor.name, start_pos=start_pos, stop_pos=stop_pos_calc, step=step_calc, num_steps=num_steps_calc),  # noqa: C408
-        "motors": motor_names,
+        "plan_pattern_args": dict(motor=motor.name, start_pos=start_pos, stop_pos=stop_pos_calc, step_size=step_size_calc, num_steps=num_steps_calc),  # noqa: C408
+        "motors": [motor.name],
     }
     _md.update(md)
-
-    x_fields = []
-    x_fields.extend(utils.get_hinted_fields(motor))
-
-    default_dimensions = [(x_fields, "primary")]
-
-    default_hints = {}
-    if len(x_fields) > 0:
-        default_hints.update(dimensions=default_dimensions)
-
-    # now add default_hints and override any hints from the original md (if
-    # exists)
-    _md["hints"] = default_hints
-    _md["hints"].update(md.get("hints", {}) or {})
+    x_fields = _set_scan_motor_metadata(_md, [motor])
     
     # @bpp.monitor_during_decorator([detector[0]])
     @bpp.run_decorator(md=_md)
@@ -362,16 +338,14 @@ def scan_he3(
             initial_total_time_s=total_time,
         )
 
-        for det in detectors:
-            yield from bps.stage(det)
-        yield from bps.stage(motor)
+        yield from _stage_devices_once(detectors + [motor])
         
         pos_cache = defaultdict(lambda: None)
-        cycler = plan_patterns.inner_product(num=num_steps_calc, args=[motor, start_pos, stop_pos_calc])
+        scan_cycler = cycler(motor, positions)
 
         def inner_scan_nd():
             # yield from bps.declare_stream(motor, *detector, name="primary")
-            for step in list(cycler):
+            for step in list(scan_cycler):
                 step_t0 = time.monotonic()
                 yield from progress.mark_started()
                 yield from bps.one_nd_step(detectors, step, pos_cache)
@@ -425,7 +399,7 @@ def scan_parallel_he3(
             motor2, 
             start_pos2:float, 
             stop_pos2:float, 
-            num_steps:float,
+            num_steps:int,
             acquire_time:float = None,
             return_to_original_position:bool = True,
             md:dict = None
@@ -444,23 +418,25 @@ def scan_parallel_he3(
         for det in detectors:
             yield from bps.mov(det.acquire_time, acquire_time)
     
-    # num_steps = int(round((stop_pos-start_pos)/step) + 1)
-    step_size1 = (stop_pos1-start_pos1)/(num_steps-1)
-    step_size2 = (stop_pos2-start_pos2)/(num_steps-1)
+    num_steps_calc = int(num_steps)
+    if num_steps_calc < 2:
+        raise ValueError("num_steps must be at least 2")
+    step_size1 = (stop_pos1-start_pos1)/(num_steps_calc-1)
+    step_size2 = (stop_pos2-start_pos2)/(num_steps_calc-1)
     estimate = estimate_plan_runtime(
         "scan_parallel_he3",
         kwargs={
-            "num_steps": num_steps,
+            "num_steps": num_steps_calc,
             "acquire_time": acquire_time,
         },
         context=_plan_estimation_context(),
     )
     total_time = float(estimate.get("estimated_total_time_s") or 0.0)
-    total_units = int(estimate.get("estimated_total_units") or num_steps)
+    total_units = int(estimate.get("estimated_total_units") or num_steps_calc)
 
     print("#===============#")
-    print(f"Starting scan of {motor1.name} from {start_pos1} to {stop_pos1} \nin {num_steps} steps of {step_size1} {motor1.egu}.")
-    print(f"In parallel scanning {motor2.name} from {start_pos2} to {stop_pos2} \nin {num_steps} steps of {step_size2} {motor2.egu}.")
+    print(f"Starting scan of {motor1.name} from {start_pos1} to {stop_pos1} \nin {num_steps_calc} steps of {step_size1} {motor1.egu}.")
+    print(f"In parallel scanning {motor2.name} from {start_pos2} to {stop_pos2} \nin {num_steps_calc} steps of {step_size2} {motor2.egu}.")
     hours = total_time // 3600
     minutes = (total_time % 3600) // 60
     seconds = total_time % 60
@@ -492,25 +468,12 @@ def scan_parallel_he3(
         "plan_name": "scan_parallel_he3",
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,
-        "plan_pattern_args": dict(motor1=motor1.name, start_pos1=start_pos1, stop_pos1=stop_pos1, motor2=motor2.name, start_pos2=start_pos2, stop_pos2=stop_pos2, step_size1=step_size1, step_size2=step_size2, num_steps=num_steps),  # noqa: C408
-        # "motors": motor_names,
+        "plan_pattern_args": dict(motor1=motor1.name, start_pos1=start_pos1, stop_pos1=stop_pos1, motor2=motor2.name, start_pos2=start_pos2, stop_pos2=stop_pos2, step_size1=step_size1, step_size2=step_size2, num_steps=num_steps_calc),  # noqa: C408
+        "motors": [motor1.name, motor2.name],
     }
     _md.update(md)
 
-    x_fields = []
-    x_fields.extend(utils.get_hinted_fields(motor1))
-    x_fields.extend(utils.get_hinted_fields(motor2))
-
-    default_dimensions = [(x_fields, "primary")]
-
-    default_hints = {}
-    if len(x_fields) > 0:
-        default_hints.update(dimensions=default_dimensions)
-
-    # now add default_hints and override any hints from the original md (if
-    # exists)
-    _md["hints"] = default_hints
-    _md["hints"].update(md.get("hints", {}) or {})
+    x_fields = _set_scan_motor_metadata(_md, [motor1, motor2])
     
     # @bpp.monitor_during_decorator([detectors[0]])
     @bpp.run_decorator(md=_md)
@@ -520,14 +483,11 @@ def scan_parallel_he3(
             initial_total_time_s=total_time,
         )
 
-        for det in detectors:
-            yield from bps.stage(det)
-        yield from bps.stage(motor1)
-        yield from bps.stage(motor2)
+        yield from _stage_devices_once(detectors + [motor1, motor2])
         
         pos_cache = defaultdict(lambda: None)
-        cycler1 = plan_patterns.inner_product(num=num_steps, args=[motor1, start_pos1, stop_pos1])
-        cycler2 = plan_patterns.inner_product(num=num_steps, args=[motor2, start_pos2, stop_pos2])
+        cycler1 = plan_patterns.inner_product(num=num_steps_calc, args=[motor1, start_pos1, stop_pos1])
+        cycler2 = plan_patterns.inner_product(num=num_steps_calc, args=[motor2, start_pos2, stop_pos2])
 
         def inner_scan_nd():
             # yield from bps.declare_stream(motor, *detectors, name="primary")
@@ -620,7 +580,6 @@ def scan_list_he3(
     original_pos = motor.position
 
     # md_args = list(chain(*((repr(motor), start, stop) for motor, start_angle, stop_angle)))
-    motor_names = motor.name
     md = md or {}
     _md = {
         "title": title,
@@ -644,23 +603,10 @@ def scan_list_he3(
         "plan_pattern": "inner_list_product",
         "plan_pattern_module": plan_patterns.__name__,
         "plan_pattern_args": dict(motor=motor.name, position_list=position_list, num_steps=num_steps),  # noqa: C408
-        "motors": motor_names,
+        "motors": [motor.name],
     }
     _md.update(md)
-
-    x_fields = []
-    x_fields.extend(utils.get_hinted_fields(motor))
-
-    default_dimensions = [(x_fields, "primary")]
-
-    default_hints = {}
-    if len(x_fields) > 0:
-        default_hints.update(dimensions=default_dimensions)
-
-    # now add default_hints and override any hints from the original md (if
-    # exists)
-    _md["hints"] = default_hints
-    _md["hints"].update(md.get("hints", {}) or {})
+    x_fields = _set_scan_motor_metadata(_md, [motor])
     
     # @bpp.monitor_during_decorator([detector[0].counts])
     @bpp.run_decorator(md=_md)
@@ -670,9 +616,7 @@ def scan_list_he3(
             initial_total_time_s=total_time,
         )
 
-        for det in detectors:
-            yield from bps.stage(det)
-        yield from bps.stage(motor)
+        yield from _stage_devices_once(detectors + [motor])
         
         pos_cache = defaultdict(lambda: None)
         cycler = plan_patterns.inner_list_product(args=[motor, position_list])
@@ -730,11 +674,11 @@ def scan2D_he3(
             motor_outer, 
             start_pos_outer:float, 
             stop_pos_outer:float, 
-            step_outer:float,
+            step_size_outer:float,
             motor_inner,
             start_pos_inner:float,
             stop_pos_inner:float,
-            step_inner:float,
+            step_size_inner:float,
             acquire_time:float = None,
             return_to_original_positions:bool = True,
             md:dict = None
@@ -752,22 +696,40 @@ def scan2D_he3(
         for det in detectors:
             yield from bps.mov(det.acquire_time, acquire_time)
     
-    num_steps_outer = int(round((stop_pos_outer-start_pos_outer)/step_outer) + 1)
-    step_outer = (stop_pos_outer-start_pos_outer)/(num_steps_outer-1)
+    positions_outer = _step_size_positions(
+        start_pos_outer,
+        stop_pos_outer,
+        step_size_outer,
+        include_stop=True,
+    )
+    if len(positions_outer) < 2:
+        raise ValueError("step_size_outer must produce at least 2 scan positions")
+    num_steps_outer = int(len(positions_outer))
+    step_size_outer_calc = float(positions_outer[1] - positions_outer[0])
+    stop_pos_outer_calc = float(positions_outer[-1])
 
-    num_steps_inner = int(round((stop_pos_inner-start_pos_inner)/step_inner) + 1)
-    step_inner = (stop_pos_inner-start_pos_inner)/(num_steps_inner-1)
+    positions_inner = _step_size_positions(
+        start_pos_inner,
+        stop_pos_inner,
+        step_size_inner,
+        include_stop=True,
+    )
+    if len(positions_inner) < 2:
+        raise ValueError("step_size_inner must produce at least 2 scan positions")
+    num_steps_inner = int(len(positions_inner))
+    step_size_inner_calc = float(positions_inner[1] - positions_inner[0])
+    stop_pos_inner_calc = float(positions_inner[-1])
 
     total_steps = num_steps_outer*num_steps_inner
     estimate = estimate_plan_runtime(
         "scan2D_he3",
         kwargs={
             "start_pos_outer": start_pos_outer,
-            "stop_pos_outer": stop_pos_outer,
-            "step_outer": step_outer,
+            "stop_pos_outer": stop_pos_outer_calc,
+            "step_size_outer": step_size_outer_calc,
             "start_pos_inner": start_pos_inner,
-            "stop_pos_inner": stop_pos_inner,
-            "step_inner": step_inner,
+            "stop_pos_inner": stop_pos_inner_calc,
+            "step_size_inner": step_size_inner_calc,
             "acquire_time": acquire_time,
         },
         context=_plan_estimation_context(),
@@ -776,8 +738,8 @@ def scan2D_he3(
     total_units = int(estimate.get("estimated_total_units") or total_steps)
 
     print("#===============#")
-    print(f"Starting 2D outer scan of with \n{motor_outer.name} from {start_pos_outer} to {stop_pos_outer} \nin {num_steps_outer} steps of {step_outer} {motor_outer.egu}.")
-    print(f"with the inner scan of \n{motor_inner.name} from {start_pos_inner} to {stop_pos_inner} \nin {num_steps_inner} steps of {step_inner} {motor_inner.egu}.")
+    print(f"Starting 2D outer scan of with \n{motor_outer.name} from {start_pos_outer} to {stop_pos_outer_calc} \nin {num_steps_outer} steps of {step_size_outer_calc} {motor_outer.egu}.")
+    print(f"with the inner scan of \n{motor_inner.name} from {start_pos_inner} to {stop_pos_inner_calc} \nin {num_steps_inner} steps of {step_size_inner_calc} {motor_inner.egu}.")
     print(f"Total of {total_steps} steps with an acquire time of {acquire_time} seconds each.")
     hours = total_time // 3600
     minutes = (total_time % 3600) // 60
@@ -791,7 +753,7 @@ def scan2D_he3(
 
 
     # md_args = list(chain(*((repr(motor), start, stop) for motor, start_angle, stop_angle)))
-    motor_names = tuple(motor.name for motor in motors)
+    motor_names = [motor.name for motor in motors]
     md = md or {}
     _md = {
         "title": title,
@@ -814,26 +776,13 @@ def scan2D_he3(
         "plan_name": "scan2D_he3",
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,
-        "plan_pattern_args": dict(motor_outer=motor_outer.name, start_pos_outer=start_pos_outer, stop_pos_outer=stop_pos_outer, step_outer=step_outer, num_steps_outer=num_steps_outer, 
-                                  motor_inner=motor_inner.name, start_pos_inner=start_pos_inner, stop_pos_inner=stop_pos_inner, step_inner=step_inner, num_steps_inner=num_steps_inner),  
+        "plan_pattern_args": dict(motor_outer=motor_outer.name, start_pos_outer=start_pos_outer, stop_pos_outer=stop_pos_outer_calc, step_size_outer=step_size_outer_calc, num_steps_outer=num_steps_outer,
+                                  motor_inner=motor_inner.name, start_pos_inner=start_pos_inner, stop_pos_inner=stop_pos_inner_calc, step_size_inner=step_size_inner_calc, num_steps_inner=num_steps_inner),
         "motors": motor_names,
     }
     _md.update(md)
 
-    x_fields = []
-    for motor in motors:
-        x_fields.extend(utils.get_hinted_fields(motor))
-
-    default_dimensions = [(x_fields, "primary")]
-
-    default_hints = {}
-    if len(x_fields) > 0:
-        default_hints.update(dimensions=default_dimensions)
-
-    # now add default_hints and override any hints from the original md (if
-    # exists)
-    _md["hints"] = default_hints
-    _md["hints"].update(md.get("hints", {}) or {})
+    x_fields = _set_scan_motor_metadata(_md, motors)
     
     # @bpp.monitor_during_decorator([detector[0].counts])
     @bpp.run_decorator(md=_md)
@@ -843,13 +792,10 @@ def scan2D_he3(
             initial_total_time_s=total_time,
         )
 
-        for det in detectors:
-            yield from bps.stage(det)
-        yield from bps.stage(motor_outer)
-        yield from bps.stage(motor_inner)
+        yield from _stage_devices_once(detectors + [motor_outer, motor_inner])
         
         pos_cache = defaultdict(lambda: None)
-        cycler = plan_patterns.outer_product(args=[motor_outer, start_pos_outer, stop_pos_outer, num_steps_outer, motor_inner, start_pos_inner, stop_pos_inner, num_steps_inner])
+        cycler = plan_patterns.outer_product(args=[motor_outer, start_pos_outer, stop_pos_outer_calc, num_steps_outer, motor_inner, start_pos_inner, stop_pos_inner_calc, num_steps_inner])
 
         def inner_scan_nd():
             # yield from bps.declare_stream(motor, *detector, name="primary")
