@@ -416,6 +416,32 @@ def preprocess_image(image: np.ndarray, median_size: int = 6) -> np.ndarray:
 
 _TOMOPY_REMOVE_OUTLIER_FN = None
 _TOMOPY_REMOVE_OUTLIER_RESOLVED = False
+_NIT_REMOVE_GAMMAS_FN = None
+_NIT_REMOVE_GAMMAS_RESOLVED = False
+NIT_GAMMA_FILTER_SETTINGS = {
+    "size": 5,
+    "dif": "auto",
+    "sigma_multiplier": 8.0,
+    "backend": "auto",
+    "threshold_mode": "shared",
+    "calibration_frames": 8,
+}
+
+
+def _resolve_nit_remove_gammas():
+    global _NIT_REMOVE_GAMMAS_FN, _NIT_REMOVE_GAMMAS_RESOLVED
+    if _NIT_REMOVE_GAMMAS_RESOLVED:
+        return _NIT_REMOVE_GAMMAS_FN
+    _NIT_REMOVE_GAMMAS_RESOLVED = True
+    fn = None
+    try:
+        from neutron_imaging_tools.filtering import remove_gammas
+
+        fn = remove_gammas
+    except Exception:
+        fn = None
+    _NIT_REMOVE_GAMMAS_FN = fn
+    return _NIT_REMOVE_GAMMAS_FN
 
 
 def _resolve_tomopy_remove_outlier():
@@ -439,10 +465,34 @@ def _resolve_tomopy_remove_outlier():
 
 
 def _normalize_preprocess_mode(mode: str) -> str:
-    text = str(mode or "median").strip().lower()
+    text = str(mode or "gamma").strip().lower()
+    if text in {"gamma", "gamma_filter", "nit_gamma", "neutron_imaging_tools"}:
+        return "gamma"
     if text in {"tomopy", "tomopy_outlier", "outlier"}:
         return "tomopy_outlier"
     return "median"
+
+
+def _nit_gamma_filter(image: np.ndarray, size: int = 5) -> Optional[np.ndarray]:
+    fn = _resolve_nit_remove_gammas()
+    if fn is None:
+        return None
+    arr = np.asarray(image, dtype=np.float32)
+    settings = dict(NIT_GAMMA_FILTER_SETTINGS)
+    settings["size"] = int(max(1, size))
+    try:
+        result = fn(
+            arr,
+            ncore=1,
+            axis=0,
+            symmetric=True,
+            preserve_dtype=False,
+            **settings,
+        )
+    except Exception:
+        return None
+    result = np.asarray(result, dtype=np.float64)
+    return result if result.shape == arr.shape else None
 
 
 def _tomopy_dual_outlier_filter(image: np.ndarray, size: int = 7) -> Optional[np.ndarray]:
@@ -512,14 +562,24 @@ def _tomopy_dual_outlier_filter(image: np.ndarray, size: int = 7) -> Optional[np
 def preprocess_image_with_mode(
     image: np.ndarray,
     *,
-    filter_mode: str = "median",
-    filter_size: int = 7,
+    filter_mode: str = "gamma",
+    filter_size: int = 5,
 ) -> np.ndarray:
     arr = np.asarray(image, dtype=np.float64)
     mode = _normalize_preprocess_mode(filter_mode)
     k = int(max(1, filter_size))
 
-    if mode == "tomopy_outlier":
+    if mode == "gamma":
+        outlier = _nit_gamma_filter(arr, size=k)
+        if outlier is not None:
+            arr = outlier
+        else:
+            outlier = _tomopy_dual_outlier_filter(arr, size=k)
+            if outlier is not None:
+                arr = outlier
+            elif scipy_ndimage is not None and k > 1:
+                arr = scipy_ndimage.median_filter(arr, size=k)
+    elif mode == "tomopy_outlier":
         outlier = _tomopy_dual_outlier_filter(arr, size=k)
         if outlier is not None:
             arr = outlier
@@ -952,7 +1012,7 @@ class _TaskRunner(QtCore.QRunnable):
 
 
 def _load_and_filter_worker(
-    path: Path, filter_mode: str = "median", filter_size: int = 7
+    path: Path, filter_mode: str = "gamma", filter_size: int = 5
 ) -> np.ndarray:
     return preprocess_image_with_mode(
         _read_image(path), filter_mode=filter_mode, filter_size=filter_size
@@ -960,7 +1020,7 @@ def _load_and_filter_worker(
 
 
 def _load_and_quick_filter_worker(
-    path: Path, filter_mode: str = "median", filter_size: int = 7
+    path: Path, filter_mode: str = "gamma", filter_size: int = 5
 ) -> np.ndarray:
     _ = filter_mode
     _ = filter_size
@@ -993,8 +1053,8 @@ def _bulk_reprocess_worker(
     path: Path,
     roi_rect: Tuple[float, float, float, float],
     fixed_edge_line: Optional[Tuple[float, float]],
-    filter_mode: str = "median",
-    filter_size: int = 7,
+    filter_mode: str = "gamma",
+    filter_size: int = 5,
 ) -> Tuple[np.ndarray, FitResult]:
     filtered = preprocess_image_with_mode(
         _read_image(path), filter_mode=filter_mode, filter_size=filter_size
@@ -1046,8 +1106,8 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         bulk_workers: Optional[int] = None,
         full_workers: Optional[int] = None,
         full_cache_gb: float = 10.0,
-        preprocess_mode: str = "tomopy_outlier",
-        preprocess_size: int = 7,
+        preprocess_mode: str = "gamma",
+        preprocess_size: int = 5,
         allow_file_open: bool = True,
         parent=None,
     ):
@@ -1066,11 +1126,14 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._last_open_dir = (
             str(frames[0].path.parent) if frames else str(Path.cwd())
         )
+        self._nit_gamma_available = _resolve_nit_remove_gammas() is not None
         self._tomopy_outlier_available = _resolve_tomopy_remove_outlier() is not None
         self._preprocess_mode = _normalize_preprocess_mode(preprocess_mode)
         self._preprocess_size = int(max(1, preprocess_size))
         self._preprocess_token = 0
-        if (self._preprocess_mode == "tomopy_outlier") and (not self._tomopy_outlier_available):
+        if (self._preprocess_mode == "gamma") and (not self._nit_gamma_available):
+            self._preprocess_mode = "tomopy_outlier" if self._tomopy_outlier_available else "median"
+        elif (self._preprocess_mode == "tomopy_outlier") and (not self._tomopy_outlier_available):
             self._preprocess_mode = "median"
 
         self._quick_filtered_cache: OrderedDict[int, np.ndarray] = OrderedDict()
@@ -1190,6 +1253,10 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._log(
             f"Prefilter: mode={self._preprocess_mode}, size={self._preprocess_size}"
         )
+        if not self._nit_gamma_available:
+            self._log(
+                "Neutron Imaging Tools gamma filter unavailable in this environment; Gamma option disabled."
+            )
         if not self._tomopy_outlier_available:
             self._log(
                 "Tomopy outlier filter unavailable in this environment; Tomopy option disabled."
@@ -1240,8 +1307,19 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             "Half-width (motor units) around the current extrema used for local quadratic fit."
         )
         self.preprocess_mode_combo = QtWidgets.QComboBox()
-        self.preprocess_mode_combo.addItem("Median", "median")
+        self.preprocess_mode_combo.addItem("Gamma (Neutron Imaging Tools)", "gamma")
         self.preprocess_mode_combo.addItem("Tomopy Outlier", "tomopy_outlier")
+        self.preprocess_mode_combo.addItem("Median", "median")
+        if not self._nit_gamma_available:
+            try:
+                model = self.preprocess_mode_combo.model()
+                idx_gamma = self.preprocess_mode_combo.findData("gamma")
+                if idx_gamma >= 0 and model is not None and hasattr(model, "item"):
+                    item = model.item(idx_gamma)
+                    if item is not None:
+                        item.setEnabled(False)
+            except Exception:
+                pass
         if not self._tomopy_outlier_available:
             try:
                 model = self.preprocess_mode_combo.model()
@@ -1264,7 +1342,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.preprocess_size_spin.setValue(int(self._preprocess_size))
         self.preprocess_size_spin.setKeyboardTracking(False)
         self.preprocess_size_spin.setToolTip(
-            "Kernel size used by Median or Tomopy outlier filtering."
+            "Kernel size used by Gamma, Tomopy outlier, or Median filtering."
         )
 
         control_row.addWidget(self.btn_prev)
@@ -1526,7 +1604,16 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
     def _set_preprocess_mode(self, *, mode: str, size: int):
         mode_n = _normalize_preprocess_mode(mode)
         size_n = int(max(1, size))
-        if (mode_n == "tomopy_outlier") and (not self._tomopy_outlier_available):
+        if (mode_n == "gamma") and (not self._nit_gamma_available):
+            mode_n = "tomopy_outlier" if self._tomopy_outlier_available else "median"
+            prev_block = self.preprocess_mode_combo.blockSignals(True)
+            try:
+                idx_fallback = self.preprocess_mode_combo.findData(mode_n)
+                if idx_fallback >= 0:
+                    self.preprocess_mode_combo.setCurrentIndex(idx_fallback)
+            finally:
+                self.preprocess_mode_combo.blockSignals(prev_block)
+        elif (mode_n == "tomopy_outlier") and (not self._tomopy_outlier_available):
             mode_n = "median"
             prev_block = self.preprocess_mode_combo.blockSignals(True)
             try:
@@ -3688,14 +3775,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--preprocess-mode",
         type=str,
-        choices=["median", "tomopy_outlier"],
-        default="tomopy_outlier",
+        choices=["gamma", "tomopy_outlier", "median"],
+        default="gamma",
         help="Prefilter mode for full processing.",
     )
     p.add_argument(
         "--preprocess-size",
         type=int,
-        default=7,
+        default=5,
         help="Kernel size for selected prefilter mode.",
     )
     return p

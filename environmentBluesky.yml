@@ -18,5 +18,7 @@ dependencies:
   - qtpy
   - p4p
   - bluesky-widgets
+  - opencv
   - pip:
     - git+https://github.com/sfayfar/adl2pydm.git
+    - git+https://github.com/MIT-NRL/NeutronImagingTools.git

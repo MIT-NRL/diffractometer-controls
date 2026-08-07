@@ -255,8 +255,8 @@ class FocusOnlineBridge(QtCore.QObject):
         bulk_workers: int = 1,
         full_workers: int = 6,
         full_cache_gb: float = 10.0,
-        preprocess_mode: str = "tomopy_outlier",
-        preprocess_size: int = 7,
+        preprocess_mode: str = "gamma",
+        preprocess_size: int = 5,
         file_wait_timeout_s: float = 30.0,
         file_wait_interval_ms: int = 250,
         run_file_name: Optional[str] = None,
@@ -284,7 +284,7 @@ class FocusOnlineBridge(QtCore.QObject):
         self.bulk_workers = int(max(1, bulk_workers))
         self.full_workers = int(max(1, full_workers))
         self.full_cache_gb = float(max(0.25, full_cache_gb))
-        self.preprocess_mode = str(preprocess_mode or "median")
+        self.preprocess_mode = str(preprocess_mode or "gamma")
         self.preprocess_size = int(max(1, preprocess_size))
         self.file_wait_timeout_s = float(max(1.0, file_wait_timeout_s))
         self.file_wait_interval_ms = int(max(50, file_wait_interval_ms))
@@ -1250,8 +1250,8 @@ def attach_to_run_engine(
     bulk_workers: int = 1,
     full_workers: int = 6,
     full_cache_gb: float = 10.0,
-    preprocess_mode: str = "tomopy_outlier",
-    preprocess_size: int = 7,
+    preprocess_mode: str = "gamma",
+    preprocess_size: int = 5,
     file_wait_timeout_s: float = 30.0,
     file_wait_interval_ms: int = 250,
     run_file_name: Optional[str] = None,
@@ -1315,14 +1315,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--preprocess-mode",
         type=str,
-        choices=["median", "tomopy_outlier"],
-        default="tomopy_outlier",
+        choices=["gamma", "tomopy_outlier", "median"],
+        default="gamma",
         help="Prefilter mode for image processing.",
     )
     p.add_argument(
         "--preprocess-size",
         type=int,
-        default=7,
+        default=5,
         help="Kernel size for selected prefilter mode.",
     )
     p.add_argument(
