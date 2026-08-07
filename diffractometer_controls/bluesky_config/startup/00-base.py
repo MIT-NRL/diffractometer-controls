@@ -52,8 +52,17 @@ except ImportError:
     from bluesky.callbacks.tiled_writer import TiledWriter
 from tiled.client import from_uri
 
+def get_tiled_uri(host=None):
+    uri = os.environ.get("TILED_URI") or os.environ.get("MITR_TILED_URI")
+    if uri:
+        return uri
+
+    host = host or os.environ.get("MITR_CONTROL_HOST") or os.environ.get("MITR_CONTROL_IP") or "localhost"
+    port = os.environ.get("MITR_TILED_PORT", "8000")
+    return f"http://{host}:{port}"
+
 key = os.environ.get("TILED_WRITER_API_KEY") or os.environ["TILED_API_KEY"]
-client = from_uri("http://localhost:8000", api_key=key)
+client = from_uri(get_tiled_uri(), api_key=key)
 
 def _catalog_exists(container, name):
     try:

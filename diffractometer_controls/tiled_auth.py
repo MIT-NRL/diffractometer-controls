@@ -1,3 +1,5 @@
+import os
+
 from qtpy import QtWidgets
 
 try:
@@ -9,7 +11,17 @@ except Exception:
     from_context = None
 
 
-TILED_URI = "http://localhost:8000"
+def get_tiled_uri(host=None):
+    uri = os.environ.get("TILED_URI") or os.environ.get("MITR_TILED_URI")
+    if uri:
+        return uri
+
+    host = host or os.environ.get("MITR_CONTROL_HOST") or os.environ.get("MITR_CONTROL_IP") or "localhost"
+    port = os.environ.get("MITR_TILED_PORT", "8000")
+    return f"http://{host}:{port}"
+
+
+TILED_URI = get_tiled_uri()
 TILED_AUTH_PROVIDER = "local"
 
 
@@ -24,10 +36,11 @@ def _context_authenticated(context):
         return False
 
 
-def build_tiled_client_from_cached_tokens(uri=TILED_URI):
+def build_tiled_client_from_cached_tokens(uri=None):
     if Context is None or from_context is None:
         raise RuntimeError("Tiled authentication helpers are unavailable in this environment.")
 
+    uri = uri or get_tiled_uri()
     context, node_path_parts = Context.from_any_uri(uri)
     try:
         context.use_cached_tokens()
@@ -40,10 +53,11 @@ def build_tiled_client_from_cached_tokens(uri=TILED_URI):
     return from_context(context, node_path_parts=node_path_parts, remember_me=True)
 
 
-def login_tiled(username, password, uri=TILED_URI, provider=TILED_AUTH_PROVIDER, *, remember_me=True):
+def login_tiled(username, password, uri=None, provider=TILED_AUTH_PROVIDER, *, remember_me=True):
     if Context is None or password_grant is None or from_context is None:
         raise RuntimeError("Tiled authentication helpers are unavailable in this environment.")
 
+    uri = uri or get_tiled_uri()
     context, node_path_parts = Context.from_any_uri(uri)
     tokens = password_grant(
         context.http_client,
@@ -94,7 +108,8 @@ class TiledLoginDialog(QtWidgets.QDialog):
         )
 
 
-def ensure_tiled_login(parent=None, *, uri=TILED_URI):
+def ensure_tiled_login(parent=None, *, uri=None):
+    uri = uri or get_tiled_uri()
     try:
         return build_tiled_client_from_cached_tokens(uri=uri)
     except Exception:

@@ -2,6 +2,7 @@ import math
 import ast
 import concurrent.futures
 import datetime as dt
+import os
 from collections.abc import Iterable, Mapping
 
 import numpy as np
@@ -35,12 +36,20 @@ except Exception:
     from_uri = None
 
 try:
-    from diffractometer_controls.tiled_auth import build_tiled_client_from_cached_tokens
+    from diffractometer_controls.tiled_auth import build_tiled_client_from_cached_tokens, get_tiled_uri
 except Exception:
     try:
-        from tiled_auth import build_tiled_client_from_cached_tokens
+        from tiled_auth import build_tiled_client_from_cached_tokens, get_tiled_uri
     except Exception:
         build_tiled_client_from_cached_tokens = None
+
+        def get_tiled_uri(host=None):
+            uri = os.environ.get("TILED_URI") or os.environ.get("MITR_TILED_URI")
+            if uri:
+                return uri
+            host = host or os.environ.get("MITR_CONTROL_HOST") or os.environ.get("MITR_CONTROL_IP") or "localhost"
+            port = os.environ.get("MITR_TILED_PORT", "8000")
+            return f"http://{host}:{port}"
 
 try:
     from diffractometer_controls.tiled_auth import ensure_tiled_login
@@ -70,7 +79,7 @@ except Exception:
             return "production"
 
 
-TILED_URI = "http://localhost:8000"
+TILED_URI = get_tiled_uri()
 RUN_UID_STATUS_PV = "4dh4:Bluesky:Run:RunUID"
 DIFFRACTION_EXPERIMENT_TYPE = "diffraction"
 DEFAULT_HISTORY_LIMIT = 100
@@ -1965,7 +1974,7 @@ class DiffractionLivePlot(QtCore.QObject):
         if self._history_catalog is not None and self._history_mode == desired_mode:
             return self._history_catalog, self._history_catalog_name, self._history_mode
 
-        client = _build_tiled_client(TILED_URI)
+        client = _build_tiled_client(get_tiled_uri())
         preferred_names = _preferred_catalog_names_for_mode(desired_mode)
         catalog_name = _resolve_catalog_name(client, preferred_names)
         catalog = client[catalog_name]

@@ -54,6 +54,7 @@ def main():
     handler.setLevel("INFO")
     _configure_qt_highdpi()
     os.environ["QT_STYLE_OVERRIDE"] = "Fusion"
+    _load_simple_env_file("~/.config/diffractometer-controls/control.env")
     _load_simple_env_file("~/.config/bluesky-queueserver/client-zmq.env")
 
     from pydm import config
@@ -233,6 +234,9 @@ def main():
     )
 
     pydm_args = parser.parse_args()
+    if not (os.environ.get("TILED_URI") or os.environ.get("MITR_TILED_URI")):
+        os.environ["MITR_CONTROL_HOST"] = str(pydm_args.ip_addr)
+
     if pydm_args.profile:
         profile = cProfile.Profile()
         profile.enable()

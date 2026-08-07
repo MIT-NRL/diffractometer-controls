@@ -285,6 +285,12 @@ class MITRMainWindow(PyDMMainWindow):
         bluesky_proxy_reset.setToolTip("Reset the Bluesky Run Engine Proxy")
         bluesky_menu.addAction(bluesky_proxy_reset)
 
+        tiled_server_reset = bluesky_menu.addAction("Tiled Server Reset")
+        tiled_server_reset.triggered.connect(lambda: self.reset_process("tiled-server"))
+        self._set_themed_action_icon(tiled_server_reset, 'fa5s.redo')
+        tiled_server_reset.setToolTip("Reset the Tiled server")
+        bluesky_menu.addAction(tiled_server_reset)
+
         # Add Bluesky GUI reset action to the "Bluesky Controls" submenu
         bluesky_gui_reset = bluesky_menu.addAction("GUI Reset")
         bluesky_gui_reset.triggered.connect(lambda: self.control_servers("4dh4gui", "restart"))
