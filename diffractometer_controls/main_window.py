@@ -34,6 +34,12 @@ try:
     from diffractometer_controls.re_plan_editor_widget import RePlanEditorWidget
 except Exception:
     from re_plan_editor_widget import RePlanEditorWidget
+try:
+    from diffractometer_controls.bluesky_environment_update_dialog import (
+        BlueskyEnvironmentUpdateDialog,
+    )
+except Exception:
+    from bluesky_environment_update_dialog import BlueskyEnvironmentUpdateDialog
 from bluesky_widgets.models.run_engine_client import RunEngineClient
 from pydm.widgets import PyDMByteIndicator, PyDMRelatedDisplayButton
 from bluesky_queueserver_api.zmq import REManagerAPI
@@ -116,6 +122,7 @@ class MITRMainWindow(PyDMMainWindow):
         self._focus_doc_dispatcher = None
         self._focus_doc_thread = None
         self._focus_data_addr = None
+        self._bluesky_environment_update_dialog = None
         self._focus_qs_control_addr = "tcp://localhost:60615"
         self._focus_qs_info_addr = "tcp://localhost:60625"
         self._focus_launched_sessions = set()
@@ -287,6 +294,13 @@ class MITRMainWindow(PyDMMainWindow):
         self._set_themed_action_icon(bluesky_vscode, 'fa6.file-code')
         bluesky_vscode.setToolTip("Edit the Bluesky files in VSCode")
         bluesky_menu.addAction(bluesky_vscode)
+
+        bluesky_update = bluesky_menu.addAction("Update Bluesky Python Environment…")
+        bluesky_update.triggered.connect(self.launch_bluesky_environment_update)
+        self._set_themed_action_icon(bluesky_update, 'fa5s.download')
+        bluesky_update.setToolTip(
+            "Preview and apply a backed-up update of the bluesky-server environment"
+        )
 
         # add line to the menu
         bluesky_menu.addSeparator()
@@ -1412,6 +1426,21 @@ class MITRMainWindow(PyDMMainWindow):
                 "Error",
                 f"An unexpected error occurred while restarting {process_name}:\n\n{str(e)}",
             )
+
+    def launch_bluesky_environment_update(self):
+        dialog = self._bluesky_environment_update_dialog
+        if dialog is not None and dialog.isVisible():
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        dialog = BlueskyEnvironmentUpdateDialog(self)
+        dialog.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
+        dialog.destroyed.connect(self._clear_bluesky_environment_update_dialog)
+        self._bluesky_environment_update_dialog = dialog
+        dialog.show()
+
+    def _clear_bluesky_environment_update_dialog(self, *args):
+        self._bluesky_environment_update_dialog = None
 
     def _set_reactor_power_suspender_enabled(self, enabled):
         prefix = f"{self.macros.get('P', '')}Bluesky:SuspenderEnable"

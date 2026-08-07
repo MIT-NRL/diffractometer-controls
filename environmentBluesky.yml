@@ -19,6 +19,5 @@ dependencies:
   - p4p
   - bluesky-widgets
   - opencv
-  - pip:
-    - git+https://github.com/sfayfar/adl2pydm.git
-    - git+https://github.com/MIT-NRL/NeutronImagingTools.git
+  # Pip-only beamline packages are installed with --no-deps by the
+  # environment updater; see requirementsBlueskyPip.txt.

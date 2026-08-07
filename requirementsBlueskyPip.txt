@@ -1,0 +1,3 @@
+# Pip-only beamline packages. Runtime dependencies are managed by Conda.
+git+https://github.com/sfayfar/adl2pydm.git
+git+https://github.com/MIT-NRL/NeutronImagingTools.git
