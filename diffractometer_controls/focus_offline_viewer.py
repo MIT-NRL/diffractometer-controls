@@ -1350,7 +1350,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.curve_sigma_quick = self.sigma_metric_plot.plot(
             pen=None,
             symbol="o",
-            symbolSize=5,
+            symbolSize=7,
             symbolBrush=pg.mkBrush(170, 170, 170),
             symbolPen=pg.mkPen(120, 120, 120, width=1),
             name="quick",
@@ -1358,7 +1358,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.curve_sigma_full = self.sigma_metric_plot.plot(
             pen=None,
             symbol="o",
-            symbolSize=7,
+            symbolSize=9,
             symbolBrush=pg.mkBrush(40, 160, 90),
             symbolPen=pg.mkPen(30, 120, 70, width=1),
             name="full",
@@ -1382,7 +1382,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.curve_psf_quick = self.psf_metric_plot.plot(
             pen=None,
             symbol="o",
-            symbolSize=5,
+            symbolSize=7,
             symbolBrush=pg.mkBrush(175, 175, 175),
             symbolPen=pg.mkPen(120, 120, 120, width=1),
             name="quick",
@@ -1390,7 +1390,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.curve_psf_full = self.psf_metric_plot.plot(
             pen=None,
             symbol="o",
-            symbolSize=7,
+            symbolSize=9,
             symbolBrush=pg.mkBrush(210, 120, 30),
             symbolPen=pg.mkPen(160, 90, 20, width=1),
             name="full",
@@ -1412,7 +1412,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.curve_mtf50_quick = self.mtf_metric_plot.plot(
             pen=None,
             symbol="o",
-            symbolSize=5,
+            symbolSize=7,
             symbolBrush=pg.mkBrush(170, 170, 170),
             symbolPen=pg.mkPen(120, 120, 120, width=1),
             name="quick",
@@ -1420,7 +1420,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self.curve_mtf50_full = self.mtf_metric_plot.plot(
             pen=None,
             symbol="o",
-            symbolSize=7,
+            symbolSize=9,
             symbolBrush=pg.mkBrush(100, 90, 220),
             symbolPen=pg.mkPen(75, 70, 170, width=1),
             name="full",

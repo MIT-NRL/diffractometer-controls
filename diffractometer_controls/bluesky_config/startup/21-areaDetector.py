@@ -267,7 +267,10 @@ class SimAreaDetector(SingleTriggerPause, SimDetector):
 
 # Enable when using the ZWO camera
 if 1:
-    cam1 = MyZWODetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total'])
+    cam1 = MyZWODetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total','focus','x'])
+    cam1.stats1.total.kind = "hinted"
+    cam1.focus.user_readback.kind = "normal"
+    cam1.x.user_readback.kind = "normal"
     register_device("cam1", depth=2)
     cam1.cam.nd_attributes_file.set("/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml") 
     # caput("4dh4:TIFF1:CreateDirectory", -3)

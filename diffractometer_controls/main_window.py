@@ -117,6 +117,7 @@ class MITRMainWindow(PyDMMainWindow):
         self._focus_data_addr = None
         self._focus_qs_control_addr = "tcp://localhost:60615"
         self._focus_qs_info_addr = "tcp://localhost:60625"
+        self._focus_launched_sessions = set()
         from application import MITRApplication
         app = MITRApplication.instance()
         self.re_manager_api = app.re_manager_api
@@ -1022,6 +1023,8 @@ class MITRMainWindow(PyDMMainWindow):
         self._focus_online_file_dir = str((doc or {}).get("file_dir", "")).strip()
         if not session_id:
             return
+        if self._should_ignore_adaptive_focus_launch(session_id, run_uid):
+            return
         self.adaptive_focus_plan_started.emit(session_id, run_uid)
 
     @Slot(str, str)
@@ -1030,6 +1033,19 @@ class MITRMainWindow(PyDMMainWindow):
             session_id=str(session_id).strip(),
             run_uid=str(run_uid).strip(),
         )
+
+    def _should_ignore_adaptive_focus_launch(self, session_id, run_uid):
+        """Debounce duplicate start documents for the same adaptive session."""
+        session_key = str(session_id).strip()
+        if session_key in self._focus_launched_sessions:
+            log.info(
+                "Ignoring duplicate adaptive focus launch session=%s run_uid=%s",
+                session_key,
+                str(run_uid or "").strip(),
+            )
+            return True
+        self._focus_launched_sessions.add(session_key)
+        return False
 
     @staticmethod
     def _load_camera_icon():
