@@ -70,15 +70,21 @@ def main():
     path_list = [dirs.as_posix() for dirs in [Path('./extra_ui').absolute(),Path('./extra_ui/autoconvert').absolute()]]
     EPICS_SUPPORT = Path('/home/mitr_4dh4/EPICS/synApps-6-3/support')
     DISPLAY_PATH = os.getenv("PYDM_DISPLAYS_PATH",None)
-
+    GITHUB = Path('/home/mitr_4dh4/Documents/GitHub')
     if DISPLAY_PATH is None:
         path_list_adl = [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*op/adl*')] + [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*opi/medm*')]
-        print(path_list_adl,len(path_list_adl))
+        print(path_list_adl)
+        path_list_custom = [
+            path.as_posix()
+            for path in GITHUB.glob('**/PyDM*')
+            if path.is_dir()
+        ]
+        print(path_list_custom)
         if len(path_list_adl) != 0:
             path_list.extend(path_list_adl)
-        print(path_list)
+        if len(path_list_custom) != 0:
+            path_list.extend(path_list_custom)
         DISPLAY_PATH = separator.join(path_list)
-        
     os.environ['PYDM_DISPLAYS_PATH'] = DISPLAY_PATH
 
     from pydm.utilities import setup_renderer
@@ -261,7 +267,6 @@ def main():
     os.environ["EPICS_CA_ADDR_LIST"] = os.environ.get("EPICS_CA_ADDR_LIST", "") + " " + pydm_args.ip_addr 
     os.environ["EPICS_PVA_ADDR_LIST"] = os.environ.get("EPICS_PVA_ADDR_LIST", "") + " " + pydm_args.ip_addr 
  
-
     if pydm_args.ip_addr == 'localhost':
         os.environ["EPICS_CA_AUTO_ADDR_LIST"] = "NO"
 

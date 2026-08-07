@@ -2641,7 +2641,7 @@ background-color: rgb(25, 102, 255);</string>
          </property>
          <property name="filenames" stdset="0">
           <stringlist>
-           <string>USB2408_module.ui</string>
+           <string>USB2408_module.adl</string>
           </stringlist>
          </property>
          <property name="titles" stdset="0">
