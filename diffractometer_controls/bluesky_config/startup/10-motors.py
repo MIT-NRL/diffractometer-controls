@@ -103,8 +103,8 @@ class AnalyzerCurvature(PseudoPositioner):
         return self.PseudoPosition(curve=real_pos.counts*0.0005516111545194904)
     
 
-analyzer1_curve = AnalyzerCurvature("4dh4:m11",name="analyzer1_curve")
-analyzer2_curve = AnalyzerCurvature("4dh4:m15",name="analyzer2_curve")
+analyzer1 = AnalyzerCurvature("4dh4:m11",name="analyzer1")
+analyzer2 = AnalyzerCurvature("4dh4:m15",name="analyzer2")
 
 sd.baseline.append(stage1.theta)
 sd.baseline.append(stage2.theta)
@@ -117,10 +117,10 @@ sd.baseline.append(sample_th)
 sd.baseline.append(det_psd_x)
 # sd.baseline.append(analyzer1_th)
 # sd.baseline.append(analyzer1_x)
-sd.baseline.append(analyzer1_curve)
+sd.baseline.append(analyzer1.curve)
 # sd.baseline.append(analyzer2_th)
 # sd.baseline.append(analyzer2_x)
-sd.baseline.append(analyzer2_curve)
+sd.baseline.append(analyzer2.curve)
 
 
 # class AnalyzerCurvature(PseudoPositioner):

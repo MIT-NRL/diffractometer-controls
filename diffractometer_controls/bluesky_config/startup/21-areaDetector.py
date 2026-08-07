@@ -11,16 +11,19 @@ from ophyd.areadetector import (AreaDetector, SingleTrigger, SimDetector,
                                 DetectorBase)
 from ophyd.areadetector.filestore_mixins import FileStoreTIFFIterativeWrite, FileStoreHDF5IterativeWrite
 from ophyd import cam
+from bluesky_queueserver import register_device
 from epics import caput, caget, cainfo
 import uuid
 from datetime import datetime, timedelta
 
 class ZWODetectorCam(CamBase):
     offset = ADCpt(SignalWithRBV, "Offset")
+    abort = ADCpt(EpicsSignal, "Abort")
 
 class QHYDetectorCam(CamBase):
     offset = ADCpt(SignalWithRBV, "Offset")
     readmode = ADCpt(SignalWithRBV, "ReadMode")
+    abort = ADCpt(EpicsSignal, "Abort")
 
 class ZWODetector(DetectorBase):
     cam = ADCpt(ZWODetectorCam, "cam1:")
@@ -44,6 +47,7 @@ class MyTIFFPlugin(FileStoreTIFFIterativeWrite,TIFFPlugin):
         super().__init__(*args,**kwargs)
         self.stage_sigs.update(
             [("file_template","%s%s_%4.4d.tif"),
+             ("auto_save", 1),
                 
             ]
         )
@@ -58,7 +62,145 @@ class MyHDF5Plugin(FileStoreHDF5IterativeWrite,HDF5Plugin):
     layout_filename_valid = Cpt(EpicsSignal, "XMLValid_RBV", kind="omitted", string=True)
     nd_attr_status = Cpt(EpicsSignal, "NDAttributesStatus", kind="omitted", string=True)
 
-class MyZWODetector(SingleTrigger, ZWODetector):
+class SingleTriggerPause(SingleTrigger):
+    """SingleTrigger variant that aborts camera acquisition on stop().
+
+    This is important for immediate RunEngine pause, which calls stop() on
+    devices. If acquisition is in-flight, forcing TIFF autosave off and
+    cam.acquire=0 can prevent finishing/writing the interrupted frame.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._acq_status = None
+        self._acq_in_progress = False
+
+    def trigger(self):
+        # Re-apply staged AutoSave before each acquisition. This makes resume
+        # reliable even if RE state transitions differ across environments.
+        try:
+            if hasattr(self, "tiff1") and hasattr(self.tiff1, "auto_save"):
+                staged_autosave = None
+                try:
+                    staged_autosave = self.tiff1.stage_sigs.get("auto_save")
+                except Exception:
+                    staged_autosave = None
+                if staged_autosave is not None:
+                    self.tiff1.auto_save.put(staged_autosave, wait=False)
+        except Exception:
+            pass
+
+        self._acq_status = super().trigger()
+        self._acq_in_progress = True
+        try:
+            self._acq_status.add_callback(
+                lambda status: setattr(self, "_acq_in_progress", False)
+            )
+        except Exception:
+            pass
+        return self._acq_status
+
+    @staticmethod
+    def _mark_status_aborted(status_obj):
+        if status_obj is None:
+            return
+        try:
+            if getattr(status_obj, "done", False):
+                return
+        except Exception:
+            pass
+
+        err = RuntimeError("Detector acquisition aborted by immediate pause/stop().")
+        for method_name in ("set_exception", "_finished"):
+            try:
+                method = getattr(status_obj, method_name)
+            except Exception:
+                continue
+            try:
+                if method_name == "_finished":
+                    method(success=False)
+                else:
+                    method(err)
+                return
+            except Exception:
+                continue
+
+    def stop(self, *, success=False):
+        was_acquiring = False
+        was_capturing = False
+        interrupted_trigger = False
+
+        try:
+            interrupted_trigger = bool(self._acq_in_progress)
+        except Exception:
+            interrupted_trigger = False
+        if not interrupted_trigger and self._acq_status is not None:
+            try:
+                interrupted_trigger = not bool(self._acq_status.done)
+            except Exception:
+                interrupted_trigger = False
+
+        # Disable autosave first so interrupt does not commit the in-flight file.
+        if interrupted_trigger and hasattr(self, "tiff1") and hasattr(self.tiff1, "auto_save"):
+            try:
+                self.tiff1.auto_save.put(0, wait=True)
+            except Exception:
+                pass
+
+        # Stop file plugin capture first to avoid committing partial frames.
+        if hasattr(self, "tiff1") and hasattr(self.tiff1, "capture"):
+            try:
+                was_capturing = bool(self.tiff1.capture.get())
+            except Exception:
+                was_capturing = False
+            try:
+                if was_capturing:
+                    self.tiff1.capture.put(0, wait=False)
+            except Exception:
+                pass
+
+        # Abort in-flight camera exposure ASAP.
+        if hasattr(self, "cam") and hasattr(self.cam, "acquire"):
+            try:
+                was_acquiring = bool(self.cam.acquire.get())
+            except Exception:
+                was_acquiring = False
+            # Some AD camera drivers expose a dedicated abort command that is
+            # more immediate than toggling Acquire to 0.
+            if hasattr(self.cam, "abort"):
+                try:
+                    self.cam.abort.put(1, wait=False)
+                except Exception:
+                    pass
+            try:
+                if was_acquiring:
+                    self.cam.acquire.put(0, wait=False)
+            except Exception:
+                pass
+
+        if interrupted_trigger or was_acquiring or was_capturing:
+            self._mark_status_aborted(self._acq_status)
+
+        self._acq_status = None
+        self._acq_in_progress = False
+        stop_ret = super().stop(success=success)
+        # Restore to staged AutoSave setting (not a hardcoded global value).
+        # This keeps manual EPICS operation safe when plugin is not staged.
+        try:
+            if hasattr(self, "tiff1") and hasattr(self.tiff1, "auto_save"):
+                staged_autosave = None
+                try:
+                    staged_autosave = self.tiff1.stage_sigs.get("auto_save")
+                except Exception:
+                    staged_autosave = None
+                if staged_autosave is not None:
+                    self.tiff1.auto_save.put(staged_autosave, wait=False)
+        except Exception:
+            pass
+        return stop_ret
+
+
+class MyZWODetector(SingleTriggerPause, ZWODetector):
     cam = Cpt(ZWODetectorCam, "cam1:")
     image = Cpt(ImagePlugin, suffix='image1:')
     stats1 = Cpt(StatsPlugin, 'Stats1:')
@@ -73,8 +215,8 @@ class MyZWODetector(SingleTrigger, ZWODetector):
     tiff1 = Cpt(
         MyTIFFPlugin,
         "TIFF1:",
-        write_path_template="/home/mitr_4dh4/Data/%Y/",
-        read_path_template="/home/mitr_4dh4/Data/%Y/",
+        write_path_template="/home/mitr_4dh4/Data/Imaging/%Y/",
+        read_path_template="/home/mitr_4dh4/Data/Imaging/%Y/",
     )
 
     
@@ -85,7 +227,7 @@ class MyZWODetector(SingleTrigger, ZWODetector):
     #     read_path_template="/home/mitr_4dh4/Data/TestData/HDF/%Y/%m/%d/",        
     # )
 
-class MyQHYDetector(SingleTrigger, QHYDetector):
+class MyQHYDetector(SingleTriggerPause, QHYDetector):
     cam = Cpt(ZWODetectorCam, "cam1:")
     image = Cpt(ImagePlugin, suffix='image1:')
     stats1 = Cpt(StatsPlugin, 'Stats1:')
@@ -95,8 +237,8 @@ class MyQHYDetector(SingleTrigger, QHYDetector):
         "TIFF1:",
         # write_path_template="/home/mitr_4dh4/Data/%Y/PSI_Experiment/",
         # read_path_template="/home/mitr_4dh4/Data/%Y/PSI_Experiment/",
-        write_path_template="/home/mitr_4dh4/Data/%Y/",
-        read_path_template="/home/mitr_4dh4/Data/%Y/",
+        write_path_template="/home/mitr_4dh4/Data/Imaging/%Y/",
+        read_path_template="/home/mitr_4dh4/Data/Imaging/%Y/",
     )
     # hdf1 = Cpt(
     #     MyHDF5Plugin,
@@ -105,7 +247,7 @@ class MyQHYDetector(SingleTrigger, QHYDetector):
     #     read_path_template="/home/mitr_4dh4/Data/TestData/HDF/%Y/%m/%d/",        
     # )
 
-class SimAreaDetector(SingleTrigger, SimDetector):
+class SimAreaDetector(SingleTriggerPause, SimDetector):
     cam = Cpt(cam.SimDetectorCam, "cam1:")
     image = Cpt(ImagePlugin, suffix='image1:')
     stats1 = Cpt(StatsPlugin, 'Stats1:')
@@ -125,10 +267,70 @@ class SimAreaDetector(SingleTrigger, SimDetector):
 
 # Enable when using the ZWO camera
 if 1:
-    cam1 = MyZWODetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total'])
+    cam1 = MyZWODetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total','focus','x'])
+    cam1.stats1.total.kind = "hinted"
+    cam1.focus.user_readback.kind = "normal"
+    cam1.x.user_readback.kind = "normal"
+    register_device("cam1", depth=2)
     cam1.cam.nd_attributes_file.set("/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml") 
     # caput("4dh4:TIFF1:CreateDirectory", -3)
     caput("4dh4:TIFF1:AutoSave", 0) #Ensure the TIFF plugin does not auto save to prevent overwriting
+
+    def _abort_detector_acquire(det):
+        """Best-effort abort used by RunEngine pause hook."""
+        # Call device stop() first so it can handle interrupt cleanup.
+        try:
+            if hasattr(det, "stop"):
+                det.stop(success=False)
+        except Exception:
+            pass
+        try:
+            if hasattr(det, "tiff1") and hasattr(det.tiff1, "capture"):
+                det.tiff1.capture.put(0, wait=False)
+        except Exception:
+            pass
+        try:
+            if hasattr(det, "cam") and hasattr(det.cam, "abort"):
+                det.cam.abort.put(1, wait=False)
+        except Exception:
+            pass
+        try:
+            if hasattr(det, "cam") and hasattr(det.cam, "acquire"):
+                det.cam.acquire.put(0, wait=False)
+        except Exception:
+            pass
+
+    # In Queue Server, immediate pause can occur while RE waits on trigger
+    # status. Hook RE state changes so pausing or suspending always aborts
+    # detector exposure.
+    try:
+        _existing_state_hook = RE.state_hook
+        if getattr(_existing_state_hook, "_detector_abort_wrapper", False):
+            _previous_state_hook = getattr(_existing_state_hook, "_detector_abort_previous", None)
+        else:
+            _previous_state_hook = _existing_state_hook
+
+        def _state_hook_with_detector_abort(*args, _previous_hook=_previous_state_hook, **kwargs):
+            state = kwargs.get("new_state", kwargs.get("state", None))
+            str_args = [a for a in args if isinstance(a, str)]
+            if state is None and str_args:
+                # RunEngine state_hook signature is (new_state, old_state).
+                state = str_args[0]
+            if isinstance(state, str):
+                state = state.strip().lower()
+
+            if state in ("pausing", "paused", "suspending", "suspended"):
+                _abort_detector_acquire(cam1)
+
+            if callable(_previous_hook):
+                return _previous_hook(*args, **kwargs)
+            return None
+
+        _state_hook_with_detector_abort._detector_abort_wrapper = True
+        _state_hook_with_detector_abort._detector_abort_previous = _previous_state_hook
+        RE.state_hook = _state_hook_with_detector_abort
+    except Exception:
+        pass
 
 # Enable when using the QHY camera
 if 0:

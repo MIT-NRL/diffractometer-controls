@@ -1,9 +1,16 @@
 import logging
 import warnings
 import subprocess
+import time
+import math
+import sys
+import os
+import threading
+import importlib.util
 from pathlib import Path
 
 import qtawesome as qta
+from epics import caput
 from pydm import data_plugins
 from pydm.display import load_file, ScreenTarget
 from pydm.main_window import PyDMMainWindow
@@ -11,34 +18,112 @@ from qtpy import QtCore, QtGui
 from qtpy.QtCore import Qt, QTimer, Slot, QSize, QLibraryInfo
 from qtpy.QtWidgets import (QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QScrollArea, QFrame,
-    QApplication, QWidget, QLabel, QAction, QToolButton, QMessageBox)
+    QApplication, QWidget, QLabel, QAction, QToolButton, QMessageBox, QProgressBar, QSizePolicy)
 from bluesky_widgets.qt.run_engine_client import (
     QtReConsoleMonitor,
     QtReEnvironmentControls,
     QtReExecutionControls,
     QtReManagerConnection,
-    QtRePlanEditor,
     QtRePlanHistory,
     QtRePlanQueue,
     QtReQueueControls,
     QtReRunningPlan,
     QtReStatusMonitor,
 )
+try:
+    from diffractometer_controls.re_plan_editor_widget import RePlanEditorWidget
+except Exception:
+    from re_plan_editor_widget import RePlanEditorWidget
 from bluesky_widgets.models.run_engine_client import RunEngineClient
 from pydm.widgets import PyDMByteIndicator, PyDMRelatedDisplayButton
 from bluesky_queueserver_api.zmq import REManagerAPI
+from pydm.widgets.channel import PyDMChannel
+
+def _load_bluesky_mode_helpers():
+    module_path = Path(__file__).resolve().with_name("bluesky_mode.py")
+    spec = importlib.util.spec_from_file_location("mitr_bluesky_mode", module_path)
+    if spec is None or spec.loader is None:
+        raise ModuleNotFoundError(f"Unable to load bluesky mode helper from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_bluesky_mode = _load_bluesky_mode_helpers()
+BLUESKY_MODE_PRODUCTION = _bluesky_mode.BLUESKY_MODE_PRODUCTION
+BLUESKY_MODE_TEST = _bluesky_mode.BLUESKY_MODE_TEST
+get_bluesky_mode = _bluesky_mode.get_bluesky_mode
+get_bluesky_active_mode = _bluesky_mode.get_bluesky_active_mode
+get_bluesky_mode_display = _bluesky_mode.get_bluesky_mode_display
+normalize_bluesky_mode = _bluesky_mode.normalize_bluesky_mode
+save_bluesky_mode_state = _bluesky_mode.save_bluesky_mode_state
+
+log = logging.getLogger(__name__)
+WF_NORM_FILTER_SETTINGS_KEY = "analysis/wf_norm_filter_method"
+WF_NORM_FILTER_OUTLIER = "outlier"
+WF_NORM_FILTER_MEDIAN = "median"
+WF_NORM_FILTER_RUNTIME_PROPERTY = "analysis_wf_norm_filter_method_runtime"
 
 class MITRMainWindow(PyDMMainWindow):
     re_manager_api: REManagerAPI
+    adaptive_focus_plan_started = QtCore.Signal(str, str)
+    _RUN_STATE_INDEX_MAP = {
+        0: "IDLE",
+        1: "RUNNING",
+        2: "PAUSED",
+        3: "DONE",
+        4: "ABORTED",
+        5: "FAILED",
+        6: "CLOSED",
+        7: "STALE",
+        8: "SUSPENDED",
+    }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.macros = kwargs.get('macros', {})
         self.macros_str = ','.join(['='.join(items) for items in self.macros.items()])
+        self._run_state = "IDLE"
+        self._run_start_epoch = 0.0
+        self._run_finish_epoch = 0.0
+        self._run_last_update_epoch = 0.0
+        self._run_done_units = 0
+        self._run_total_units = 0
+        self._run_plan_name = ""
+        self._run_initial_remaining_s = 0.0
+        self._run_suspended = False
+        self._run_progress_frozen_value = 0
+        self._run_is_suspended_display = False
+        self._run_channels = []
+        self._run_display_state = "IDLE"
+        self._run_pulse_period_s = 2.8
+        self._run_state_font_px = 16
+        self._run_finish_font_px = 16
+        self._run_progress_font_px = 15
+        self._run_is_dark_mode = False
+        self._themed_icon_targets = []
+        self._bluesky_mode_actions = {}
+        self._bluesky_mode_label = None
+        self._bluesky_mode_requested = get_bluesky_mode()
+        self._bluesky_mode_active = get_bluesky_active_mode()
+        self._bluesky_mode_channels = []
+        self._focus_online_proc = None
+        self._focus_online_session_id = None
+        self._focus_online_run_uid = None
+        self._focus_online_file_name = ""
+        self._focus_online_file_dir = ""
+        self._focus_doc_dispatcher = None
+        self._focus_doc_thread = None
+        self._focus_data_addr = None
+        self._focus_qs_control_addr = "tcp://localhost:60615"
+        self._focus_qs_info_addr = "tcp://localhost:60625"
+        self._focus_launched_sessions = set()
         from application import MITRApplication
         app = MITRApplication.instance()
         self.re_manager_api = app.re_manager_api
+        self.adaptive_focus_plan_started.connect(self._on_adaptive_focus_plan_started)
         self.customize_ui()
+        self._start_adaptive_focus_listener()
 
 
     def customize_ui(self):
@@ -48,14 +133,16 @@ class MITRMainWindow(PyDMMainWindow):
         self.setWindowIcon(QtGui.QIcon(icon_path))
         re_manager_api = self.re_manager_api
 
-        bar = self.statusBar()
-        heartbeat_indicator = PyDMByteIndicator(init_channel=f"ca://{self.macros['P']}HEARTBEAT")
-        heartbeat_indicator.labels = ['IOC Heartbeat']
-        heartbeat_indicator.labelPosition = 2
+        if self._should_show_heartbeat_indicator():
+            bar = self.statusBar()
+            heartbeat_indicator = PyDMByteIndicator(init_channel=f"ca://{self.macros['P']}HEARTBEAT")
+            heartbeat_indicator.labels = ['IOC Heartbeat']
+            heartbeat_indicator.labelPosition = 2
+            self._setup_bluesky_mode_indicator(bar)
+            bar.addPermanentWidget(heartbeat_indicator)
+            self._setup_bluesky_mode_channels()
 
-        bar.addPermanentWidget(heartbeat_indicator)
-
-        gear_icon = qta.icon('fa6s.gear')
+        gear_icon = self._make_themed_icon('fa6s.gear')
         # controls = PyDMRelatedDisplayButton(filename="/home/mitr_4dh4/EPICS/IOCs/4dh4/4dh4App/op/adl/ioc_motors.adl")
         # controls.macros = self.macros_str
         # controls.setText("Controls")
@@ -68,10 +155,11 @@ class MITRMainWindow(PyDMMainWindow):
         # Create a QToolButton
 
         controlsAll = QToolButton(self)
-        controlsAll.setIcon(qta.icon('fa6s.gear'))  # Set an appropriate icon
+        controlsAll.setIcon(gear_icon)
         controlsAll.setText("All Controls")  # Set the text for the button
         controlsAll.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)  # Text below the icon
         controlsAll.setIconSize(QSize(24, 24))  # Match the icon size of the home button
+        self._register_themed_icon(controlsAll, 'fa6s.gear')
 
 
         # Connect the button to the load_file function
@@ -80,8 +168,17 @@ class MITRMainWindow(PyDMMainWindow):
             macros=self.macros,
         ))
 
+        camera_button = QToolButton(self)
+        camera_button.setIcon(self._load_camera_icon())
+        camera_button.setText("Camera")
+        camera_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        camera_button.setIconSize(QSize(24, 24))
+        camera_button.clicked.connect(self.launch_camera_viewer)
+
         # Add the button to the navbar
         self.ui.navbar.addWidget(controlsAll)
+        self.ui.navbar.addWidget(camera_button)
+        self._setup_run_status_widget(self.ui.navbar)
 
         # controlsAll = CustomRelatedDisplayButtonWrapper(
         #     parent=self,
@@ -94,8 +191,72 @@ class MITRMainWindow(PyDMMainWindow):
         # self.ui.navbar.addWidget(controls)
         # self.ui.navbar.addWidget(controlsAll)
 
-        # Add a "Control System" menu to the menu bar
+        # Append application theme selection to the existing View menu.
+        view_menu = self._get_or_create_menu("View")
         control_system_menu = self.menuBar().addMenu("Control System")
+        analysis_menu = self.menuBar().addMenu("Analysis")
+        self.menuBar().insertMenu(control_system_menu.menuAction(), analysis_menu)
+
+        if view_menu.actions():
+            view_menu.addSeparator()
+        theme_menu = view_menu.addMenu("Theme")
+        theme_action_group = QtGui.QActionGroup(theme_menu)
+        theme_action_group.setExclusive(True)
+        self._theme_action_group = theme_action_group
+        self._theme_actions = {}
+        for label, mode, tip in (
+            ("Light Mode", "light", "Force the application to use the light theme."),
+            ("Dark Mode", "dark", "Force the application to use the dark theme."),
+            ("Auto Toggle", "system", "Follow the desktop theme preference."),
+        ):
+            action = theme_menu.addAction(label)
+            action.setCheckable(True)
+            action.setToolTip(tip)
+            action.setData(mode)
+            theme_action_group.addAction(action)
+            action.triggered.connect(lambda checked=False, m=mode: self._set_theme_mode(m))
+            self._theme_actions[mode] = action
+        self._sync_theme_actions()
+
+        normalization_menu = analysis_menu.addMenu("Normalization filtering")
+        normalization_action_group = QtGui.QActionGroup(normalization_menu)
+        normalization_action_group.setExclusive(True)
+        norm_outlier_action = normalization_menu.addAction("Remove outliers (tomopy)")
+        norm_outlier_action.setCheckable(True)
+        normalization_action_group.addAction(norm_outlier_action)
+        norm_median_action = normalization_menu.addAction("Median filter")
+        norm_median_action.setCheckable(True)
+        normalization_action_group.addAction(norm_median_action)
+
+        tomopy_available = self._is_tomopy_available()
+        if not tomopy_available:
+            norm_outlier_action.setText("Remove outliers (tomopy, not installed)")
+            norm_outlier_action.setEnabled(False)
+            norm_outlier_action.setToolTip("tomopy is not available in this environment.")
+            normalization_menu.setToolTipsVisible(True)
+            normalization_menu.setToolTip("tomopy not installed: remove-outliers disabled, median filter is used.")
+
+        settings = QtCore.QSettings()
+        default_method = WF_NORM_FILTER_OUTLIER if tomopy_available else WF_NORM_FILTER_MEDIAN
+        current_method = str(settings.value(WF_NORM_FILTER_SETTINGS_KEY, default_method)).strip().lower()
+        if current_method not in {WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}:
+            current_method = default_method
+        if current_method == WF_NORM_FILTER_OUTLIER and not tomopy_available:
+            current_method = WF_NORM_FILTER_MEDIAN
+            settings.setValue(WF_NORM_FILTER_SETTINGS_KEY, current_method)
+        app = QApplication.instance()
+        if app is not None:
+            app.setProperty(WF_NORM_FILTER_RUNTIME_PROPERTY, current_method)
+        norm_outlier_action.setChecked(current_method == WF_NORM_FILTER_OUTLIER)
+        norm_median_action.setChecked(current_method == WF_NORM_FILTER_MEDIAN)
+        norm_outlier_action.triggered.connect(lambda checked=False: self._set_norm_filter_setting(WF_NORM_FILTER_OUTLIER))
+        norm_median_action.triggered.connect(lambda checked=False: self._set_norm_filter_setting(WF_NORM_FILTER_MEDIAN))
+
+        analysis_menu.addSeparator()
+        launch_focus_program_action = analysis_menu.addAction("Launch focus program")
+        launch_focus_program_action.setIcon(self._load_focus_program_icon())
+        launch_focus_program_action.setToolTip("Open offline focus analysis in a separate process.")
+        launch_focus_program_action.triggered.connect(self.launch_focus_program)
 
         # Add a "Bluesky Controls" submenu
         bluesky_menu = control_system_menu.addMenu("Bluesky Controls")
@@ -103,7 +264,7 @@ class MITRMainWindow(PyDMMainWindow):
         # Add vscode editor of the bluesky directory
         bluesky_vscode = bluesky_menu.addAction("Edit Bluesky Files")
         bluesky_vscode.triggered.connect(lambda: subprocess.Popen(["code", "-n", "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls"]))
-        bluesky_vscode.setIcon(qta.icon('fa6.file-code'))
+        self._set_themed_action_icon(bluesky_vscode, 'fa6.file-code')
         bluesky_vscode.setToolTip("Edit the Bluesky files in VSCode")
         bluesky_menu.addAction(bluesky_vscode)
 
@@ -113,44 +274,66 @@ class MITRMainWindow(PyDMMainWindow):
         # Add actions to the "Bluesky Controls" submenu
         bluesky_RE_reset = bluesky_menu.addAction("RE Manager Reset")
         bluesky_RE_reset.triggered.connect(lambda: self.reset_process("queue-server"))
-        bluesky_RE_reset.setIcon(qta.icon('fa5s.redo'))
+        self._set_themed_action_icon(bluesky_RE_reset, 'fa5s.redo')
         bluesky_RE_reset.setToolTip("Reset the Bluesky Run Engine Manager")
         bluesky_menu.addAction(bluesky_RE_reset)
 
         # Add actions to the "Bluesky Controls" submenu
         bluesky_proxy_reset = bluesky_menu.addAction("RE Proxy Reset")
         bluesky_proxy_reset.triggered.connect(lambda: self.reset_process("bluesky-proxy"))
-        bluesky_proxy_reset.setIcon(qta.icon('fa5s.redo'))
+        self._set_themed_action_icon(bluesky_proxy_reset, 'fa5s.redo')
         bluesky_proxy_reset.setToolTip("Reset the Bluesky Run Engine Proxy")
         bluesky_menu.addAction(bluesky_proxy_reset)
+
+        tiled_server_reset = bluesky_menu.addAction("Tiled Server Reset")
+        tiled_server_reset.triggered.connect(lambda: self.reset_process("tiled-server"))
+        self._set_themed_action_icon(tiled_server_reset, 'fa5s.redo')
+        tiled_server_reset.setToolTip("Reset the Tiled server")
+        bluesky_menu.addAction(tiled_server_reset)
 
         # Add Bluesky GUI reset action to the "Bluesky Controls" submenu
         bluesky_gui_reset = bluesky_menu.addAction("GUI Reset")
         bluesky_gui_reset.triggered.connect(lambda: self.control_servers("4dh4gui", "restart"))
-        bluesky_gui_reset.setIcon(qta.icon('fa5s.redo'))
+        self._set_themed_action_icon(bluesky_gui_reset, 'fa5s.redo')
         bluesky_gui_reset.setToolTip("Reset the Bluesky GUI")
         bluesky_menu.addAction(bluesky_gui_reset)
 
         # Add separator before suspender actions
         bluesky_menu.addSeparator()
 
+        bluesky_mode_menu = bluesky_menu.addMenu("Mode")
+        bluesky_mode_action_group = QtGui.QActionGroup(bluesky_mode_menu)
+        bluesky_mode_action_group.setExclusive(True)
+        self._bluesky_mode_action_group = bluesky_mode_action_group
+        for label, mode, tip in (
+            ("Production Mode", BLUESKY_MODE_PRODUCTION, "Use the production scan-history counter and production catalog after the next RE environment restart."),
+            ("Test Mode", BLUESKY_MODE_TEST, "Use the separate test scan-history counter and save to testdb after the next RE environment restart."),
+        ):
+            action = bluesky_mode_menu.addAction(label)
+            action.setCheckable(True)
+            action.setToolTip(tip)
+            bluesky_mode_action_group.addAction(action)
+            action.triggered.connect(lambda checked=False, m=mode: self._set_bluesky_mode(m))
+            self._bluesky_mode_actions[mode] = action
+        self._sync_bluesky_mode_actions()
+
         # Add a "Suspender" submenu under "Bluesky Controls"
         suspender_menu = bluesky_menu.addMenu("Suspender")
 
         # Remove Reactor Power Suspender action
         remove_suspender_action = suspender_menu.addAction("Remove Reactor Power Suspender")
-        remove_suspender_action.setIcon(qta.icon('fa5s.trash'))
+        self._set_themed_action_icon(remove_suspender_action, 'fa5s.trash')
         remove_suspender_action.setToolTip("Remove the reactor power suspender from the Run Engine")
         remove_suspender_action.triggered.connect(
-            lambda: re_manager_api.script_upload("RE.remove_suspender(reactor_power_suspender)")
+            lambda: self._set_reactor_power_suspender_enabled(False)
         )
 
         # Install Reactor Power Suspender action
         install_suspender_action = suspender_menu.addAction("Install Reactor Power Suspender")
-        install_suspender_action.setIcon(qta.icon('fa5s.plus'))
+        self._set_themed_action_icon(install_suspender_action, 'fa5s.plus')
         install_suspender_action.setToolTip("Install the reactor power suspender to the Run Engine")
         install_suspender_action.triggered.connect(
-            lambda: re_manager_api.script_upload("RE.install_suspender(reactor_power_suspender)")
+            lambda: self._set_reactor_power_suspender_enabled(True)
         )
         
 
@@ -160,13 +343,13 @@ class MITRMainWindow(PyDMMainWindow):
         # Add vscode editor of the EPICS directory
         epics_vscode = epics_menu.addAction("Edit EPICS IOC Files")
         epics_vscode.triggered.connect(lambda: subprocess.Popen(["code", "-n", "/home/mitr_4dh4/EPICS/IOCs/4dh4"]))
-        epics_vscode.setIcon(qta.icon('fa6.file-code'))
+        self._set_themed_action_icon(epics_vscode, 'fa6.file-code')
         epics_vscode.setToolTip("Edit the EPICS IOC files in VSCode")
         epics_menu.addAction(epics_vscode)
 
         epics_top_vscode = epics_menu.addAction("Edit EPICS Files")
         epics_top_vscode.triggered.connect(lambda: subprocess.Popen(["code", "-n", "/home/mitr_4dh4/EPICS"]))
-        epics_top_vscode.setIcon(qta.icon('fa6.file-code'))
+        self._set_themed_action_icon(epics_top_vscode, 'fa6.file-code')
         epics_top_vscode.setToolTip("Edit the EPICS files in VSCode")
         epics_menu.addAction(epics_top_vscode)
 
@@ -176,21 +359,21 @@ class MITRMainWindow(PyDMMainWindow):
         # Add start action to the "EPICS Controls" submenu
         epics_ioc_start = epics_menu.addAction("IOC Start")
         epics_ioc_start.triggered.connect(lambda: self.control_servers("4dh4ioc", "start"))
-        epics_ioc_start.setIcon(qta.icon('fa5s.play'))
+        self._set_themed_action_icon(epics_ioc_start, 'fa5s.play')
         epics_ioc_start.setToolTip("Start the EPICS IOC")
         epics_menu.addAction(epics_ioc_start)
 
         # Add actions to the "EPICS Controls" submenu
         epics_ioc_reset = epics_menu.addAction("IOC Reset")
         epics_ioc_reset.triggered.connect(lambda: self.control_servers("4dh4ioc", "restart"))
-        epics_ioc_reset.setIcon(qta.icon('fa5s.redo'))
+        self._set_themed_action_icon(epics_ioc_reset, 'fa5s.redo')
         epics_ioc_reset.setToolTip("Reset the EPICS IOC")
         epics_menu.addAction(epics_ioc_reset)
 
         # Add stop action to the "EPICS Controls" submenu
         epics_ioc_stop = epics_menu.addAction("IOC Stop")
         epics_ioc_stop.triggered.connect(lambda: self.control_servers("4dh4ioc", "stop"))
-        epics_ioc_stop.setIcon(qta.icon('fa5s.stop'))
+        self._set_themed_action_icon(epics_ioc_stop, 'fa5s.stop')
         epics_ioc_stop.setToolTip("Stop the EPICS IOC")
         epics_menu.addAction(epics_ioc_stop)
 
@@ -201,7 +384,895 @@ class MITRMainWindow(PyDMMainWindow):
             macros=self.macros,
             # open_in_new_window=True
         ))
+        self._register_themed_icon(controls_action, 'fa6s.gear')
         control_system_menu.addAction(controls_action)
+
+    def _should_show_heartbeat_indicator(self):
+        app = QApplication.instance()
+        startup_ui_file = getattr(app, "_startup_ui_file", "main_screen.ui")
+        return Path(str(startup_ui_file)).name == "main_screen.ui"
+
+    def _is_tomopy_available(self):
+        try:
+            import tomopy  # noqa: F401
+            return True
+        except Exception:
+            return False
+
+    def _set_norm_filter_setting(self, method):
+        m = str(method).strip().lower() if method is not None else WF_NORM_FILTER_OUTLIER
+        if m not in {WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}:
+            m = WF_NORM_FILTER_OUTLIER
+        forced_median = False
+        if m == WF_NORM_FILTER_OUTLIER and not self._is_tomopy_available():
+            m = WF_NORM_FILTER_MEDIAN
+            forced_median = True
+        settings = QtCore.QSettings()
+        settings.setValue(WF_NORM_FILTER_SETTINGS_KEY, m)
+        settings.sync()
+        app = QApplication.instance()
+        if app is not None:
+            app.setProperty(WF_NORM_FILTER_RUNTIME_PROPERTY, m)
+        try:
+            if forced_median:
+                self.statusBar().showMessage("tomopy not installed; normalization filter set to: median", 3000)
+            else:
+                self.statusBar().showMessage(f"Normalization filter set to: {m}", 2500)
+        except Exception:
+            pass
+
+    def _setup_bluesky_mode_indicator(self, container):
+        label = QLabel(container)
+        label.setAlignment(Qt.AlignCenter)
+        label.setMinimumWidth(112)
+        label.setMinimumHeight(16)
+        label.setMaximumHeight(16)
+        label.setMargin(0)
+        label.setToolTip("Actual Bluesky mode in the worker. Changing the requested mode still requires an RE environment restart.")
+        self._bluesky_mode_label = label
+        add_permanent = getattr(container, "addPermanentWidget", None)
+        if callable(add_permanent):
+            add_permanent(label)
+        else:
+            container.addWidget(label)
+        self._refresh_bluesky_mode_indicator()
+
+    def _setup_bluesky_mode_channels(self):
+        if getattr(self, "_bluesky_mode_channels", None):
+            return
+        prefix = self.macros.get("P", "")
+        channels = [
+            PyDMChannel(address=f"ca://{prefix}Bluesky:Mode", value_slot=self._on_bluesky_mode_requested_changed),
+            PyDMChannel(address=f"ca://{prefix}Bluesky:ActiveMode", value_slot=self._on_bluesky_mode_active_changed),
+        ]
+        self._bluesky_mode_channels = channels
+        for ch in channels:
+            ch.connect()
+
+    def _normalize_bluesky_mode_value(self, value, fallback):
+        if value is None:
+            return fallback
+        try:
+            return BLUESKY_MODE_TEST if int(value) == 1 else BLUESKY_MODE_PRODUCTION
+        except Exception:
+            return normalize_bluesky_mode(value)
+
+    def _on_bluesky_mode_requested_changed(self, value):
+        self._bluesky_mode_requested = self._normalize_bluesky_mode_value(value, self._bluesky_mode_requested)
+        self._sync_bluesky_mode_actions()
+        self._refresh_bluesky_mode_indicator()
+
+    def _on_bluesky_mode_active_changed(self, value):
+        self._bluesky_mode_active = self._normalize_bluesky_mode_value(value, self._bluesky_mode_active)
+        self._refresh_bluesky_mode_indicator()
+
+    def _bluesky_mode_style(self, mode):
+        dark_mode = self._is_dark_theme_active_from_app(QApplication.instance())
+        if mode == BLUESKY_MODE_TEST:
+            bg = "#7a4b00" if dark_mode else "#ffe29a"
+            border = "#c98900" if dark_mode else "#b97700"
+            fg = "#fff4d6" if dark_mode else "#4b2b00"
+        else:
+            bg = "#1f5f46" if dark_mode else "#d8f3e4"
+            border = "#2f8f6b" if dark_mode else "#2d6a4f"
+            fg = "#ebfff5" if dark_mode else "#163828"
+        return (
+            "QLabel {"
+            f"background-color: {bg};"
+            f"border: 1px solid {border};"
+            "border-radius: 7px;"
+            f"color: {fg};"
+            "font-weight: 700;"
+            "font-size: 11px;"
+            "padding: 0 6px;"
+            "}"
+        )
+
+    def _refresh_bluesky_mode_indicator(self):
+        label = getattr(self, "_bluesky_mode_label", None)
+        if label is None:
+            return
+        requested_mode = getattr(self, "_bluesky_mode_requested", get_bluesky_mode())
+        active_mode = getattr(self, "_bluesky_mode_active", get_bluesky_active_mode())
+        active_display = get_bluesky_mode_display(active_mode)
+        requested_display = get_bluesky_mode_display(requested_mode)
+        text = f"Bluesky: {active_display}"
+        if requested_mode != active_mode:
+            text = f"{text} (req {requested_display})"
+        label.setText(text)
+        label.setStyleSheet(self._bluesky_mode_style(active_mode))
+        label.setToolTip(
+            f"Actual worker mode: {active_display}. "
+            f"Requested mode: {requested_display}. "
+            "If these differ, restart the RE environment to apply the requested mode."
+        )
+
+    def _set_bluesky_mode(self, mode):
+        mode = str(mode).strip().lower()
+        if mode not in {BLUESKY_MODE_PRODUCTION, BLUESKY_MODE_TEST}:
+            mode = BLUESKY_MODE_PRODUCTION
+        previous_mode = getattr(self, "_bluesky_mode_requested", get_bluesky_mode())
+        save_bluesky_mode_state(mode)
+        self._bluesky_mode_requested = mode
+        self._sync_bluesky_mode_actions()
+        self._refresh_bluesky_mode_indicator()
+        if mode == previous_mode:
+            message = (
+                f"Requested Bluesky mode remains {get_bluesky_mode_display(mode)}. "
+                "Restart the RE environment to reapply it."
+            )
+        else:
+            message = (
+                f"Requested Bluesky mode set to {get_bluesky_mode_display(mode)}. "
+                "Restart the RE environment to apply it."
+            )
+        try:
+            self.statusBar().showMessage(message, 5000)
+        except Exception:
+            pass
+
+    def _sync_bluesky_mode_actions(self):
+        current_mode = getattr(self, "_bluesky_mode_requested", get_bluesky_mode())
+        for mode, action in getattr(self, "_bluesky_mode_actions", {}).items():
+            was_blocked = action.blockSignals(True)
+            action.setChecked(mode == current_mode)
+            action.blockSignals(was_blocked)
+
+    def _get_or_create_menu(self, title):
+        wanted = str(title).replace("&", "").strip().lower()
+        for action in self.menuBar().actions():
+            menu = action.menu()
+            if menu is None:
+                continue
+            current = menu.title().replace("&", "").strip().lower()
+            if current == wanted:
+                return menu
+        return self.menuBar().addMenu(title)
+
+    def _make_themed_icon(self, icon_name):
+        palette = self.palette()
+        color = palette.color(QtGui.QPalette.ButtonText).name()
+        disabled = palette.color(QtGui.QPalette.Disabled, QtGui.QPalette.ButtonText).name()
+        return qta.icon(icon_name, color=color, color_disabled=disabled)
+
+    def _register_themed_icon(self, target, icon_name):
+        self._themed_icon_targets.append((target, icon_name))
+        target.setIcon(self._make_themed_icon(icon_name))
+
+    def _set_themed_action_icon(self, action, icon_name):
+        self._register_themed_icon(action, icon_name)
+
+    def _refresh_themed_icons(self):
+        kept = []
+        for target, icon_name in self._themed_icon_targets:
+            try:
+                target.setIcon(self._make_themed_icon(icon_name))
+                kept.append((target, icon_name))
+            except RuntimeError:
+                continue
+        self._themed_icon_targets = kept
+
+    @staticmethod
+    def _theme_mode_from_app(app):
+        from application import get_app_settings
+
+        settings = get_app_settings()
+        getter = getattr(app, "theme_mode", None)
+        if callable(getter):
+            try:
+                return getter()
+            except Exception:
+                pass
+        return str(settings.value("appearance/theme_mode", "system")).strip().lower()
+
+    @staticmethod
+    def _is_dark_theme_active_from_app(app):
+        getter = getattr(app, "is_dark_theme_active", None)
+        if callable(getter):
+            try:
+                return bool(getter())
+            except Exception:
+                pass
+        if app is None:
+            return False
+        try:
+            palette = app.palette()
+            color = palette.color(QtGui.QPalette.Window)
+            return color.lightness() < 128
+        except Exception:
+            return False
+
+    def _set_theme_mode(self, mode):
+        from application import THEME_MODE_SETTINGS_KEY, MITRApplication, get_app_settings
+
+        mode = str(mode).strip().lower()
+        if mode not in {"light", "dark", "system"}:
+            mode = "system"
+        settings = get_app_settings()
+        settings.setValue(THEME_MODE_SETTINGS_KEY, mode)
+        settings.sync()
+        app = MITRApplication.instance()
+        if app is not None:
+            app.apply_theme_preference(mode)
+        self._sync_theme_actions()
+        try:
+            self.statusBar().showMessage(f"Theme set to: {mode}", 2000)
+        except Exception:
+            pass
+
+    def _sync_theme_actions(self):
+        app = QApplication.instance()
+        theme_mode = self._theme_mode_from_app(app)
+        for mode, action in getattr(self, "_theme_actions", {}).items():
+            was_blocked = action.blockSignals(True)
+            action.setChecked(mode == theme_mode)
+            action.blockSignals(was_blocked)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() in (
+            QtCore.QEvent.PaletteChange,
+            QtCore.QEvent.ApplicationPaletteChange,
+        ):
+            self._refresh_themed_icons()
+            self._refresh_bluesky_mode_indicator()
+
+    def _setup_run_status_widget(self, toolbar):
+        prefix = f"{self.macros.get('P', '')}Bluesky:Run:"
+        panel = QWidget(self)
+        self._run_status_panel = panel
+        layout = QHBoxLayout(panel)
+        layout.setContentsMargins(8, 2, 8, 2)
+        layout.setSpacing(8)
+
+        self._run_state_label = QLabel("Run: IDLE", panel)
+        self._run_state_label.setMinimumWidth(0)
+        self._run_state_label.setAlignment(Qt.AlignCenter)
+        self._run_state_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self._run_state_label.setStyleSheet(self._run_state_style("IDLE"))
+
+        self._run_finish_label = QLabel("Finish: --", panel)
+        self._run_finish_label.setMinimumWidth(300)
+        self._run_finish_label.setMaximumWidth(300)
+        self._run_finish_label.setAlignment(Qt.AlignCenter)
+        self._run_finish_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+
+        self._run_progress = QProgressBar(panel)
+        self._run_progress.setMinimumWidth(0)
+        self._run_progress.setMaximumWidth(16777215)
+        self._run_progress.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self._run_progress.setRange(0, 1000)
+        self._run_progress.setValue(0)
+        self._run_progress.setTextVisible(True)
+        self._run_progress.setFormat("No active run")
+        self._run_progress.setStyleSheet(self._run_progress_style())
+
+        layout.addWidget(self._run_state_label, 1)
+        layout.addWidget(self._run_progress, 1)
+        layout.addWidget(self._run_finish_label, 0)
+        toolbar.addWidget(panel)
+
+        self._run_channels = [
+            PyDMChannel(address=f"ca://{prefix}State", value_slot=self._on_run_state_changed),
+            PyDMChannel(address=f"ca://{prefix}Suspended", value_slot=self._on_run_suspended_changed),
+            PyDMChannel(address=f"ca://{prefix}StartEpoch", value_slot=self._on_run_start_epoch_changed),
+            PyDMChannel(address=f"ca://{prefix}FinishEpoch", value_slot=self._on_run_finish_epoch_changed),
+            PyDMChannel(address=f"ca://{prefix}LastUpdateEpoch", value_slot=self._on_run_last_update_epoch_changed),
+            PyDMChannel(address=f"ca://{prefix}DoneUnits", value_slot=self._on_run_done_units_changed),
+            PyDMChannel(address=f"ca://{prefix}TotalUnits", value_slot=self._on_run_total_units_changed),
+            PyDMChannel(address=f"ca://{prefix}PlanName", value_slot=self._on_run_plan_name_changed),
+        ]
+        for ch in self._run_channels:
+            ch.connect()
+
+        self._run_eta_timer = QTimer(self)
+        self._run_eta_timer.timeout.connect(self._update_run_status_widget)
+        self._run_eta_timer.start(1000)
+
+        self._run_anim_timer = QTimer(self)
+        self._run_anim_timer.timeout.connect(self._tick_run_state_animation)
+        self._run_anim_timer.start(50)
+        QtCore.QTimer.singleShot(0, self._apply_run_widget_scale)
+
+    def _is_dark_mode(self):
+        app = QApplication.instance()
+        palette = app.palette() if app is not None else self.palette()
+        window_color = palette.color(QtGui.QPalette.Window)
+        return window_color.lightness() < 128
+
+    def _run_progress_style(self):
+        if self._run_is_dark_mode:
+            return (
+                "QProgressBar { border: 1px solid #4b5563; border-radius: 5px; "
+                "background-color: #111827; color: #f9fafb; text-align: center; "
+                f"font-size: {self._run_progress_font_px}px; font-weight: 700; }} "
+                "QProgressBar::chunk { background-color: #3b82f6; }"
+            )
+        return (
+            "QProgressBar { border: 1px solid #9ca3af; border-radius: 5px; "
+            "background-color: #f3f4f6; color: #111827; text-align: center; "
+            f"font-size: {self._run_progress_font_px}px; font-weight: 700; }} "
+            "QProgressBar::chunk { background-color: #60a5fa; }"
+        )
+
+    def _apply_run_widget_scale(self):
+        toolbar = getattr(getattr(self, "ui", None), "navbar", None)
+        if toolbar is None or not hasattr(self, "_run_state_label"):
+            return
+        self._run_is_dark_mode = self._is_dark_mode()
+        h = max(18, int(toolbar.height()))
+        self._run_state_font_px = max(10, min(int(h * 0.33), 20))
+        self._run_finish_font_px = max(10, min(int(h * 0.33), 20))
+        self._run_progress_font_px = max(10, min(int(h * 0.30), 18))
+
+        finish_color = "#e5e7eb" if self._run_is_dark_mode else "#1f2937"
+        self._run_finish_label.setStyleSheet(
+            f"font-size: {self._run_finish_font_px}px; font-weight: 700; color: {finish_color};"
+        )
+        self._run_progress.setStyleSheet(self._run_progress_style())
+        self._run_state_label.setStyleSheet(self._run_state_style(self._run_display_state))
+
+    @staticmethod
+    def _blend_hex_rgb(color_a, color_b, t):
+        t = max(0.0, min(1.0, float(t)))
+        ra, ga, ba = color_a
+        rb, gb, bb = color_b
+        r = int(round(ra + (rb - ra) * t))
+        g = int(round(ga + (gb - ga) * t))
+        b = int(round(ba + (bb - ba) * t))
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    def _run_state_style(self, state, pulse_t=0.5):
+        if state == "RUNNING":
+            # Pulse the red badge brightness with a sine profile.
+            bg = self._blend_hex_rgb((252, 165, 165), (254, 226, 226), pulse_t)
+            border = self._blend_hex_rgb((248, 113, 113), (254, 202, 202), pulse_t)
+            return (
+                f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #7f1d1d; "
+                f"background-color: {bg}; border: 1px solid {border}; "
+                "border-radius: 6px; padding: 3px 8px;"
+            )
+
+        palette = {
+            "PAUSED": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #92400e; background-color: #fef3c7; border: 1px solid #fcd34d; border-radius: 6px; padding: 3px 8px;",
+            "SUSPENDED": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #7c2d12; background-color: #ffedd5; border: 1px solid #fdba74; border-radius: 6px; padding: 3px 8px;",
+            "DONE": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #065f46; background-color: #d1fae5; border: 1px solid #86efac; border-radius: 6px; padding: 3px 8px;",
+            "ABORTED": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #991b1b; background-color: #fee2e2; border: 1px solid #fca5a5; border-radius: 6px; padding: 3px 8px;",
+            "FAILED": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #991b1b; background-color: #fee2e2; border: 1px solid #fca5a5; border-radius: 6px; padding: 3px 8px;",
+            "CLOSED": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #6b7280; background-color: #f3f4f6; border: 1px solid #d1d5db; border-radius: 6px; padding: 3px 8px;",
+            "STALE": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #92400e; background-color: #fef3c7; border: 1px solid #fcd34d; border-radius: 6px; padding: 3px 8px;",
+            "IDLE": f"font-size: {self._run_state_font_px}px; font-weight: 800; color: #334155; background-color: #e2e8f0; border: 1px solid #cbd5e1; border-radius: 6px; padding: 3px 8px;",
+        }
+        return palette.get(state, palette["IDLE"])
+
+    def _tick_run_state_animation(self):
+        if self._run_display_state != "RUNNING":
+            return
+        now = time.monotonic()
+        phase = (2.0 * math.pi * now) / max(self._run_pulse_period_s, 0.2)
+        pulse_t = 0.5 + 0.5 * math.sin(phase)
+        self._run_state_label.setStyleSheet(self._run_state_style("RUNNING", pulse_t=pulse_t))
+
+    @staticmethod
+    def _as_float(value, default=0.0):
+        try:
+            return float(value)
+        except Exception:
+            return float(default)
+
+    @staticmethod
+    def _as_int(value, default=0):
+        try:
+            return int(float(value))
+        except Exception:
+            return int(default)
+
+    def _on_run_state_changed(self, value):
+        state = "IDLE"
+        if isinstance(value, (int, float)):
+            state = self._RUN_STATE_INDEX_MAP.get(int(value), str(value).strip().upper())
+        elif value is not None:
+            raw = str(value).strip()
+            if raw.isdigit():
+                state = self._RUN_STATE_INDEX_MAP.get(int(raw), raw.upper())
+            else:
+                state = raw.upper()
+        if state in ("DONE", "ABORTED", "FAILED"):
+            # Present a simplified lifecycle in the toolbar: active vs idle.
+            state = "IDLE"
+            self._run_suspended = False
+            self._run_start_epoch = 0.0
+            self._run_finish_epoch = 0.0
+            self._run_done_units = 0
+            self._run_total_units = 0
+            self._run_initial_remaining_s = 0.0
+        if state == "RUNNING" and self._run_state != "RUNNING":
+            self._run_initial_remaining_s = 0.0
+        self._run_state = state or "IDLE"
+        self._update_run_status_widget()
+
+    def _on_run_suspended_changed(self, value):
+        if isinstance(value, str):
+            raw = value.strip().lower()
+            self._run_suspended = raw in ("1", "true", "yes", "on")
+        else:
+            try:
+                self._run_suspended = bool(int(float(value)))
+            except Exception:
+                self._run_suspended = bool(value)
+        self._update_run_status_widget()
+
+    def _on_run_finish_epoch_changed(self, value):
+        self._run_finish_epoch = self._as_float(value, default=0.0)
+        if self._run_state == "RUNNING" and self._run_finish_epoch > 0:
+            remaining = max(0.0, self._run_finish_epoch - time.time())
+            if self._run_initial_remaining_s <= 0.0 or remaining > self._run_initial_remaining_s:
+                self._run_initial_remaining_s = remaining
+        self._update_run_status_widget()
+
+    def _on_run_start_epoch_changed(self, value):
+        self._run_start_epoch = self._as_float(value, default=0.0)
+        self._update_run_status_widget()
+
+    def _on_run_last_update_epoch_changed(self, value):
+        self._run_last_update_epoch = self._as_float(value, default=0.0)
+        self._update_run_status_widget()
+
+    def _on_run_done_units_changed(self, value):
+        self._run_done_units = max(0, self._as_int(value, default=0))
+        self._update_run_status_widget()
+
+    def _on_run_total_units_changed(self, value):
+        self._run_total_units = max(0, self._as_int(value, default=0))
+        self._update_run_status_widget()
+
+    def _on_run_plan_name_changed(self, value):
+        self._run_plan_name = str(value).strip() if value is not None else ""
+        self._update_run_status_widget()
+
+    @staticmethod
+    def _format_hms(seconds):
+        sec = max(0, int(round(seconds)))
+        h = sec // 3600
+        m = (sec % 3600) // 60
+        s = sec % 60
+        return f"{h:02d}:{m:02d}:{s:02d}"
+
+    def _update_run_status_widget(self):
+        now = time.time()
+        dark_mode = self._is_dark_mode()
+        if dark_mode != self._run_is_dark_mode:
+            self._run_is_dark_mode = dark_mode
+            self._apply_run_widget_scale()
+
+        state = self._run_state
+        if self._run_suspended and state in ("RUNNING", "PAUSED", "STALE", "SUSPENDED"):
+            state = "SUSPENDED"
+
+        stale_timeout_s = 20.0
+        if state == "RUNNING" and self._run_last_update_epoch > 0:
+            # If finish_epoch is known, avoid marking long exposures as stale just
+            # because there are no mid-exposure updates. Only mark stale after ETA
+            # has passed and updates are still missing.
+            if self._run_finish_epoch > 0:
+                finish_grace_s = 30.0
+                if (now > (self._run_finish_epoch + finish_grace_s)) and (
+                    (now - self._run_last_update_epoch) > stale_timeout_s
+                ):
+                    state = "STALE"
+            elif (now - self._run_last_update_epoch) > stale_timeout_s:
+                state = "STALE"
+
+        self._run_display_state = state
+        self._run_state_label.setText(f"Run: {state}")
+        self._run_state_label.setStyleSheet(self._run_state_style(state))
+
+        if state in ("SUSPENDED", "PAUSED"):
+            self._run_finish_label.setText("Finish: pending")
+        elif state in ("RUNNING", "STALE") and self._run_finish_epoch > 0:
+            finish_local = QtCore.QDateTime.fromSecsSinceEpoch(
+                int(self._run_finish_epoch), QtCore.Qt.LocalTime
+            ).toString("yyyy-MM-dd HH:mm:ss")
+            self._run_finish_label.setText(f"Finish: {finish_local}")
+        else:
+            self._run_finish_label.setText("Finish: --")
+
+        if state in ("RUNNING", "STALE"):
+            self._run_is_suspended_display = False
+            remaining = max(0.0, self._run_finish_epoch - now) if self._run_finish_epoch > 0 else 0.0
+
+            if self._run_initial_remaining_s <= 0.0 and self._run_finish_epoch > 0:
+                self._run_initial_remaining_s = max(remaining, 1.0)
+
+            frac_time = 0.0
+            if self._run_start_epoch > 0 and self._run_finish_epoch > self._run_start_epoch:
+                total = self._run_finish_epoch - self._run_start_epoch
+                elapsed = now - self._run_start_epoch
+                frac_time = min(1.0, max(0.0, elapsed / total))
+            elif self._run_initial_remaining_s > 0:
+                frac_time = 1.0 - min(1.0, remaining / self._run_initial_remaining_s)
+                frac_time = max(0.0, frac_time)
+
+            frac_units = 0.0
+            if self._run_total_units > 0:
+                frac_units = min(1.0, max(0.0, float(self._run_done_units) / float(self._run_total_units)))
+
+            # Use whichever signal indicates more progress to keep the bar active
+            # during long steps even when done_units are only updated at boundaries.
+            frac = max(frac_units, frac_time)
+            value = int(round(frac * 1000))
+
+            self._run_progress.setRange(0, 1000)
+            self._run_progress.setValue(value)
+            plan_txt = f" [{self._run_plan_name}]" if self._run_plan_name else ""
+            self._run_progress.setFormat(f"{self._format_hms(remaining)} remaining{plan_txt}")
+        elif state in ("SUSPENDED", "PAUSED"):
+            if not self._run_is_suspended_display:
+                frozen = self._run_progress.value()
+                if self._run_total_units > 0:
+                    frac_units = min(1.0, max(0.0, float(self._run_done_units) / float(self._run_total_units)))
+                    frozen = int(round(frac_units * 1000))
+                self._run_progress_frozen_value = max(0, min(1000, int(frozen)))
+                self._run_is_suspended_display = True
+            self._run_progress.setRange(0, 1000)
+            self._run_progress.setValue(self._run_progress_frozen_value)
+            plan_txt = f" [{self._run_plan_name}]" if self._run_plan_name else ""
+            if state == "PAUSED":
+                self._run_progress.setFormat(f"Paused{plan_txt}")
+            else:
+                self._run_progress.setFormat(f"Suspended{plan_txt}")
+        elif state == "DONE":
+            self._run_is_suspended_display = False
+            self._run_progress.setRange(0, 1000)
+            self._run_progress.setValue(1000)
+            self._run_progress.setFormat("Completed")
+        elif state in ("ABORTED", "FAILED"):
+            self._run_is_suspended_display = False
+            self._run_progress.setRange(0, 1000)
+            self._run_progress.setValue(0)
+            self._run_progress.setFormat(state.title())
+        else:
+            self._run_is_suspended_display = False
+            self._run_progress.setRange(0, 1000)
+            self._run_progress.setValue(0)
+            self._run_progress.setFormat("No active run")
+
+    @staticmethod
+    def _parse_tcp_host(addr, default_host="localhost"):
+        text = str(addr or "").strip()
+        if text.startswith("tcp://"):
+            text = text[6:]
+        if ":" in text:
+            host = text.rsplit(":", 1)[0].strip()
+        else:
+            host = text.strip()
+        if not host or host in {"*", "0.0.0.0"}:
+            return str(default_host)
+        return host
+
+    def _start_adaptive_focus_listener(self):
+        if self._focus_doc_dispatcher is not None:
+            return
+        try:
+            client = getattr(self.re_manager_api, "_client", None)
+            control_addr = getattr(client, "_zmq_server_address", "tcp://localhost:60615")
+            info_addr = getattr(self.re_manager_api, "_zmq_info_addr", "tcp://localhost:60625")
+            self._focus_qs_control_addr = str(control_addr)
+            self._focus_qs_info_addr = str(info_addr)
+            host = self._parse_tcp_host(info_addr, default_host=self._parse_tcp_host(control_addr))
+            self._focus_data_addr = f"{host}:5568"
+            try:
+                from bluesky.callbacks.zmq import RemoteDispatcher
+            except Exception:
+                from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher
+
+            dispatcher = RemoteDispatcher(self._focus_data_addr)
+            dispatcher.subscribe(self._on_focus_bluesky_doc)
+            thread = threading.Thread(
+                target=dispatcher.start,
+                daemon=True,
+                name="adaptive-focus-doc-listener",
+            )
+            thread.start()
+            self._focus_doc_dispatcher = dispatcher
+            self._focus_doc_thread = thread
+            log.info("Adaptive focus listener started on %s", self._focus_data_addr)
+        except Exception:
+            log.exception("Failed to start adaptive focus listener")
+
+    def _stop_adaptive_focus_listener(self):
+        dispatcher = self._focus_doc_dispatcher
+        thread = self._focus_doc_thread
+        self._focus_doc_dispatcher = None
+        self._focus_doc_thread = None
+        if dispatcher is not None:
+            try:
+                dispatcher.stop()
+            except Exception:
+                pass
+        if thread is not None:
+            try:
+                thread.join(timeout=2.0)
+            except Exception:
+                pass
+
+    def _on_focus_bluesky_doc(self, name, doc):
+        if str(name) != "start":
+            return
+        plan_name = str((doc or {}).get("plan_name", "")).strip()
+        if plan_name != "adaptive_imaging_focus_scan":
+            return
+        focus_md = (doc or {}).get("focus_adaptive", {}) or {}
+        session_id = str(focus_md.get("session_id", "")).strip()
+        run_uid = str((doc or {}).get("uid", "")).strip()
+        self._focus_online_file_name = str((doc or {}).get("file_name", "")).strip()
+        self._focus_online_file_dir = str((doc or {}).get("file_dir", "")).strip()
+        if not session_id:
+            return
+        if self._should_ignore_adaptive_focus_launch(session_id, run_uid):
+            return
+        self.adaptive_focus_plan_started.emit(session_id, run_uid)
+
+    @Slot(str, str)
+    def _on_adaptive_focus_plan_started(self, session_id, run_uid):
+        self._launch_focus_online_viewer(
+            session_id=str(session_id).strip(),
+            run_uid=str(run_uid).strip(),
+        )
+
+    def _should_ignore_adaptive_focus_launch(self, session_id, run_uid):
+        """Debounce duplicate start documents for the same adaptive session."""
+        session_key = str(session_id).strip()
+        if session_key in self._focus_launched_sessions:
+            log.info(
+                "Ignoring duplicate adaptive focus launch session=%s run_uid=%s",
+                session_key,
+                str(run_uid or "").strip(),
+            )
+            return True
+        self._focus_launched_sessions.add(session_key)
+        return False
+
+    @staticmethod
+    def _load_camera_icon():
+        base_dir = Path(__file__).resolve().parent
+        icon = QtGui.QIcon()
+        for candidate in (
+            base_dir / "icons" / "camera.svg",
+            base_dir / "NRL_Logo.png",
+        ):
+            if candidate.exists():
+                icon.addFile(str(candidate))
+                if not icon.isNull():
+                    break
+        return icon
+
+    @staticmethod
+    def _load_focus_program_icon():
+        base_dir = Path(__file__).resolve().parent
+        icon = QtGui.QIcon()
+        for candidate in (
+            base_dir / "icons" / "focus_program.svg",
+            base_dir / "icons" / "camera.svg",
+            base_dir / "NRL_Logo.png",
+        ):
+            if candidate.exists():
+                icon.addFile(str(candidate))
+                if not icon.isNull():
+                    break
+        return icon
+
+    def _resolve_focus_python_executable(self):
+        viewer_python = Path(sys.executable)
+        conda_prefix = str(os.environ.get("CONDA_PREFIX", "")).strip()
+        if not conda_prefix:
+            return viewer_python
+
+        candidates = [Path(conda_prefix) / "bin" / "python"]
+        if os.name == "nt":
+            candidates = [
+                Path(conda_prefix) / "python.exe",
+                Path(conda_prefix) / "Scripts" / "python.exe",
+            ] + candidates
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return viewer_python
+
+    def launch_camera_viewer(self):
+        from application import MITRApplication
+
+        app = MITRApplication.instance()
+        macros = dict(self.macros)
+        macros.update({"R": "camURL:", "im": "urlimage1:"})
+        try:
+            if app is not None:
+                app.new_pydm_process("extra_ui/cam_url.ui", macros=macros)
+            else:
+                load_file("extra_ui/cam_url.ui", macros=macros, target=ScreenTarget.NEW_PROCESS)
+        except Exception as ex:
+            msg = f"Unable to launch camera viewer: {ex}"
+            log.warning(msg)
+            QMessageBox.warning(self, "Camera Viewer", msg)
+
+    def launch_focus_program(self):
+        viewer_script = Path(__file__).resolve().parent / "focus_offline_viewer.py"
+        if not viewer_script.exists():
+            msg = f"Focus program not found: {viewer_script}"
+            log.warning(msg)
+            QMessageBox.warning(self, "Focus Program", msg)
+            return
+
+        viewer_python = self._resolve_focus_python_executable()
+        cmd = [str(viewer_python), str(viewer_script)]
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(viewer_script.parent),
+                env=dict(os.environ),
+            )
+            self.statusBar().showMessage(
+                f"Launched focus program (pid={proc.pid})", 3000
+            )
+            log.info(
+                "Launched focus_offline_viewer pid=%s python=%s",
+                proc.pid,
+                str(viewer_python),
+            )
+        except Exception:
+            log.exception("Failed to launch focus_offline_viewer")
+            QMessageBox.critical(
+                self,
+                "Focus Program",
+                "Failed to launch focus program. See logs for details.",
+            )
+
+    def _stop_focus_online_viewer(self):
+        proc = self._focus_online_proc
+        self._focus_online_proc = None
+        self._focus_online_session_id = None
+        self._focus_online_run_uid = None
+        if proc is None:
+            return
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=2.0)
+                except Exception:
+                    proc.kill()
+        except Exception:
+            pass
+
+    def _launch_focus_online_viewer(self, *, session_id: str, run_uid: str):
+        if not session_id:
+            return
+        try:
+            # Ensure Queue Server picks up the latest user group permissions
+            # before the adaptive viewer starts submitting function_execute calls.
+            self.re_manager_api.permissions_reload()
+        except Exception:
+            pass
+        current = self._focus_online_proc
+        if (
+            current is not None
+            and current.poll() is None
+            and str(self._focus_online_session_id) == str(session_id)
+        ):
+            return
+        self._stop_focus_online_viewer()
+        viewer_script = Path(__file__).resolve().parent / "focus_online_viewer.py"
+        if not viewer_script.exists():
+            log.warning("Focus online viewer script not found: %s", viewer_script)
+            return
+        viewer_python = self._resolve_focus_python_executable()
+        def _env_int(name: str, default: int, min_val: int = 1) -> int:
+            try:
+                return max(min_val, int(str(os.environ.get(name, default)).strip()))
+            except Exception:
+                return int(default)
+        max_workers_total = _env_int("FOCUS_VIEWER_MAX_WORKERS_TOTAL", 8, min_val=3)
+        bulk_workers = _env_int("FOCUS_VIEWER_BULK_WORKERS", 1, min_val=1)
+        full_workers = _env_int("FOCUS_VIEWER_FULL_WORKERS", 6, min_val=1)
+        def _env_float(name: str, default: float, min_val: float = 0.0) -> float:
+            try:
+                return max(min_val, float(str(os.environ.get(name, default)).strip()))
+            except Exception:
+                return float(default)
+        file_wait_timeout_s = _env_float("FOCUS_VIEWER_FILE_WAIT_TIMEOUT_S", 30.0, min_val=1.0)
+        file_wait_interval_ms = _env_int("FOCUS_VIEWER_FILE_WAIT_INTERVAL_MS", 250, min_val=50)
+        cmd = [
+            str(viewer_python),
+            str(viewer_script),
+            "--zmq-address",
+            str(self._focus_data_addr or "localhost:5568"),
+            "--stream-name",
+            "primary",
+            "--run-uid",
+            str(run_uid or ""),
+            "--session-id",
+            str(session_id),
+            "--qserver-control-addr",
+            str(self._focus_qs_control_addr),
+            "--qserver-info-addr",
+            str(self._focus_qs_info_addr),
+            "--parent-pid",
+            str(os.getpid()),
+            "--startup-timeout-s",
+            "90",
+            "--max-workers-total",
+            str(max_workers_total),
+            "--bulk-workers",
+            str(bulk_workers),
+            "--full-workers",
+            str(full_workers),
+            "--file-wait-timeout-s",
+            str(file_wait_timeout_s),
+            "--file-wait-interval-ms",
+            str(file_wait_interval_ms),
+        ]
+        if self._focus_online_file_name:
+            cmd.extend(["--run-file-name", str(self._focus_online_file_name)])
+        if self._focus_online_file_dir:
+            cmd.extend(["--run-file-dir", str(self._focus_online_file_dir)])
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(viewer_script.parent),
+                env=dict(os.environ),
+            )
+            self._focus_online_proc = proc
+            self._focus_online_session_id = str(session_id)
+            self._focus_online_run_uid = str(run_uid or "")
+            log.info(
+                "Launched focus_online_viewer pid=%s python=%s workers(total=%s,bulk=%s,full=%s) session=%s run_uid=%s",
+                proc.pid,
+                str(viewer_python),
+                max_workers_total,
+                bulk_workers,
+                full_workers,
+                session_id,
+                run_uid,
+            )
+            def _check_started():
+                p = self._focus_online_proc
+                if p is None:
+                    return
+                rc = p.poll()
+                if rc is not None:
+                    log.error(
+                        "focus_online_viewer exited early rc=%s session=%s run_uid=%s",
+                        rc,
+                        session_id,
+                        run_uid,
+                    )
+            QtCore.QTimer.singleShot(2500, _check_started)
+        except Exception:
+            log.exception(
+                "Failed to launch focus_online_viewer for session=%s run_uid=%s",
+                session_id,
+                run_uid,
+            )
 
 
     def update_window_title(self):
@@ -213,6 +1284,71 @@ class MITRMainWindow(PyDMMainWindow):
         if data_plugins.is_read_only():
             title += " [Read Only Mode]"
         self.setWindowTitle(title)
+
+    def set_display_widget(self, new_widget):
+        super().set_display_widget(new_widget)
+        restore = getattr(new_widget, "restore_after_navigation", None)
+        if callable(restore):
+            try:
+                restore()
+            except Exception:
+                pass
+
+    def clear_display_widget(self):
+        display_widget = self.display_widget()
+        cleanup = getattr(display_widget, "cleanup_before_navigation", None)
+        if callable(cleanup):
+            try:
+                cleanup()
+            except Exception:
+                pass
+        super().clear_display_widget()
+
+    def cleanup_before_close(self):
+        """Stop local timers/channels so app shutdown is not delayed."""
+        display_widget = self.display_widget()
+        cleanup_display = getattr(display_widget, "cleanup_before_navigation", None)
+        if callable(cleanup_display):
+            try:
+                cleanup_display()
+            except Exception:
+                pass
+
+        self._stop_focus_online_viewer()
+        self._stop_adaptive_focus_listener()
+
+        for conn in self.findChildren(QtReManagerConnection):
+            try:
+                conn._deactivate_updates = True
+            except Exception:
+                pass
+
+        for editor in self.findChildren(RePlanEditorWidget):
+            shutdown = getattr(editor, "shutdown", None)
+            if callable(shutdown):
+                try:
+                    shutdown(wait=True, timeout=0.25)
+                except Exception:
+                    pass
+
+        for timer_name in ("_run_eta_timer", "_run_anim_timer"):
+            timer = getattr(self, timer_name, None)
+            if timer is not None:
+                try:
+                    timer.stop()
+                except Exception:
+                    pass
+
+        for channel in getattr(self, "_run_channels", []):
+            try:
+                channel.disconnect()
+            except Exception:
+                pass
+        self._run_channels = []
+
+    def closeEvent(self, event):
+        self.cleanup_before_close()
+        super().closeEvent(event)
 
     def reset_process(self, process_name):
         """
@@ -245,6 +1381,25 @@ class MITRMainWindow(PyDMMainWindow):
                 "Error",
                 f"An unexpected error occurred while restarting {process_name}:\n\n{str(e)}",
             )
+
+    def _set_reactor_power_suspender_enabled(self, enabled):
+        prefix = f"{self.macros.get('P', '')}Bluesky:SuspenderEnable"
+        wrote = False
+        try:
+            wrote = bool(caput(prefix, 1 if enabled else 0, wait=False))
+        except Exception:
+            wrote = False
+        if wrote:
+            return
+
+        # Fallback: direct RE script command if CA path is unavailable.
+        cmd = f"_queue_set_reactor_power_suspender({bool(enabled)})"
+        try:
+            # Must run in background to be accepted while a plan is active.
+            self.re_manager_api.script_upload(cmd, run_in_background=True)
+        except TypeError:
+            # Compatibility with older API signatures.
+            self.re_manager_api.script_upload(cmd)
 
     def control_servers(self, server_name, command):
         """
