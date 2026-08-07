@@ -3,22 +3,15 @@ import os
 import json
 import subprocess
 import sys
-from collections import OrderedDict
-from functools import partial
 from pathlib import Path
-from typing import Mapping, Sequence
 
-import pydm
 import pyqtgraph as pg
-import qtawesome as qta
 from pydm import data_plugins
 from pydm.application import PyDMApplication
 from pydm.utilities import path_info
 from pydm.utilities.stylesheet import apply_stylesheet
 from PyQt5.QtWidgets import QStyleFactory
 from qtpy import QtCore, QtGui, QtWidgets
-from qtpy.QtCore import Signal
-from qtpy.QtWidgets import QAction
 from bluesky_widgets.qt import run_engine_client as bw_run_engine_client
 
 from main_window import MITRMainWindow
@@ -26,6 +19,7 @@ from bluesky_widgets.models.run_engine_client import RunEngineClient
 from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher
 # from bluesky.callbacks.zmq import RemoteDispatcher
 from bluesky_queueserver_api.zmq import REManagerAPI
+from document_dispatcher import DocumentDispatcherService
 
 log = logging.getLogger(__name__)
 THEME_MODE_SETTINGS_KEY = "appearance/theme_mode"
@@ -325,6 +319,7 @@ class MITRApplication(PyDMApplication):
         zmq_public_key = os.environ.get("QSERVER_ZMQ_PUBLIC_KEY") or None
         self.re_client = RunEngineClient(zmq_control_addr=f'tcp://{ipaddress}:60615', zmq_info_addr=f'tcp://{ipaddress}:60625')
         self.re_dispatcher = RemoteDispatcher(f'{ipaddress}:5568')
+        self.document_dispatcher = DocumentDispatcherService(self.re_dispatcher)
         self.re_manager_api = REManagerAPI(
             zmq_control_addr=f'tcp://{ipaddress}:60615',
             zmq_info_addr=f'tcp://{ipaddress}:60625',
@@ -338,21 +333,15 @@ class MITRApplication(PyDMApplication):
         self._theme_mode = "system"
 
         super().__init__(ui_file=ui_file, use_main_window=use_main_window, *args, **kwargs)
+        # Start exactly one Qt receive loop after the initial display has had a
+        # chance to register its callbacks.  Later displays only subscribe.
+        self.document_dispatcher.start()
         base_style = QStyleFactory.create(DEFAULT_QT_STYLE)
         if base_style is not None:
             self.setStyle(base_style)
         self._base_style_name = self.style().objectName() or DEFAULT_QT_STYLE
         self._base_palette = QtGui.QPalette(self.palette())
         self.apply_theme_preference()
- 
-        # self.ui_file = ui_file
-        # self.main_window = MI
-
-        # self.main_window.ui.
-
-    def __del__(self):
-        pass
-        # self.re_dispatcher.stop()
 
     def theme_mode(self):
         return getattr(self, "_theme_mode", "system")

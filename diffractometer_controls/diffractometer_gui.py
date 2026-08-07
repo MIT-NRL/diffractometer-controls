@@ -4,33 +4,11 @@ from pathlib import Path
 
 # from pydm.display import Display
 from qtpy import QtCore, QtGui, QtWidgets
-from qtpy.QtWidgets import (QVBoxLayout, QHBoxLayout, QGroupBox,
-    QLabel, QLineEdit, QPushButton, QScrollArea, QFrame,
-    QApplication, QWidget, QLabel)
 from pydm.widgets.channel import PyDMChannel
-from bluesky_widgets.qt.run_engine_client import (
-    QtReConsoleMonitor,
-    QtReEnvironmentControls,
-    QtReExecutionControls,
-    QtReManagerConnection,
-    QtRePlanHistory,
-    QtRePlanQueue,
-    QtReQueueControls,
-    QtReRunningPlan,
-    QtReStatusMonitor,
-)
-try:
-    from diffractometer_controls.re_plan_editor_widget import RePlanEditorWidget
-except Exception:
-    from re_plan_editor_widget import RePlanEditorWidget
 
 # from bluesky_widgets.qt.figures import QtFigure, QtFigures
 # from bluesky_widgets.models.auto_plot_builders import AutoLines, AutoPlotter, AutoImages
 # from bluesky_widgets.models.plot_builders import Lines, Images
-from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher
-# from bluesky.callbacks.zmq import RemoteDispatcher
-from bluesky.utils import install_remote_qt_kicker
-
 from bluesky_widgets.models.run_engine_client import RunEngineClient
 import display
 
@@ -159,7 +137,6 @@ def _load_diffraction_plot_classes():
     }
 
 class MainScreen(display.MITRDisplay):
-    re_dispatcher: RemoteDispatcher
     re_client: RunEngineClient
 
     def __init__(self, parent=None, args=None, macros=None, ui_filename='diffractometer_gui.ui'):
@@ -174,34 +151,16 @@ class MainScreen(display.MITRDisplay):
 
     def customize_ui(self):
         from application import MITRApplication
-        from bluesky_widgets.utils.streaming import stream_documents_into_runs
 
         self._time_remaining_channel = None
         self._acquire_time_channel = None
+        self._manual_channels_connected = False
+        self._document_subscription = None
         self._acquire_time_total = 0.0
         self._time_remaining_value = 0.0
 
         app = MITRApplication.instance()
         re_client = app.re_client
-
-        # re_queue = QtRePlanQueue(re_client)
-        # re_plan_editor = RePlanEditorWidget(re_client)
-        # self.ui.RE_Queue.layout().addWidget(re_queue)
-        # self.ui.RE_Plan_Editor.layout().addWidget(re_plan_editor)
-
-        # figModel = Lines('motor',['det1','det2'],max_runs=3)
-        # figModel = AutoLines(max_runs=1)
-        # figModel = Lines('he3psd0_position_x[0]',['he3psd0_counts[0]'],max_runs=1)
-
-        # viewer = QtFigures(figModel.figures)
-        # self.runs = []
-        # app.re_dispatcher.subscribe(stream_documents_into_runs(figModel.add_run))
-        # app.re_dispatcher.subscribe(print)
-
-        #Viewer for imaging data
-        # figModel = Images("tiff1")
-        # viewer = QtFigure(figModel.figure)
-        # app.re_dispatcher.subscribe(stream_documents_into_runs(figModel.add_run))
 
         support = _get_diffraction_plot_support()
         if support.get("controller_ok"):
@@ -210,32 +169,54 @@ class MainScreen(display.MITRDisplay):
             plot_widget = plot_class()
             viewer = classes["viewer"](plot_widget)
             self._diffraction_live_plot = classes["controller"](viewer, re_client=re_client)
-            app.re_dispatcher.subscribe(self._diffraction_live_plot.on_document)
-            if hasattr(app.re_dispatcher, "_waiting_for_start"):
-                # The Qt RemoteDispatcher drops all mid-run documents until it
-                # sees a 'start' doc. For diffraction we explicitly want to
-                # support attaching during a run, so allow later event/event_page
-                # docs through immediately.
-                app.re_dispatcher._waiting_for_start = False
+            self._document_subscription = app.document_dispatcher.subscribe(
+                self._diffraction_live_plot.on_document
+            )
         else:
             viewer = _DiffractionUnavailableWidget(support.get("message", ""))
             self._diffraction_live_plot = None
 
         self._setup_time_remaining_progress()
 
-        app.re_dispatcher.start()
-        # install_remote_qt_kicker()
-
-        # re_console = QtReConsoleMonitor(re_client)
-        # re_queue_history = QtRePlanHistory(re_client)
-        # self.ui.RE_Console.layout().addWidget(re_console)
-        # self.ui.RE_Queue_History.layout().addWidget(re_queue_history)
-
         self.ui.Data_Viewer.layout().addWidget(viewer)
 
-        # self.ui.pushButton.clicked.connect(self.printstuff)
+    def _set_manual_channels_connected(self, connected):
+        connected = bool(connected)
+        if connected == self._manual_channels_connected:
+            return
+        for channel in (self._time_remaining_channel, self._acquire_time_channel):
+            if channel is None:
+                continue
+            try:
+                channel.connect() if connected else channel.disconnect()
+            except Exception:
+                pass
+        self._manual_channels_connected = connected
 
-        # self.ui.psdDisplay.addChannel(y_channel=f"ca://{self.macros['P']}det1:LiveCountsD0",color='black',symbolSize=5,symbol='o')
+    def deactivate_display(self):
+        from application import MITRApplication
+
+        app = MITRApplication.instance()
+        if self._document_subscription is not None:
+            app.document_dispatcher.unsubscribe(self._document_subscription)
+            self._document_subscription = None
+        controller = getattr(self, "_diffraction_live_plot", None)
+        if controller is not None:
+            controller.deactivate()
+        self._set_manual_channels_connected(False)
+
+    def activate_display(self):
+        from application import MITRApplication
+
+        controller = getattr(self, "_diffraction_live_plot", None)
+        if controller is not None:
+            controller.activate()
+            if self._document_subscription is None:
+                app = MITRApplication.instance()
+                self._document_subscription = app.document_dispatcher.subscribe(
+                    controller.on_document
+                )
+        self._set_manual_channels_connected(True)
 
     def _setup_time_remaining_progress(self):
         old_widget = getattr(self.ui, "PyDMLabel", None)
@@ -297,6 +278,7 @@ class MainScreen(display.MITRDisplay):
                 value_slot=self._on_acquire_time_changed,
             )
             self._acquire_time_channel.connect()
+        self._manual_channels_connected = True
 
     @staticmethod
     def _derive_acquire_time_address(remaining_address):

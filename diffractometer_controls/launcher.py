@@ -44,6 +44,40 @@ def _configure_qt_highdpi():
         set_rounding_policy(rounding_policy_enum.PassThrough)
 
 
+def _patch_bluesky_status_reload_shutdown(cls):
+    """Make shared Queue Server polling safe to stop during navigation."""
+    if getattr(cls, "_dc_status_reload_shutdown_patch_applied", False):
+        return
+
+    def _patched_reload_status(self):
+        self.model.load_re_manager_status()
+        remaining = max(float(getattr(self, "update_period", 0) or 0), 0.0)
+        while remaining > 0:
+            if getattr(self, "_deactivate_updates", False):
+                break
+            delay = min(0.05, remaining)
+            time.sleep(delay)
+            remaining -= delay
+
+    def _patched_reload_complete(self):
+        if not self._deactivate_updates:
+            self._start_thread()
+            return
+        # The RunEngineClient model is shared by all screens. A worker from a
+        # detached screen must not clear state after another screen attaches.
+        detaching = bool(getattr(self, "_dc_detaching", False))
+        self._dc_detaching = False
+        if not detaching:
+            self.model.clear_connection_status()
+        self.updates_activated = False
+        self._deactivate_updates = False
+        self._update_widget_states()
+
+    cls._reload_status = _patched_reload_status
+    cls._reload_complete = _patched_reload_complete
+    cls._dc_status_reload_shutdown_patch_applied = True
+
+
 def main():
     logger = logging.getLogger("")
     handler = logging.StreamHandler()
@@ -73,13 +107,16 @@ def main():
     GITHUB = Path('/home/mitr_4dh4/Documents/GitHub')
     if DISPLAY_PATH is None:
         path_list_adl = [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*op/adl*')] + [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*opi/medm*')]
-        print(path_list_adl)
         path_list_custom = [
             path.as_posix()
             for path in GITHUB.glob('**/PyDM*')
             if path.is_dir()
         ]
-        print(path_list_custom)
+        logger.debug(
+            "Configured %d EPICS and %d custom display search paths.",
+            len(path_list_adl),
+            len(path_list_custom),
+        )
         if len(path_list_adl) != 0:
             path_list.extend(path_list_adl)
         if len(path_list_custom) != 0:
@@ -143,30 +180,9 @@ def main():
 
     _patch_bluesky_worker_safe_shutdown()
 
-    def _patch_bluesky_status_reload_shutdown():
-        """
-        Make Queue Server status polling responsive to disconnect/shutdown.
-        The upstream widget sleeps for a full update period, which can keep a
-        FunctionWorker alive past our shutdown budget.
-        """
-        cls = bw_run_engine_client.QtReManagerConnection
-        if getattr(cls, "_dc_status_reload_shutdown_patch_applied", False):
-            return
-
-        def _patched_reload_status(self):
-            self.model.load_re_manager_status()
-            remaining = max(float(getattr(self, "update_period", 0) or 0), 0.0)
-            while remaining > 0:
-                if getattr(self, "_deactivate_updates", False):
-                    break
-                delay = min(0.05, remaining)
-                time.sleep(delay)
-                remaining -= delay
-
-        cls._reload_status = _patched_reload_status
-        cls._dc_status_reload_shutdown_patch_applied = True
-
-    _patch_bluesky_status_reload_shutdown()
+    _patch_bluesky_status_reload_shutdown(
+        bw_run_engine_client.QtReManagerConnection
+    )
 
     parser = argparse.ArgumentParser(description="Python Display Manager")
     parser.add_argument(
@@ -389,10 +405,10 @@ def main():
             except Exception:
                 pass
 
-        dispatcher = getattr(app, "re_dispatcher", None)
-        if dispatcher is not None:
+        dispatcher_service = getattr(app, "document_dispatcher", None)
+        if dispatcher_service is not None:
             try:
-                dispatcher.stop()
+                dispatcher_service.stop()
             except Exception:
                 pass
 

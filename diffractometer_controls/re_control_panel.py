@@ -551,6 +551,7 @@ class REControlPanel(display.MITRDisplay):
         re_manager = getattr(self, "_re_manager", None)
         if re_manager is not None:
             try:
+                re_manager._dc_detaching = True
                 re_manager._deactivate_updates = True
             except Exception:
                 pass

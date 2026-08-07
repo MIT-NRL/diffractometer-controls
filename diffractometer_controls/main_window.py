@@ -1,11 +1,9 @@
 import logging
-import warnings
 import subprocess
 import time
 import math
 import sys
 import os
-import threading
 import importlib.util
 from pathlib import Path
 
@@ -15,20 +13,21 @@ from pydm import data_plugins
 from pydm.display import load_file, ScreenTarget
 from pydm.main_window import PyDMMainWindow
 from qtpy import QtCore, QtGui
-from qtpy.QtCore import Qt, QTimer, Slot, QSize, QLibraryInfo
-from qtpy.QtWidgets import (QVBoxLayout, QHBoxLayout, QGroupBox,
-    QLabel, QLineEdit, QPushButton, QScrollArea, QFrame,
-    QApplication, QWidget, QLabel, QAction, QToolButton, QMessageBox, QProgressBar, QSizePolicy)
+from qtpy.QtCore import Qt, QTimer, Slot, QSize
+from qtpy.QtWidgets import (
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QApplication,
+    QWidget,
+    QAction,
+    QToolButton,
+    QMessageBox,
+    QProgressBar,
+    QSizePolicy,
+)
 from bluesky_widgets.qt.run_engine_client import (
-    QtReConsoleMonitor,
-    QtReEnvironmentControls,
-    QtReExecutionControls,
     QtReManagerConnection,
-    QtRePlanHistory,
-    QtRePlanQueue,
-    QtReQueueControls,
-    QtReRunningPlan,
-    QtReStatusMonitor,
 )
 try:
     from diffractometer_controls.re_plan_editor_widget import RePlanEditorWidget
@@ -40,8 +39,7 @@ try:
     )
 except Exception:
     from bluesky_environment_update_dialog import BlueskyEnvironmentUpdateDialog
-from bluesky_widgets.models.run_engine_client import RunEngineClient
-from pydm.widgets import PyDMByteIndicator, PyDMRelatedDisplayButton
+from pydm.widgets import PyDMByteIndicator
 from bluesky_queueserver_api.zmq import REManagerAPI
 from pydm.widgets.channel import PyDMChannel
 
@@ -119,8 +117,7 @@ class MITRMainWindow(PyDMMainWindow):
         self._focus_online_run_uid = None
         self._focus_online_file_name = ""
         self._focus_online_file_dir = ""
-        self._focus_doc_dispatcher = None
-        self._focus_doc_thread = None
+        self._focus_doc_subscription = None
         self._focus_data_addr = None
         self._bluesky_environment_update_dialog = None
         self._focus_qs_control_addr = "tcp://localhost:60615"
@@ -1002,64 +999,38 @@ class MITRMainWindow(PyDMMainWindow):
             self._run_progress.setValue(0)
             self._run_progress.setFormat("No active run")
 
-    @staticmethod
-    def _parse_tcp_host(addr, default_host="localhost"):
-        text = str(addr or "").strip()
-        if text.startswith("tcp://"):
-            text = text[6:]
-        if ":" in text:
-            host = text.rsplit(":", 1)[0].strip()
-        else:
-            host = text.strip()
-        if not host or host in {"*", "0.0.0.0"}:
-            return str(default_host)
-        return host
-
     def _start_adaptive_focus_listener(self):
-        if self._focus_doc_dispatcher is not None:
+        if self._focus_doc_subscription is not None:
             return
         try:
+            from application import MITRApplication
+
+            app = MITRApplication.instance()
             client = getattr(self.re_manager_api, "_client", None)
-            control_addr = getattr(client, "_zmq_server_address", "tcp://localhost:60615")
-            info_addr = getattr(self.re_manager_api, "_zmq_info_addr", "tcp://localhost:60625")
+            control_addr = getattr(client, "_zmq_server_address", f"tcp://{app._ipaddress}:60615")
+            info_addr = getattr(self.re_manager_api, "_zmq_info_addr", f"tcp://{app._ipaddress}:60625")
             self._focus_qs_control_addr = str(control_addr)
             self._focus_qs_info_addr = str(info_addr)
-            host = self._parse_tcp_host(info_addr, default_host=self._parse_tcp_host(control_addr))
-            self._focus_data_addr = f"{host}:5568"
-            try:
-                from bluesky.callbacks.zmq import RemoteDispatcher
-            except Exception:
-                from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher
-
-            dispatcher = RemoteDispatcher(self._focus_data_addr)
-            dispatcher.subscribe(self._on_focus_bluesky_doc)
-            thread = threading.Thread(
-                target=dispatcher.start,
-                daemon=True,
-                name="adaptive-focus-doc-listener",
+            self._focus_data_addr = f"{app._ipaddress}:5568"
+            self._focus_doc_subscription = app.document_dispatcher.subscribe(
+                self._on_focus_bluesky_doc,
+                name="start",
             )
-            thread.start()
-            self._focus_doc_dispatcher = dispatcher
-            self._focus_doc_thread = thread
-            log.info("Adaptive focus listener started on %s", self._focus_data_addr)
+            log.info("Adaptive focus listener subscribed on %s", self._focus_data_addr)
         except Exception:
             log.exception("Failed to start adaptive focus listener")
 
     def _stop_adaptive_focus_listener(self):
-        dispatcher = self._focus_doc_dispatcher
-        thread = self._focus_doc_thread
-        self._focus_doc_dispatcher = None
-        self._focus_doc_thread = None
-        if dispatcher is not None:
-            try:
-                dispatcher.stop()
-            except Exception:
-                pass
-        if thread is not None:
-            try:
-                thread.join(timeout=2.0)
-            except Exception:
-                pass
+        token = self._focus_doc_subscription
+        self._focus_doc_subscription = None
+        if token is None:
+            return
+        try:
+            from application import MITRApplication
+
+            MITRApplication.instance().document_dispatcher.unsubscribe(token)
+        except Exception:
+            pass
 
     def _on_focus_bluesky_doc(self, name, doc):
         if str(name) != "start":
@@ -1128,21 +1099,10 @@ class MITRMainWindow(PyDMMainWindow):
         return icon
 
     def _resolve_focus_python_executable(self):
-        viewer_python = Path(sys.executable)
-        conda_prefix = str(os.environ.get("CONDA_PREFIX", "")).strip()
-        if not conda_prefix:
-            return viewer_python
-
-        candidates = [Path(conda_prefix) / "bin" / "python"]
-        if os.name == "nt":
-            candidates = [
-                Path(conda_prefix) / "python.exe",
-                Path(conda_prefix) / "Scripts" / "python.exe",
-            ] + candidates
-        for candidate in candidates:
-            if candidate.exists():
-                return candidate
-        return viewer_python
+        # Use the interpreter that successfully imported and launched this GUI.
+        # CONDA_PREFIX may describe the parent shell rather than this process
+        # when launcher.py is invoked with an absolute Python path.
+        return Path(sys.executable)
 
     def launch_camera_viewer(self):
         from application import MITRApplication
@@ -1390,10 +1350,12 @@ class MITRMainWindow(PyDMMainWindow):
             except Exception:
                 pass
         self._run_channels = []
-
-    def closeEvent(self, event):
-        self.cleanup_before_close()
-        super().closeEvent(event)
+        for channel in getattr(self, "_bluesky_mode_channels", []):
+            try:
+                channel.disconnect()
+            except Exception:
+                pass
+        self._bluesky_mode_channels = []
 
     def reset_process(self, process_name):
         """

@@ -1,6 +1,5 @@
 import os
 import re
-import sys
 import threading
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
@@ -9,28 +8,7 @@ import numpy as np
 # from pydm.display import Display
 from qtpy import QtCore, QtGui
 from qtpy import QtWidgets
-from qtpy.QtWidgets import (QVBoxLayout, QHBoxLayout, QGroupBox,
-    QLabel, QLineEdit, QPushButton, QScrollArea, QFrame,
-    QApplication, QWidget, QLabel)
-from bluesky_widgets.qt.run_engine_client import (
-    QtReConsoleMonitor,
-    QtReEnvironmentControls,
-    QtReExecutionControls,
-    QtReManagerConnection,
-    QtRePlanEditor,
-    QtRePlanHistory,
-    QtRePlanQueue,
-    QtReQueueControls,
-    QtReRunningPlan,
-    QtReStatusMonitor,
-)
-
-# from bluesky_widgets.qt.figures import QtFigure, QtFigures
-# from bluesky_widgets.models.auto_plot_builders import AutoLines, AutoPlotter, AutoImages
-from bluesky_widgets.models.plot_builders import Lines, Images
 from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher
-# from bluesky.callbacks.zmq import RemoteDispatcher
-from bluesky.utils import install_remote_qt_kicker
 from pydm.widgets.channel import PyDMChannel
 
 from bluesky_widgets.models.run_engine_client import RunEngineClient
@@ -115,6 +93,7 @@ class MainScreen(display.MITRDisplay):
         self._acquire_channel = None
         self._time_remaining_channel = None
         self._acquire_time_channel = None
+        self._manual_channels_connected = False
         self._acquire_time_total = 0.0
         self._time_remaining_value = 0.0
         self._histogram_curve = None
@@ -245,6 +224,51 @@ class MainScreen(display.MITRDisplay):
         self.destroyed.connect(self._shutdown_profile_worker)
         self.destroyed.connect(self._shutdown_wf_norm_worker)
         self.destroyed.connect(self._shutdown_live_filter_worker)
+
+    def _set_manual_channels_connected(self, connected):
+        connected = bool(connected)
+        if connected == self._manual_channels_connected:
+            return
+        channels = (
+            self._time_remaining_channel,
+            self._acquire_time_channel,
+            self._acquire_channel,
+        )
+        for channel in channels:
+            if channel is None:
+                continue
+            try:
+                channel.connect() if connected else channel.disconnect()
+            except Exception:
+                pass
+        self._manual_channels_connected = connected
+
+    def deactivate_display(self):
+        timer = getattr(self, "_startup_autoscale_timer", None)
+        if timer is not None:
+            timer.stop()
+        self._set_manual_channels_connected(False)
+        self._shutdown_profile_worker()
+        self._shutdown_wf_norm_worker()
+        self._shutdown_live_filter_worker()
+
+    def activate_display(self):
+        with self._profile_worker_lock:
+            if self._profile_worker is None:
+                self._profile_worker = ThreadPoolExecutor(
+                    max_workers=1,
+                    thread_name_prefix="profile-worker",
+                )
+        with self._live_filter_worker_lock:
+            if self._live_filter_worker is None:
+                self._live_filter_worker = ThreadPoolExecutor(
+                    max_workers=1,
+                    thread_name_prefix="live-image-filter",
+                )
+        self._set_manual_channels_connected(True)
+        timer = getattr(self, "_startup_autoscale_timer", None)
+        if timer is not None and self._startup_autoscale_attempts < self._startup_autoscale_max_attempts:
+            timer.start()
 
     def _get_image_viewbox(self):
         image_view = self.ui.cameraImage
@@ -1835,6 +1859,7 @@ class MainScreen(display.MITRDisplay):
                 value_slot=self._on_acquire_time_changed,
             )
             self._acquire_time_channel.connect()
+        self._manual_channels_connected = True
 
     def _on_time_remaining_changed(self, value):
         self._time_remaining_value = self._to_float(value, default=0.0)
@@ -1948,6 +1973,7 @@ class MainScreen(display.MITRDisplay):
                 value_slot=self._on_acquire_value_changed,
             )
             self._acquire_channel.connect()
+            self._manual_channels_connected = True
 
     def _set_detector_state_acquire_style(self, acquiring):
         if acquiring:

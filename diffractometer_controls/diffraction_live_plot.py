@@ -1654,15 +1654,10 @@ class DiffractionLivePlot(QtCore.QObject):
         self._history_load_token = 0
         self._startup_history_uid = ""
         self._startup_history_retry_count = 0
-        self._history_executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=1,
-            thread_name_prefix="diffraction-history",
-        )
+        self._history_executor = None
+        self._active = False
+        self._running_item_events_connected = False
 
-        events = getattr(self.re_client, "events", None)
-        running_item_changed = getattr(events, "running_item_changed", None)
-        if running_item_changed is not None:
-            running_item_changed.connect(self._on_running_item_changed)
         previous_requested = getattr(self.widget, "previous_requested", None)
         if previous_requested is not None:
             previous_requested.connect(self._on_history_previous_requested)
@@ -1678,9 +1673,52 @@ class DiffractionLivePlot(QtCore.QObject):
         live_follow_toggled = getattr(self.widget, "live_follow_toggled", None)
         if live_follow_toggled is not None:
             live_follow_toggled.connect(self._on_live_follow_toggled)
-        self.destroyed.connect(self._shutdown_history_executor)
+        self.destroyed.connect(self.shutdown)
+        self.activate()
         self._emit_history_state()
+
+    def _set_running_item_events_connected(self, connected):
+        connected = bool(connected)
+        if connected == self._running_item_events_connected:
+            return
+        events = getattr(self.re_client, "events", None)
+        emitter = getattr(events, "running_item_changed", None)
+        if emitter is None:
+            return
+        try:
+            if connected:
+                emitter.connect(self._on_running_item_changed)
+            else:
+                emitter.disconnect(self._on_running_item_changed)
+        except Exception:
+            return
+        self._running_item_events_connected = connected
+
+    def activate(self):
+        """Resume model callbacks and background work for a visible screen."""
+        if self._active:
+            return
+        self._active = True
+        if self._history_executor is None:
+            self._history_executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="diffraction-history",
+            )
+        self._set_running_item_events_connected(True)
         QtCore.QTimer.singleShot(0, self._arm_current_running_item)
+
+    def deactivate(self):
+        """Suspend callbacks and workers while PyDM caches the hidden screen."""
+        self._active = False
+        self._set_running_item_events_connected(False)
+        self._disarm_live_subscriptions()
+        # Invalidate results from work that may complete after deactivation.
+        self._history_refresh_token += 1
+        self._history_load_token += 1
+        self._shutdown_history_executor()
+
+    def shutdown(self, *_args):
+        self.deactivate()
 
     def _shutdown_history_executor(self, *_args):
         executor = getattr(self, "_history_executor", None)
@@ -1693,7 +1731,7 @@ class DiffractionLivePlot(QtCore.QObject):
             pass
 
     def _arm_current_running_item(self):
-        if (not self._live_follow_enabled) or self._display_mode != "live":
+        if (not self._active) or (not self._live_follow_enabled) or self._display_mode != "live":
             return
         running_item = dict(getattr(self.re_client, "_running_item", {}) or {})
         if not running_item:
@@ -1722,6 +1760,8 @@ class DiffractionLivePlot(QtCore.QObject):
         )
 
     def _schedule_history_refresh(self, *, delay_ms=0, autoload_live=False):
+        if not self._active:
+            return
         QtCore.QTimer.singleShot(
             max(0, int(delay_ms)),
             lambda autoload_live=bool(autoload_live): self._refresh_history_async(
@@ -1730,7 +1770,7 @@ class DiffractionLivePlot(QtCore.QObject):
         )
 
     def _refresh_history_async(self, *, autoload_live=False):
-        if not self._tiled_enabled:
+        if (not self._active) or (not self._tiled_enabled):
             return
         executor = getattr(self, "_history_executor", None)
         if executor is None:
@@ -2481,6 +2521,8 @@ class DiffractionLivePlot(QtCore.QObject):
             self._render_history_row(data=dict(row or {}), seq_num=seq_num_value)
 
     def on_document(self, name, doc):
+        if not self._active:
+            return
         if str(name) == "start":
             start_doc = dict(doc or {})
             if not _is_diffraction_start_doc(start_doc):

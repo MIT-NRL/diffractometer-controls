@@ -152,6 +152,12 @@ def _acquire_session_lock(session_id: Optional[str]):
     return None
 
 
+def _has_received_focus_frame(bridge) -> bool:
+    """Return whether the viewer has accepted its first valid image file."""
+    window = getattr(bridge, "window", None)
+    return bool(window is not None and getattr(window, "frames", ()))
+
+
 class QueueServerAdaptiveClient:
     """Submit adaptive focus commands to Queue Server via function_execute."""
 
@@ -1527,11 +1533,12 @@ def main(argv=None) -> int:
         parent_timer.timeout.connect(_check_parent)
         parent_timer.start()
 
-    # Guard 2: if nothing was received, auto-exit so no unseen process lingers.
+    # Guard 2: allow the first acquisition and file write to finish, but do not
+    # leave an idle viewer behind if no valid frame ever arrives.
     startup_timeout_s = float(max(0.0, float(args.startup_timeout_s or 0.0)))
     if startup_timeout_s > 0:
         def _check_startup_timeout():
-            if bridge.window is None:
+            if not _has_received_focus_frame(bridge):
                 print(
                     f"No frames received within {startup_timeout_s:.1f}s; exiting focus viewer."
                 )

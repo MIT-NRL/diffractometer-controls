@@ -1,11 +1,8 @@
 from pathlib import Path
-from typing import Optional, Sequence
 
-from ophyd import Device
 from pydm import Display
 from pydm.widgets.embedded_display import PyDMEmbeddedDisplay
 from qtpy import QtWidgets
-from qtpy.QtCore import Signal, Slot
 
 class MITRDisplay(Display):
     _RE_EMBEDDED_FILENAMES = {
@@ -17,19 +14,27 @@ class MITRDisplay(Display):
     def __init__(self, parent=None, args=None, macros=None, ui_filename=None, **kwargs):
         super().__init__(parent=parent, args=args, macros=macros, ui_filename=ui_filename, **kwargs)
         self._pending_embedded_reload = set()
-        # self.ui_filename = ui_filename
         self.customize_ui()
-
-    # def ui_filename(self):
-    #     return self.ui_filename
-    
-    # def ui_filepath(self):
-    #     return super().ui_filepath()
+        self._navigation_active = True
 
     def customize_ui(self):
         pass
 
+    def activate_display(self):
+        """Resume non-PyDM resources after this cached display is restored."""
+
+    def deactivate_display(self):
+        """Suspend non-PyDM resources before this display is cached."""
+
     def cleanup_before_navigation(self):
+        if not getattr(self, "_navigation_active", True):
+            return
+        self._navigation_active = False
+        try:
+            self.deactivate_display()
+        except Exception:
+            pass
+
         pending_reload = set()
         for embedded in self.findChildren(PyDMEmbeddedDisplay):
             filename = Path(str(getattr(embedded, "filename", "") or "")).name
@@ -71,6 +76,8 @@ class MITRDisplay(Display):
         self._pending_embedded_reload = pending_reload
 
     def restore_after_navigation(self):
+        if getattr(self, "_navigation_active", False):
+            return
         pending_reload = tuple(getattr(self, "_pending_embedded_reload", ()) or ())
         self._pending_embedded_reload = set()
         for embedded in pending_reload:
@@ -78,3 +85,8 @@ class MITRDisplay(Display):
                 embedded.load_if_needed()
             except Exception:
                 pass
+        try:
+            self.activate_display()
+        except Exception:
+            pass
+        self._navigation_active = True
