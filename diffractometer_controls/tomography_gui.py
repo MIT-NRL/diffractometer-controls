@@ -50,14 +50,22 @@ except Exception:
     scipy_ndimage = None
 
 try:
-    from wf_norm_worker import build_wf_norm_array_worker
+    from live_image_pipeline import LiveImageState
+    from wf_norm_worker import build_wf_norm_array_worker, filter_live_image_worker
 except Exception:
     try:
-        from diffractometer_controls.wf_norm_worker import build_wf_norm_array_worker
+        from diffractometer_controls.live_image_pipeline import LiveImageState
+        from diffractometer_controls.wf_norm_worker import (
+            build_wf_norm_array_worker,
+            filter_live_image_worker,
+        )
     except Exception:
         build_wf_norm_array_worker = None
+        filter_live_image_worker = None
+        LiveImageState = None
 
 WF_NORM_FILTER_SETTINGS_KEY = "analysis/wf_norm_filter_method"
+WF_NORM_FILTER_GAMMA = "gamma"
 WF_NORM_FILTER_OUTLIER = "outlier"
 WF_NORM_FILTER_MEDIAN = "median"
 WF_NORM_FILTER_RUNTIME_PROPERTY = "analysis_wf_norm_filter_method_runtime"
@@ -69,6 +77,8 @@ class MainScreen(display.MITRDisplay):
     profile_compute_ready = QtCore.Signal(object)
     profile_worker_idle = QtCore.Signal()
     wf_norm_ready = QtCore.Signal(object)
+    live_filter_ready = QtCore.Signal(object)
+    live_filter_worker_idle = QtCore.Signal()
 
     def __init__(self, parent=None, args=None, macros=None, ui_filename='tomography_gui.ui'):
         super().__init__(parent, args, macros, ui_filename)
@@ -94,7 +104,6 @@ class MainScreen(display.MITRDisplay):
         self._default_gamma_value = 1.0
         self._gamma_value = self._default_gamma_value
         self._last_image = None
-        self._manual_levels_initialized = False
         self._startup_autoscale_attempts = 0
         self._startup_autoscale_max_attempts = 30
         self._level_slider_low_bound = 0.0
@@ -130,8 +139,8 @@ class MainScreen(display.MITRDisplay):
         self._wf_norm_mismatch_count = 0
         self._wf_norm_mismatch_limit = 5
         self._wf_norm_last_dir = ""
-        self._wf_norm_filter_method = WF_NORM_FILTER_OUTLIER
-        self._wf_norm_outlier_size = 7
+        self._wf_norm_filter_method = WF_NORM_FILTER_GAMMA
+        self._wf_norm_outlier_size = 5
         self._wf_norm_median_size = 6
         self._wf_norm_busy = False
         self._wf_norm_worker_lock = threading.Lock()
@@ -143,11 +152,22 @@ class MainScreen(display.MITRDisplay):
         self._wf_norm_status_method = ""
         self._wf_norm_requested_method = ""
         self._wf_norm_tooltip_prefix = ""
+        self._wf_norm_gamma_available = None
         self._wf_norm_tomopy_available = None
-        self._wf_norm_image_update_in_progress = False
-        self._wf_norm_ignore_next_image_changed = False
+        self._display_image_update_in_progress = False
+        self._live_image_state = LiveImageState() if LiveImageState is not None else None
         self._last_source_image = None
         self._last_source_exposure_s = None
+        self._live_filter_size = 5
+        self._live_filter_available = None
+        self._live_filter_worker_lock = threading.Lock()
+        self._live_filter_worker = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="live-image-filter"
+        )
+        self._live_filter_future = None
+        self._live_filter_pending_request = None
+        self._live_filter_diagnostics = {}
+        self.live_filter_checkbox = None
         self._acquire_was_active = False
         self._pending_next_frame_exposure_s = None
         self.wf_norm_checkbox = None
@@ -182,6 +202,8 @@ class MainScreen(display.MITRDisplay):
         self.profile_compute_ready.connect(self._on_profile_compute_ready)
         self.profile_worker_idle.connect(self._on_profile_worker_idle)
         self.wf_norm_ready.connect(self._on_wf_norm_ready)
+        self.live_filter_ready.connect(self._on_live_filter_ready)
+        self.live_filter_worker_idle.connect(self._on_live_filter_worker_idle)
 
         image_view = self.ui.cameraImage
         self._install_display_controls(image_view)
@@ -205,21 +227,15 @@ class MainScreen(display.MITRDisplay):
             except Exception:
                 image_signal_connected = False
 
-        # Also listen to the underlying ImageItem change signal to catch
-        # first-image timing when PV data/shape channels connect in sequence.
-        try:
-            image_item = image_view.getImageItem()
-            if image_item is not None and hasattr(image_item, "sigImageChanged"):
-                same_signal = False
-                if hasattr(image_view, "newImageSignal"):
-                    try:
-                        same_signal = image_view.newImageSignal is image_item.sigImageChanged
-                    except Exception:
-                        same_signal = False
-                if (not image_signal_connected) or (not same_signal):
+        # PyDM's newImageSignal aliases ImageItem.sigImageChanged. Connect the
+        # underlying signal only as a fallback, otherwise every frame is handled twice.
+        if not image_signal_connected:
+            try:
+                image_item = image_view.getImageItem()
+                if image_item is not None and hasattr(image_item, "sigImageChanged"):
                     image_item.sigImageChanged.connect(self._on_image_changed_event)
-        except Exception:
-            pass
+            except Exception:
+                pass
 
         # Startup retry loop: keep attempting autoscale until first valid image appears.
         self._startup_autoscale_timer = QtCore.QTimer(self)
@@ -228,6 +244,7 @@ class MainScreen(display.MITRDisplay):
         self._startup_autoscale_timer.start()
         self.destroyed.connect(self._shutdown_profile_worker)
         self.destroyed.connect(self._shutdown_wf_norm_worker)
+        self.destroyed.connect(self._shutdown_live_filter_worker)
 
     def _get_image_viewbox(self):
         image_view = self.ui.cameraImage
@@ -460,16 +477,6 @@ class MainScreen(display.MITRDisplay):
 
     def _profile_source_2d(self):
         data_source = self._last_image
-        if self._is_wf_norm_active():
-            # For profile analysis, explicitly derive from the latest raw frame
-            # when possible so ROI statistics track normalized display values.
-            raw_candidate = self._last_source_image if self._last_source_image is not None else self._last_image
-            normalized = self._normalize_image_with_wf_for_analysis(
-                raw_candidate,
-                source_exposure_s=self._last_source_exposure_s,
-            )
-            if normalized is not None:
-                data_source = normalized
 
         if data_source is None:
             return None
@@ -487,23 +494,6 @@ class MainScreen(display.MITRDisplay):
         squeezed = np.squeeze(data)
         if squeezed.ndim == 2:
             return squeezed
-        return None
-
-    def _normalize_image_with_wf_for_analysis(self, image, source_exposure_s=None):
-        if image is None or self._wf_norm_reciprocal is None:
-            return None
-        data = np.asarray(image)
-        data = np.squeeze(data)
-        if data.ndim != 2:
-            return None
-        data_f = np.asarray(data, dtype=np.float32)
-        scale = np.float32(self._wf_norm_exposure_scale(source_exposure_s=source_exposure_s))
-        rec = self._wf_norm_reciprocal
-        if data_f.shape == rec.shape:
-            return np.asarray(data_f * rec * scale, dtype=np.float32)
-        rec_t = self._wf_norm_reciprocal_t
-        if rec_t is not None and data_f.shape == rec_t.shape:
-            return np.asarray(data_f * rec_t * scale, dtype=np.float32)
         return None
 
     def _default_profile_roi_geometry(self):
@@ -751,6 +741,170 @@ class MainScreen(display.MITRDisplay):
             except Exception:
                 pass
 
+    def _shutdown_live_filter_worker(self, *args):
+        with self._live_filter_worker_lock:
+            worker = self._live_filter_worker
+            self._live_filter_worker = None
+            self._live_filter_future = None
+            self._live_filter_pending_request = None
+        if worker is not None:
+            try:
+                worker.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                worker.shutdown(wait=False)
+            except Exception:
+                pass
+
+    def _has_live_gamma_filter(self):
+        if self._live_filter_available is None:
+            if filter_live_image_worker is None or self._live_image_state is None:
+                self._live_filter_available = False
+            else:
+                try:
+                    from neutron_imaging_tools.filtering import remove_gammas  # noqa: F401
+                    self._live_filter_available = True
+                except Exception:
+                    self._live_filter_available = False
+        return bool(self._live_filter_available)
+
+    def _set_live_filter_checked(self, checked):
+        if self.live_filter_checkbox is None:
+            return
+        previous = self.live_filter_checkbox.blockSignals(True)
+        self.live_filter_checkbox.setChecked(bool(checked))
+        self.live_filter_checkbox.blockSignals(previous)
+
+    def _update_live_filter_tooltip(self, error=""):
+        checkbox = self.live_filter_checkbox
+        if checkbox is None:
+            return
+        if error:
+            checkbox.setToolTip(f"AutoFilter disabled: {error}")
+            return
+        diagnostics = self._live_filter_diagnostics
+        backend = str(diagnostics.get("backend", "")).strip().lower()
+        parts = ["Apply the NIT Gamma filter to the current raw detector image"]
+        if backend:
+            parts.append(f"backend={backend}")
+        changed = self._to_float(diagnostics.get("changed_fraction", np.nan), default=np.nan)
+        if np.isfinite(changed):
+            parts.append(f"pixels corrected={100.0 * changed:.4g}%")
+        threshold = self._to_float(diagnostics.get("threshold", np.nan), default=np.nan)
+        if np.isfinite(threshold):
+            parts.append(f"threshold={threshold:.6g}")
+        checkbox.setToolTip(". ".join(parts) + ".")
+
+    def _on_live_filter_toggled(self, enabled):
+        if self._live_image_state is None:
+            self._set_live_filter_checked(False)
+            return
+        checked = bool(enabled)
+        if checked and not self._has_live_gamma_filter():
+            self._set_live_filter_checked(False)
+            self._update_live_filter_tooltip(error="neutron-imaging-tools is unavailable")
+            return
+        self._live_image_state.set_filter_enabled(checked)
+        self._live_filter_diagnostics = {}
+        with self._live_filter_worker_lock:
+            self._live_filter_pending_request = None
+        self._render_current_frame(force_set_image=True)
+        if checked:
+            self._schedule_live_filter_for_current()
+        else:
+            self._update_live_filter_tooltip()
+
+    def _schedule_live_filter_for_current(self):
+        state = self._live_image_state
+        if state is None or not state.filter_enabled or filter_live_image_worker is None:
+            return
+        request = state.make_filter_request()
+        if request is None:
+            return
+        with self._live_filter_worker_lock:
+            if self._live_filter_worker is None:
+                return
+            if self._live_filter_future is not None:
+                self._live_filter_pending_request = request
+                return
+            try:
+                future = self._live_filter_worker.submit(
+                    filter_live_image_worker,
+                    request.image,
+                    int(self._live_filter_size),
+                )
+            except Exception as ex:
+                self._set_live_filter_checked(False)
+                state.set_filter_enabled(False)
+                self._update_live_filter_tooltip(error=str(ex))
+                self._render_current_frame(force_set_image=True)
+                return
+            self._live_filter_pending_request = None
+            self._live_filter_future = future
+        future.add_done_callback(
+            lambda completed, req=request: self._on_live_filter_future_done(completed, req)
+        )
+
+    def _on_live_filter_future_done(self, future, request):
+        try:
+            payload = future.result()
+        except Exception as ex:
+            payload = {"ok": False, "error": str(ex)}
+        if not isinstance(payload, dict):
+            payload = {"ok": False, "error": "Live filter returned an invalid result."}
+        payload = dict(payload)
+        payload["frame_id"] = int(request.frame_id)
+        payload["generation"] = int(request.generation)
+        with self._live_filter_worker_lock:
+            if future is not self._live_filter_future:
+                return
+            self._live_filter_future = None
+        try:
+            self.live_filter_ready.emit(payload)
+            self.live_filter_worker_idle.emit()
+        except Exception:
+            pass
+
+    def _on_live_filter_worker_idle(self):
+        with self._live_filter_worker_lock:
+            had_pending = self._live_filter_pending_request is not None
+            self._live_filter_pending_request = None
+        if had_pending:
+            self._schedule_live_filter_for_current()
+
+    def _on_live_filter_ready(self, payload):
+        state = self._live_image_state
+        if state is None or not isinstance(payload, dict):
+            return
+        frame_id = int(payload.get("frame_id", -1))
+        generation = int(payload.get("generation", -1))
+        is_current = (
+            state.filter_enabled
+            and frame_id == state.frame_id
+            and generation == state.filter_generation
+        )
+        if not is_current:
+            return
+        if not payload.get("ok", False):
+            error = str(payload.get("error", "Gamma filtering failed."))
+            state.set_filter_enabled(False)
+            self._set_live_filter_checked(False)
+            with self._live_filter_worker_lock:
+                self._live_filter_pending_request = None
+            self._update_live_filter_tooltip(error=error)
+            self._render_current_frame(force_set_image=True)
+            return
+        accepted = state.accept_filtered(
+            payload.get("filtered_image"),
+            frame_id=frame_id,
+            generation=generation,
+        )
+        if not accepted:
+            return
+        diagnostics = payload.get("filter_diagnostics", {})
+        self._live_filter_diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+        self._update_live_filter_tooltip()
+        self._render_current_frame(force_set_image=True)
+
     def _set_wf_norm_checked(self, checked):
         if self.wf_norm_checkbox is None:
             return
@@ -787,17 +941,31 @@ class MainScreen(display.MITRDisplay):
                 self._wf_norm_tomopy_available = False
         return bool(self._wf_norm_tomopy_available)
 
+    def _wf_norm_has_gamma_filter(self):
+        if self._wf_norm_gamma_available is None:
+            try:
+                from neutron_imaging_tools.filtering import remove_gammas  # noqa: F401
+                self._wf_norm_gamma_available = True
+            except Exception:
+                self._wf_norm_gamma_available = False
+        return bool(self._wf_norm_gamma_available)
+
     def _wf_norm_filter_label(self):
         if self._wf_norm_filter_method == WF_NORM_FILTER_MEDIAN:
             return f"Median filter (size={int(self._wf_norm_median_size)})"
+        if self._wf_norm_filter_method == WF_NORM_FILTER_GAMMA:
+            return f"Gamma filter (Neutron Imaging Tools, size={int(self._wf_norm_outlier_size)})"
         return f"Remove outliers (tomopy, size={int(self._wf_norm_outlier_size)})"
 
     def _set_wf_norm_filter_method(self, method, persist=True):
-        m = str(method).strip().lower() if method is not None else "outlier"
-        if m not in {WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}:
-            m = WF_NORM_FILTER_OUTLIER
+        m = str(method).strip().lower() if method is not None else WF_NORM_FILTER_GAMMA
+        valid_methods = {WF_NORM_FILTER_GAMMA, WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}
+        if m not in valid_methods:
+            m = WF_NORM_FILTER_GAMMA
+        if m == WF_NORM_FILTER_GAMMA and not self._wf_norm_has_gamma_filter():
+            m = WF_NORM_FILTER_OUTLIER if self._wf_norm_has_tomopy() else WF_NORM_FILTER_MEDIAN
         if m == WF_NORM_FILTER_OUTLIER and not self._wf_norm_has_tomopy():
-            m = WF_NORM_FILTER_MEDIAN
+            m = WF_NORM_FILTER_GAMMA if self._wf_norm_has_gamma_filter() else WF_NORM_FILTER_MEDIAN
         self._wf_norm_filter_method = m
         app = QtWidgets.QApplication.instance()
         if app is not None:
@@ -816,7 +984,7 @@ class MainScreen(display.MITRDisplay):
             runtime_value = app.property(WF_NORM_FILTER_RUNTIME_PROPERTY)
             if runtime_value is not None:
                 m = str(runtime_value).strip().lower()
-                if m in {WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}:
+                if m in {WF_NORM_FILTER_GAMMA, WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}:
                     self._set_wf_norm_filter_method(m, persist=False)
                     return
         settings = QtCore.QSettings()
@@ -827,16 +995,18 @@ class MainScreen(display.MITRDisplay):
         value = settings.value(WF_NORM_FILTER_SETTINGS_KEY, self._wf_norm_filter_method)
         self._set_wf_norm_filter_method(value, persist=False)
 
-    def _clear_wf_norm_reference(self, disable_checkbox=True):
+    def _clear_wf_norm_reference(self, disable_checkbox=True, restore_display=False):
         self._wf_norm_array = None
         self._wf_norm_reciprocal = None
         self._wf_norm_reciprocal_t = None
         self._wf_norm_reference_exposure_s = None
         self._wf_norm_tooltip_prefix = ""
-        self._wf_norm_ignore_next_image_changed = False
         self._wf_norm_mismatch_count = 0
         if disable_checkbox:
             self._set_wf_norm_checked(False)
+        if restore_display:
+            self._ensure_raw_state_from_latest_pv()
+            self._render_current_frame(force_set_image=True)
 
     def _ensure_wf_norm_worker(self):
         with self._wf_norm_worker_lock:
@@ -861,7 +1031,7 @@ class MainScreen(display.MITRDisplay):
         idx = min(self._wf_norm_status_index, len(labels) - 1)
         label = labels[idx]
         method = str(self._wf_norm_status_method).strip().lower()
-        if method in {WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}:
+        if method in {WF_NORM_FILTER_GAMMA, WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}:
             label = f"{label[:-3]} ({method})..."
         if self._wf_norm_status_index < (len(labels) - 1):
             self._wf_norm_status_index += 1
@@ -871,7 +1041,7 @@ class MainScreen(display.MITRDisplay):
         self._wf_norm_status_index = 1
         self._wf_norm_status_method = str(method or "").strip().lower()
         self._set_wf_norm_visual_state("busy")
-        if self._wf_norm_status_method in {WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}:
+        if self._wf_norm_status_method in {WF_NORM_FILTER_GAMMA, WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}:
             text = f"Loading ({self._wf_norm_status_method})..."
         else:
             text = "Loading..."
@@ -891,30 +1061,16 @@ class MainScreen(display.MITRDisplay):
         checked = bool(enabled)
         if not checked:
             self._set_wf_norm_visual_state("idle")
-            raw_image = self._last_source_image
-            if raw_image is None:
-                raw_image = self._get_latest_pv_image()
-            if raw_image is not None:
-                raw_image = np.asarray(raw_image)
-                self._last_source_image = raw_image
-                self._last_image = raw_image
-                self._set_image_item_data(raw_image)
-                self._histogram_user_view_active = False
-                if self.auto_levels_checkbox.isChecked():
-                    self._auto_levels_from_current_image()
-                else:
-                    self._update_level_slider_scale_from_image(raw_image)
-                    self._set_image_levels(self.min_spinbox.value(), self.max_spinbox.value())
+            self._ensure_raw_state_from_latest_pv()
+            self._render_current_frame(force_set_image=True)
+            self._histogram_user_view_active = False
             self._reset_histogram_view()
             self._apply_profile_popup_theme_from_palette()
             return
         if self._wf_norm_array is not None:
             self._set_wf_norm_visual_state("ready")
-            if self._last_source_image is not None:
-                self._apply_robust_normalization(
-                    self._last_source_image,
-                    source_exposure_s=self._last_source_exposure_s,
-                )
+            self._ensure_raw_state_from_latest_pv()
+            self._render_current_frame(force_set_image=True)
             self._reset_histogram_view()
             self._apply_profile_popup_theme_from_palette()
             return
@@ -941,22 +1097,25 @@ class MainScreen(display.MITRDisplay):
 
     def _submit_wf_norm_build(self, paths):
         if build_wf_norm_array_worker is None:
-            self._clear_wf_norm_reference(disable_checkbox=True)
+            self._clear_wf_norm_reference(disable_checkbox=True, restore_display=True)
             self._set_wf_norm_visual_state("error")
             if self.wf_norm_select_button is not None:
                 self.wf_norm_select_button.setToolTip("WF build failed: worker module import failed.")
             return
         path_list = tuple(str(p) for p in paths if str(p).strip())
         if not path_list:
-            self._clear_wf_norm_reference(disable_checkbox=True)
+            self._clear_wf_norm_reference(disable_checkbox=True, restore_display=True)
             self._set_wf_norm_visual_state("error")
             if self.wf_norm_select_button is not None:
                 self.wf_norm_select_button.setToolTip("WF build failed: no source files.")
             return
         self._load_wf_norm_filter_method_from_settings()
         selected_method = self._wf_norm_filter_method
+        if selected_method == WF_NORM_FILTER_GAMMA and not self._wf_norm_has_gamma_filter():
+            selected_method = WF_NORM_FILTER_OUTLIER if self._wf_norm_has_tomopy() else WF_NORM_FILTER_MEDIAN
+            self._set_wf_norm_filter_method(selected_method, persist=True)
         if selected_method == WF_NORM_FILTER_OUTLIER and not self._wf_norm_has_tomopy():
-            selected_method = WF_NORM_FILTER_MEDIAN
+            selected_method = WF_NORM_FILTER_GAMMA if self._wf_norm_has_gamma_filter() else WF_NORM_FILTER_MEDIAN
             self._set_wf_norm_filter_method(selected_method, persist=True)
         self._wf_norm_requested_method = selected_method
         try:
@@ -970,7 +1129,7 @@ class MainScreen(display.MITRDisplay):
             )
         except Exception as ex:
             self._stop_wf_norm_status_animation()
-            self._clear_wf_norm_reference(disable_checkbox=True)
+            self._clear_wf_norm_reference(disable_checkbox=True, restore_display=True)
             self._set_wf_norm_visual_state("error")
             if self.wf_norm_select_button is not None:
                 self.wf_norm_select_button.setToolTip(f"WF build failed: {ex}")
@@ -1002,7 +1161,7 @@ class MainScreen(display.MITRDisplay):
             error = ""
             if isinstance(payload, dict):
                 error = str(payload.get("error", "WF build failed."))
-            self._clear_wf_norm_reference(disable_checkbox=True)
+            self._clear_wf_norm_reference(disable_checkbox=True, restore_display=True)
             self._set_wf_norm_visual_state("error")
             if self.wf_norm_select_button is not None:
                 self.wf_norm_select_button.setToolTip(error)
@@ -1011,9 +1170,35 @@ class MainScreen(display.MITRDisplay):
         method_used = str(payload.get("filter_used", "")).strip().lower()
         method_requested = str(payload.get("filter_requested", "")).strip().lower()
         note = str(payload.get("filter_note", "")).strip()
+        merge_used = str(payload.get("merge_used", "")).strip().lower()
+        merge_requested = str(payload.get("merge_requested", "")).strip().lower()
+        merge_note = str(payload.get("merge_note", "")).strip()
+        filter_diagnostics = payload.get("filter_diagnostics", {})
+        if not isinstance(filter_diagnostics, dict):
+            filter_diagnostics = {}
+        merge_diagnostics = payload.get("merge_diagnostics", {})
+        if not isinstance(merge_diagnostics, dict):
+            merge_diagnostics = {}
         method_label = method_used or method_requested or self._wf_norm_requested_method or self._wf_norm_filter_method
         if method_used and method_requested and method_used != method_requested:
             method_label = f"{method_used} (requested {method_requested})"
+        if method_used == WF_NORM_FILTER_GAMMA:
+            backend = str(filter_diagnostics.get("backend", "")).strip().lower()
+            if backend:
+                method_label = f"{method_label}/{backend}"
+            filter_details = []
+            changed_fraction = self._to_float(
+                filter_diagnostics.get("changed_fraction", np.nan), default=np.nan
+            )
+            if np.isfinite(changed_fraction):
+                filter_details.append(f"pixels corrected={100.0 * changed_fraction:.4g}%")
+            threshold = self._to_float(
+                filter_diagnostics.get("threshold", np.nan), default=np.nan
+            )
+            if np.isfinite(threshold):
+                filter_details.append(f"threshold={threshold:.6g}")
+            if filter_details:
+                method_label = f"{method_label} ({', '.join(filter_details)})"
         wf_exposure_s = self._to_float(payload.get("wf_exposure_s", np.nan), default=np.nan)
         if np.isfinite(wf_exposure_s) and wf_exposure_s > 0:
             self._wf_norm_reference_exposure_s = float(wf_exposure_s)
@@ -1022,7 +1207,7 @@ class MainScreen(display.MITRDisplay):
         norm_array = np.asarray(payload.get("norm_array"))
         norm_array = np.squeeze(norm_array)
         if norm_array.size == 0 or norm_array.ndim != 2:
-            self._clear_wf_norm_reference(disable_checkbox=True)
+            self._clear_wf_norm_reference(disable_checkbox=True, restore_display=True)
             self._set_wf_norm_visual_state("error")
             if self.wf_norm_select_button is not None:
                 self.wf_norm_select_button.setToolTip(
@@ -1035,7 +1220,7 @@ class MainScreen(display.MITRDisplay):
         finite_mask = np.isfinite(norm_array)
         valid = finite_mask & (np.abs(norm_array) > self._wf_norm_eps)
         if not np.any(valid):
-            self._clear_wf_norm_reference(disable_checkbox=True)
+            self._clear_wf_norm_reference(disable_checkbox=True, restore_display=True)
             self._set_wf_norm_visual_state("error")
             if self.wf_norm_select_button is not None:
                 finite_vals = norm_array[finite_mask]
@@ -1062,7 +1247,21 @@ class MainScreen(display.MITRDisplay):
         self._wf_norm_reciprocal_t = np.asarray(reciprocal.T, dtype=np.float32)
         self._wf_norm_mismatch_count = 0
         if self.wf_norm_select_button is not None:
-            tip = f"Loaded {int(payload.get('count', 0))} WF file(s), shape={tuple(norm_array.shape)}, filter={method_label}."
+            merge_label = merge_used or merge_requested or "unknown"
+            if merge_used and merge_requested and merge_used != merge_requested:
+                merge_label = f"{merge_used} (requested {merge_requested})"
+            if merge_used == "mad_adaptive":
+                rejected_fraction = self._to_float(
+                    merge_diagnostics.get("rejected_fraction", np.nan), default=np.nan
+                )
+                if np.isfinite(rejected_fraction):
+                    merge_label = (
+                        f"{merge_label} (samples rejected={100.0 * rejected_fraction:.4g}%)"
+                    )
+            tip = (
+                f"Loaded {int(payload.get('count', 0))} WF file(s), shape={tuple(norm_array.shape)}, "
+                f"merge={merge_label}, filter={method_label}."
+            )
             exp_count = int(payload.get("wf_exposure_count", 0) or 0)
             if exp_count > 0:
                 wf_exp_min = self._to_float(payload.get("wf_exposure_min_s", np.nan), default=np.nan)
@@ -1075,16 +1274,13 @@ class MainScreen(display.MITRDisplay):
                     tip = f"{tip} Exposure tags detected in {exp_count} WF TIFF(s)"
             if note:
                 tip = f"{tip} {note}"
+            if merge_note:
+                tip = f"{tip} {merge_note}"
             self._update_wf_norm_exposure_tooltip(prefix=tip)
         self._set_wf_norm_visual_state("ready")
         if self.wf_norm_checkbox is not None and self.wf_norm_checkbox.isChecked():
-            if self._last_source_image is not None:
-                self._apply_robust_normalization(
-                    self._last_source_image,
-                    source_exposure_s=self._last_source_exposure_s,
-                )
-            else:
-                self._apply_robust_normalization()
+            self._ensure_raw_state_from_latest_pv()
+            self._render_current_frame(force_set_image=True)
             self._reset_histogram_view()
         self._apply_profile_popup_theme_from_palette()
 
@@ -1123,23 +1319,118 @@ class MainScreen(display.MITRDisplay):
                 )
         return None
 
+    def _ingest_raw_frame(self, image, *, source_exposure_s=None):
+        state = self._live_image_state
+        if state is None or image is None:
+            return False
+        source = np.asarray(image)
+        source = np.squeeze(source)
+        if source.ndim != 2 or source.size == 0:
+            return False
+        exposure_s = self._normalize_positive_exposure(source_exposure_s)
+        if exposure_s is None:
+            exposure_s = self._get_current_exposure_time_s()
+        state.ingest_raw(source, exposure_s=exposure_s)
+        self._last_source_image = state.raw_frame
+        self._last_source_exposure_s = state.raw_exposure_s
+        self._live_filter_diagnostics = {}
+        if state.filter_enabled:
+            self._update_live_filter_tooltip()
+        return True
+
+    def _ensure_raw_state_from_latest_pv(self):
+        state = self._live_image_state
+        if state is None:
+            return False
+        if state.raw_frame is not None:
+            return True
+        image = self._get_latest_pv_image()
+        if image is None:
+            return False
+        return self._ingest_raw_frame(
+            image,
+            source_exposure_s=self._get_current_exposure_time_s(),
+        )
+
+    def _render_current_frame(self, *, force_set_image=False, source_is_new_frame=False):
+        state = self._live_image_state
+        if state is None:
+            return
+        source = state.display_source()
+        if source is None:
+            return
+
+        raw = state.raw_frame
+        norm_was_active = self._is_wf_norm_active()
+        normalize = None
+        if norm_was_active:
+            normalize = lambda image: self._normalize_image_with_wf(
+                image,
+                source_exposure_s=state.raw_exposure_s,
+            )
+        display_image = state.compose_display(normalize=normalize)
+
+        transformed = (display_image is not raw) or norm_was_active
+        if force_set_image or transformed:
+            self._set_image_item_data(display_image)
+
+        if source_is_new_frame and norm_was_active:
+            self._histogram_user_view_active = False
+
+        if self._measure_enabled:
+            self._set_measure_interaction_enabled(True)
+        else:
+            self._enforce_pan_interaction()
+
+        self._last_image = display_image
+        self._schedule_histogram_update()
+        if self._profile_enabled and not self._profile_roi_dragging:
+            self._update_profile_plot()
+
+        if not self.auto_levels_checkbox.isChecked():
+            self._update_level_slider_scale_from_image(display_image)
+            self._set_image_levels(self.min_spinbox.value(), self.max_spinbox.value())
+            return
+
+        data = np.asarray(display_image)
+        if data.size == 0:
+            return
+        self._update_level_slider_scale_from_image(data)
+        finite = data[np.isfinite(data)]
+        if finite.size == 0:
+            return
+        low, high = np.percentile(
+            finite,
+            [self._norm_low_percentile, self._norm_high_percentile],
+        )
+        if high <= low:
+            high = low + 1.0
+        self.min_spinbox.blockSignals(True)
+        self.max_spinbox.blockSignals(True)
+        self.min_spinbox.setValue(float(low))
+        self.max_spinbox.setValue(float(high))
+        self.min_spinbox.blockSignals(False)
+        self.max_spinbox.blockSignals(False)
+        self._set_image_levels(low, high)
+
     def _set_image_item_data(self, image_data):
         image_view = self.ui.cameraImage
         try:
             image_item = image_view.getImageItem()
             if image_item is None or not hasattr(image_item, "setImage"):
                 return
-            self._wf_norm_image_update_in_progress = True
-            self._wf_norm_ignore_next_image_changed = True
+            self._display_image_update_in_progress = True
             image_item.setImage(image_data, autoLevels=False)
         except Exception:
             self._clear_internal_image_update_flags()
         finally:
-            QtCore.QTimer.singleShot(0, self._clear_internal_image_update_flags)
+            # ImageItem.sigImageChanged is emitted synchronously by setImage.
+            # Clear immediately so a real detector frame cannot be ignored while
+            # waiting for the next Qt event-loop turn.
+            self._clear_internal_image_update_flags()
 
     def _clear_internal_image_update_flags(self):
-        self._wf_norm_ignore_next_image_changed = False
-        self._wf_norm_image_update_in_progress = False
+        self._display_image_update_in_progress = False
 
     def _cancel_profile_requests(self):
         with self._profile_worker_lock:
@@ -1903,6 +2194,23 @@ class MainScreen(display.MITRDisplay):
         wf_norm_block.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         controls_layout.addWidget(wf_norm_block)
 
+        self.live_filter_checkbox = QtWidgets.QCheckBox("AutoFilter")
+        self.live_filter_checkbox.setChecked(False)
+        self.live_filter_checkbox.toggled.connect(self._on_live_filter_toggled)
+        live_filter_block = QtWidgets.QWidget()
+        live_filter_layout = QtWidgets.QVBoxLayout(live_filter_block)
+        live_filter_layout.setContentsMargins(0, 0, 0, 0)
+        live_filter_layout.setSpacing(2)
+        live_filter_layout.addWidget(self.live_filter_checkbox)
+        live_filter_layout.addStretch(1)
+        live_filter_block.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
+        controls_layout.addWidget(live_filter_block)
+        if self._has_live_gamma_filter():
+            self._update_live_filter_tooltip()
+        else:
+            self.live_filter_checkbox.setEnabled(False)
+            self._update_live_filter_tooltip(error="neutron-imaging-tools is unavailable")
+
         controls_layout.addWidget(measure_block)
 
         histogram_block = self._create_histogram_block()
@@ -1921,6 +2229,9 @@ class MainScreen(display.MITRDisplay):
         if idx >= 0:
             controls_layout.setStretch(idx, 0)
         idx = controls_layout.indexOf(wf_norm_block)
+        if idx >= 0:
+            controls_layout.setStretch(idx, 0)
+        idx = controls_layout.indexOf(live_filter_block)
         if idx >= 0:
             controls_layout.setStretch(idx, 0)
         idx = controls_layout.indexOf(measure_block)
@@ -2596,13 +2907,11 @@ class MainScreen(display.MITRDisplay):
             return
         _, cmap_value = self._colormap_options[index]
         image_view = self.ui.cameraImage
-        if hasattr(image_view, "setColorMap"):
-            try:
-                image_view.setColorMap(cmap_value)
-            except Exception:
-                image_view.setProperty("colorMap", cmap_value)
-        else:
-            image_view.setProperty("colorMap", cmap_value)
+        # The public setColorMap method expects a pyqtgraph ColorMap, while the
+        # Qt property accepts/coerces PyDM's enum values.  Using the property is
+        # also important for Magma, whose enum value is zero and is otherwise
+        # interpreted by setColorMap as "reuse the current map".
+        image_view.setProperty("colorMap", cmap_value)
         image_view.update()
         QtCore.QTimer.singleShot(0, self._refresh_lut_and_gamma)
 
@@ -2688,10 +2997,9 @@ class MainScreen(display.MITRDisplay):
             self._startup_autoscale_timer.stop()
 
     def _on_new_image_event(self, *args):
-        pending_frame_exposure_s = self._normalize_positive_exposure(self._pending_next_frame_exposure_s)
-        if self._wf_norm_ignore_next_image_changed and pending_frame_exposure_s is None:
-            self._wf_norm_ignore_next_image_changed = False
+        if self._display_image_update_in_progress:
             return
+        pending_frame_exposure_s = self._normalize_positive_exposure(self._pending_next_frame_exposure_s)
         frame_exposure_s = pending_frame_exposure_s
         if frame_exposure_s is None:
             frame_exposure_s = self._get_current_exposure_time_s()
@@ -2705,125 +3013,44 @@ class MainScreen(display.MITRDisplay):
         )
 
     def _on_image_changed_event(self, *args):
-        # Some backends only deliver frame changes through sigImageChanged.
-        # If we have a latched acquire-time exposure waiting, consume it here
-        # and treat this as the authoritative new-frame update. Otherwise keep
-        # this path non-authoritative so redraws do not overwrite frame state.
-        frame_exposure_s = self._normalize_positive_exposure(self._pending_next_frame_exposure_s)
-        if frame_exposure_s is not None:
-            self._pending_next_frame_exposure_s = None
-            self._apply_robust_normalization(
-                *args,
-                source_exposure_s=frame_exposure_s,
-                source_is_new_frame=True,
-            )
+        # Fallback for image widgets without newImageSignal. Internal display
+        # writes are ignored by _display_image_update_in_progress.
+        if self._display_image_update_in_progress:
             return
-        self._apply_robust_normalization(*args, source_is_new_frame=False)
+        frame_exposure_s = self._normalize_positive_exposure(self._pending_next_frame_exposure_s)
+        if frame_exposure_s is None:
+            frame_exposure_s = self._get_current_exposure_time_s()
+        self._pending_next_frame_exposure_s = None
+        self._apply_robust_normalization(
+            *args,
+            source_exposure_s=frame_exposure_s,
+            source_is_new_frame=True,
+        )
 
     def _apply_robust_normalization(self, *args, source_exposure_s=None, source_is_new_frame=False):
-        if self._wf_norm_image_update_in_progress:
-            return
-        if self._wf_norm_ignore_next_image_changed and (not source_is_new_frame):
-            self._wf_norm_ignore_next_image_changed = False
+        if self._display_image_update_in_progress:
             return
         image = None
+        source_from_pv = False
         if args:
             candidate = args[0]
             if candidate is not None:
                 image = candidate
 
-        norm_active = (
-            self.wf_norm_checkbox is not None
-            and self.wf_norm_checkbox.isChecked()
-            and self._wf_norm_reciprocal is not None
-        )
-
         if image is None:
             image = self._get_latest_pv_image()
-            if image is None and self._last_source_image is not None:
-                image = self._last_source_image
-            if image is None:
-                image_view = self.ui.cameraImage
-                try:
-                    image = image_view.getImageItem().image
-                except Exception:
-                    image = getattr(image_view, "image", None)
+            source_from_pv = image is not None
 
         if image is None:
             return
-
-        source_image = np.asarray(image)
-        source_exposure_s = self._normalize_positive_exposure(source_exposure_s)
-        # Only promote true raw-frame sources into the raw cache. Explicit image
-        # arguments are also used for internal reprocessing of cached frames and
-        # must not be allowed to overwrite the cache with display data.
-        should_refresh_raw_cache = source_is_new_frame or (not norm_active)
-        if should_refresh_raw_cache:
-            # Keep the cached raw frame aligned with the most recent PV image.
-            self._last_source_image = source_image
-            if source_exposure_s is not None:
-                self._last_source_exposure_s = source_exposure_s
-            elif self._last_source_exposure_s is None:
-                self._last_source_exposure_s = self._get_current_exposure_time_s()
-
-        effective_source_exposure_s = source_exposure_s
-        if effective_source_exposure_s is None:
-            effective_source_exposure_s = self._last_source_exposure_s
-        display_image = source_image
-        if norm_active:
-            normalized = self._normalize_image_with_wf(
-                source_image,
-                source_exposure_s=effective_source_exposure_s,
-            )
-            if normalized is not None:
-                display_image = normalized
-                self._set_image_item_data(display_image)
-
-        if source_is_new_frame and norm_active:
-            # Norm-mode histogram range is data-dependent; when a fresh frame
-            # arrives, follow the new image instead of preserving an older zoom.
-            self._histogram_user_view_active = False
-
-        # Some backends reset interaction mode when first frame is rendered.
-        if self._measure_enabled:
-            self._set_measure_interaction_enabled(True)
-        else:
-            self._enforce_pan_interaction()
-
-        self._last_image = display_image
-        self._schedule_histogram_update()
-        if self._profile_enabled and not self._profile_roi_dragging:
-            self._update_profile_plot()
-        if not self.auto_levels_checkbox.isChecked():
-            self._update_level_slider_scale_from_image(display_image)
-            if not self._manual_levels_initialized:
-                self._auto_levels_from_current_image()
-                self._manual_levels_initialized = True
-            else:
-                self._set_image_levels(self.min_spinbox.value(), self.max_spinbox.value())
+        state = self._live_image_state
+        should_ingest = bool(source_is_new_frame)
+        if state is not None and state.raw_frame is None and source_from_pv:
+            should_ingest = True
+        if should_ingest:
+            if not self._ingest_raw_frame(image, source_exposure_s=source_exposure_s):
+                return
+            self._render_current_frame(source_is_new_frame=bool(source_is_new_frame))
+            self._schedule_live_filter_for_current()
             return
-
-        data = np.asarray(display_image)
-        if data.size == 0:
-            return
-        self._update_level_slider_scale_from_image(data)
-
-        finite = data[np.isfinite(data)]
-        if finite.size == 0:
-            return
-
-        low, high = np.percentile(
-            finite,
-            [self._norm_low_percentile, self._norm_high_percentile],
-        )
-        if high <= low:
-            high = low + 1.0
-
-        self.min_spinbox.blockSignals(True)
-        self.max_spinbox.blockSignals(True)
-        self.min_spinbox.setValue(float(low))
-        self.max_spinbox.setValue(float(high))
-        self.min_spinbox.blockSignals(False)
-        self.max_spinbox.blockSignals(False)
-
-        self._set_image_levels(low, high)
+        self._render_current_frame()

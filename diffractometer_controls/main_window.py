@@ -60,6 +60,7 @@ save_bluesky_mode_state = _bluesky_mode.save_bluesky_mode_state
 
 log = logging.getLogger(__name__)
 WF_NORM_FILTER_SETTINGS_KEY = "analysis/wf_norm_filter_method"
+WF_NORM_FILTER_GAMMA = "gamma"
 WF_NORM_FILTER_OUTLIER = "outlier"
 WF_NORM_FILTER_MEDIAN = "median"
 WF_NORM_FILTER_RUNTIME_PROPERTY = "analysis_wf_norm_filter_method_runtime"
@@ -221,6 +222,9 @@ class MITRMainWindow(PyDMMainWindow):
         normalization_menu = analysis_menu.addMenu("Normalization filtering")
         normalization_action_group = QtGui.QActionGroup(normalization_menu)
         normalization_action_group.setExclusive(True)
+        norm_gamma_action = normalization_menu.addAction("Gamma filter (Neutron Imaging Tools)")
+        norm_gamma_action.setCheckable(True)
+        normalization_action_group.addAction(norm_gamma_action)
         norm_outlier_action = normalization_menu.addAction("Remove outliers (tomopy)")
         norm_outlier_action.setCheckable(True)
         normalization_action_group.addAction(norm_outlier_action)
@@ -228,27 +232,43 @@ class MITRMainWindow(PyDMMainWindow):
         norm_median_action.setCheckable(True)
         normalization_action_group.addAction(norm_median_action)
 
+        nit_gamma_available = self._is_nit_gamma_available()
         tomopy_available = self._is_tomopy_available()
+        if not nit_gamma_available:
+            norm_gamma_action.setText("Gamma filter (Neutron Imaging Tools, not installed)")
+            norm_gamma_action.setEnabled(False)
+            norm_gamma_action.setToolTip("neutron-imaging-tools is not available in this environment.")
+            normalization_menu.setToolTipsVisible(True)
         if not tomopy_available:
             norm_outlier_action.setText("Remove outliers (tomopy, not installed)")
             norm_outlier_action.setEnabled(False)
             norm_outlier_action.setToolTip("tomopy is not available in this environment.")
             normalization_menu.setToolTipsVisible(True)
-            normalization_menu.setToolTip("tomopy not installed: remove-outliers disabled, median filter is used.")
 
         settings = QtCore.QSettings()
-        default_method = WF_NORM_FILTER_OUTLIER if tomopy_available else WF_NORM_FILTER_MEDIAN
+        if nit_gamma_available:
+            default_method = WF_NORM_FILTER_GAMMA
+        elif tomopy_available:
+            default_method = WF_NORM_FILTER_OUTLIER
+        else:
+            default_method = WF_NORM_FILTER_MEDIAN
         current_method = str(settings.value(WF_NORM_FILTER_SETTINGS_KEY, default_method)).strip().lower()
-        if current_method not in {WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}:
+        valid_methods = {WF_NORM_FILTER_GAMMA, WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}
+        if current_method not in valid_methods:
             current_method = default_method
+        if current_method == WF_NORM_FILTER_GAMMA and not nit_gamma_available:
+            current_method = WF_NORM_FILTER_OUTLIER if tomopy_available else WF_NORM_FILTER_MEDIAN
+            settings.setValue(WF_NORM_FILTER_SETTINGS_KEY, current_method)
         if current_method == WF_NORM_FILTER_OUTLIER and not tomopy_available:
-            current_method = WF_NORM_FILTER_MEDIAN
+            current_method = WF_NORM_FILTER_GAMMA if nit_gamma_available else WF_NORM_FILTER_MEDIAN
             settings.setValue(WF_NORM_FILTER_SETTINGS_KEY, current_method)
         app = QApplication.instance()
         if app is not None:
             app.setProperty(WF_NORM_FILTER_RUNTIME_PROPERTY, current_method)
+        norm_gamma_action.setChecked(current_method == WF_NORM_FILTER_GAMMA)
         norm_outlier_action.setChecked(current_method == WF_NORM_FILTER_OUTLIER)
         norm_median_action.setChecked(current_method == WF_NORM_FILTER_MEDIAN)
+        norm_gamma_action.triggered.connect(lambda checked=False: self._set_norm_filter_setting(WF_NORM_FILTER_GAMMA))
         norm_outlier_action.triggered.connect(lambda checked=False: self._set_norm_filter_setting(WF_NORM_FILTER_OUTLIER))
         norm_median_action.triggered.connect(lambda checked=False: self._set_norm_filter_setting(WF_NORM_FILTER_MEDIAN))
 
@@ -399,14 +419,25 @@ class MITRMainWindow(PyDMMainWindow):
         except Exception:
             return False
 
+    def _is_nit_gamma_available(self):
+        try:
+            from neutron_imaging_tools.filtering import remove_gammas  # noqa: F401
+            return True
+        except Exception:
+            return False
+
     def _set_norm_filter_setting(self, method):
-        m = str(method).strip().lower() if method is not None else WF_NORM_FILTER_OUTLIER
-        if m not in {WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}:
-            m = WF_NORM_FILTER_OUTLIER
-        forced_median = False
+        m = str(method).strip().lower() if method is not None else WF_NORM_FILTER_GAMMA
+        valid_methods = {WF_NORM_FILTER_GAMMA, WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}
+        if m not in valid_methods:
+            m = WF_NORM_FILTER_GAMMA
+        fallback_note = ""
+        if m == WF_NORM_FILTER_GAMMA and not self._is_nit_gamma_available():
+            m = WF_NORM_FILTER_OUTLIER if self._is_tomopy_available() else WF_NORM_FILTER_MEDIAN
+            fallback_note = f"neutron-imaging-tools not installed; normalization filter set to: {m}"
         if m == WF_NORM_FILTER_OUTLIER and not self._is_tomopy_available():
-            m = WF_NORM_FILTER_MEDIAN
-            forced_median = True
+            m = WF_NORM_FILTER_GAMMA if self._is_nit_gamma_available() else WF_NORM_FILTER_MEDIAN
+            fallback_note = f"tomopy not installed; normalization filter set to: {m}"
         settings = QtCore.QSettings()
         settings.setValue(WF_NORM_FILTER_SETTINGS_KEY, m)
         settings.sync()
@@ -414,8 +445,8 @@ class MITRMainWindow(PyDMMainWindow):
         if app is not None:
             app.setProperty(WF_NORM_FILTER_RUNTIME_PROPERTY, m)
         try:
-            if forced_median:
-                self.statusBar().showMessage("tomopy not installed; normalization filter set to: median", 3000)
+            if fallback_note:
+                self.statusBar().showMessage(fallback_note, 3000)
             else:
                 self.statusBar().showMessage(f"Normalization filter set to: {m}", 2500)
         except Exception:
