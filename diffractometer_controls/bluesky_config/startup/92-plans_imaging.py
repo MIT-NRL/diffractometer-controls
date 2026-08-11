@@ -34,6 +34,9 @@ try:
         build_estimation_context,
         estimate_plan_runtime,
     )
+    from diffractometer_controls.tomography_scan_parameters import (
+        extend_tomography_angles_deg,
+    )
 except ModuleNotFoundError:
     package_root = Path(__file__).resolve().parents[3]
     if str(package_root) not in sys.path:
@@ -41,6 +44,9 @@ except ModuleNotFoundError:
     from diffractometer_controls.plan_time_estimation import (
         build_estimation_context,
         estimate_plan_runtime,
+    )
+    from diffractometer_controls.tomography_scan_parameters import (
+        extend_tomography_angles_deg,
     )
 
 transfer_time_per_bytes = 4.1203007518796994e-08 # transfer speed in seconds per byte testing on the ASI294MM Pro
@@ -292,19 +298,56 @@ def tomo_scan(file_name:str,
               num_projections:int = None,
               angle_step_size:float = None,
               start_angle:float = 0, 
-              stop_angle:float = 360,
+              stop_angle:float = 180,
               num_exposures:int = 1,
-              include_stop_angle:bool = False,
+              include_stop_angle:bool = True,
+              tilt_correction_projections:int = 0,
+              full_360_scan:bool = False,
               return_to_start:bool = True, 
               check_temperature:bool = True,
-              check_180_deg:bool = True,
               md:dict = None):
-    '''
-    Tomography scan that defaults to a 360-degree range.
-    '''
+    """Acquire an inclusive 0–180° tomography base set by default.
+
+    ``num_projections`` describes the base set, including both endpoints.
+    ``tilt_correction_projections`` adds a sparse set of exact 180° pairs in
+    the second half and always includes 360°. ``full_360_scan`` instead adds
+    every second-half pair at the same angular density as the base set.
+    """
     file_name = str(file_name).strip().replace(" ","_").replace("__","_")
     file_dir = str(file_dir).strip().replace(" ","_").replace("__","_")
 
+    # Resolve and validate the complete trajectory before changing detector or
+    # motor state.
+    tilt_correction_projections = int(tilt_correction_projections)
+    if tilt_correction_projections < 0:
+        raise ValueError("tilt_correction_projections must be non-negative")
+    base_positions, base_num_projections_calc, angle_step_size_calc, base_stop_angle = (
+        _tomo_positions_from_num_or_step_size(
+            start_angle,
+            stop_angle,
+            num_projections=num_projections,
+            angle_step_size=angle_step_size,
+            include_stop=include_stop_angle,
+        )
+    )
+    if bool(full_360_scan) or tilt_correction_projections > 0:
+        positions = np.asarray(
+            extend_tomography_angles_deg(
+                base_positions,
+                tilt_correction_projections=tilt_correction_projections,
+                full_360_scan=bool(full_360_scan),
+            ),
+            dtype=float,
+        )
+    else:
+        positions = np.asarray(base_positions, dtype=float)
+    num_projections_calc = int(len(positions))
+    actual_stop_angle = float(positions[-1])
+    actual_tilt_correction_projections = (
+        base_num_projections_calc - 1
+        if bool(full_360_scan)
+        else tilt_correction_projections
+    )
     detector = [detector]
 
     # Ensure temperature is checked within the main plan
@@ -317,26 +360,18 @@ def tomo_scan(file_name:str,
         for det in detector:
             yield from bps.mov(det.cam.acquire_time, exposure_time)
 
-    positions, num_projections_calc, angle_step_size_calc, actual_stop_angle = (
-        _tomo_positions_from_num_or_step_size(
-            start_angle,
-            stop_angle,
-            num_projections=num_projections,
-            angle_step_size=angle_step_size,
-            include_stop=include_stop_angle,
-        )
-    )
-
     estimate = estimate_plan_runtime(
         "tomo_scan",
         kwargs={
             "exposure_time": exposure_time,
-            "num_projections": num_projections_calc,
+            "num_projections": base_num_projections_calc,
             "angle_step_size": angle_step_size_calc,
             "start_angle": start_angle,
-            "stop_angle": actual_stop_angle,
+            "stop_angle": base_stop_angle,
             "num_exposures": num_exposures,
             "include_stop_angle": include_stop_angle,
+            "tilt_correction_projections": tilt_correction_projections,
+            "full_360_scan": full_360_scan,
         },
         context=_plan_estimation_context(),
     )
@@ -346,7 +381,13 @@ def tomo_scan(file_name:str,
     
 
     print("#===============#")
-    print(f"Starting tomography scan from {start_angle} to {actual_stop_angle} \nin {num_projections_calc} steps of {angle_step_size_calc} degrees with {num_exposures} exposured per step.")
+    print(
+        f"Starting tomography scan with {base_num_projections_calc} base projections "
+        f"from {start_angle} to {base_stop_angle}, plus "
+        f"{actual_tilt_correction_projections} paired second-half projections "
+        f"through {actual_stop_angle}, for {num_projections_calc} total positions "
+        f"at {num_exposures} exposures per position."
+    )
     hours = total_time // 3600
     minutes = (total_time % 3600) // 60
     seconds = total_time % 60
@@ -383,7 +424,17 @@ def tomo_scan(file_name:str,
         "plan_name": "tomo_scan",
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,
-        "plan_pattern_args": dict(motor=motor.name, start_angle=start_angle, stop_angle=actual_stop_angle, num_projections=num_projections_calc, angle_step_size=angle_step_size_calc, include_stop_angle=include_stop_angle),  # noqa: C408
+        "plan_pattern_args": dict(
+            motor=motor.name,
+            start_angle=start_angle,
+            stop_angle=base_stop_angle,
+            num_projections=base_num_projections_calc,
+            total_angular_positions=num_projections_calc,
+            angle_step_size=angle_step_size_calc,
+            include_stop_angle=include_stop_angle,
+            tilt_correction_projections=actual_tilt_correction_projections,
+            full_360_scan=bool(full_360_scan),
+        ),
         "motors": [motor.name],
     }
     _md.update(md)
@@ -434,8 +485,6 @@ def tomo_scan(file_name:str,
         pos_cache = defaultdict(lambda: None)
         # if num_projections is not None:
         scan_cycler = cycler(motor, positions)
-        if not np.any(np.isclose(positions, 180.0)) and check_180_deg:
-            raise RuntimeError("\n\n****Warning****: 180 degrees not in the scan positions. Ending the scan. Please check the scan parameters or disable the check_180_deg parameter.\n\n")
                         
 
         def inner_scan_nd():

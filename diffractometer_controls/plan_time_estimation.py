@@ -137,8 +137,8 @@ def _estimate_imaging_scan(params: Mapping[str, Any], context: Mapping[str, Any]
 
 def _estimate_tomo_scan(params: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, float | int | None]:
     start_angle = _as_float(params.get("start_angle"), 0.0) or 0.0
-    stop_angle = _as_float(params.get("stop_angle"), 360.0) or 360.0
-    include_stop_angle = bool(params.get("include_stop_angle", False))
+    stop_angle = _as_float(params.get("stop_angle"), 180.0) or 180.0
+    include_stop_angle = bool(params.get("include_stop_angle", True))
     num_projections = _as_int(params.get("num_projections"), None)
     angle_step_size = _as_float(params.get("angle_step_size", params.get("angle_step")), None)
     if num_projections is not None:
@@ -156,13 +156,27 @@ def _estimate_tomo_scan(params: Mapping[str, Any], context: Mapping[str, Any]) -
         return _unknown_estimate()
     if num_projections_calc <= 0:
         return _unknown_estimate()
+    tilt_correction_projections = _as_int(
+        params.get("tilt_correction_projections"),
+        0,
+    )
+    if tilt_correction_projections is None or tilt_correction_projections < 0:
+        return _unknown_estimate()
+    if tilt_correction_projections == 1:
+        return _unknown_estimate()
+    if bool(params.get("full_360_scan", False)):
+        if tilt_correction_projections:
+            return _unknown_estimate()
+        total_angular_positions = 2 * num_projections_calc - 1
+    else:
+        total_angular_positions = num_projections_calc + tilt_correction_projections
     num_exposures = max(1, _as_int(params.get("num_exposures"), 1) or 1)
     exposure_time = _as_float(params.get("exposure_time"), None)
     if exposure_time is None:
         exposure_time = _as_float(context.get("imaging_exposure_time_s"), None)
     if exposure_time is None:
-        return _unknown_estimate(num_exposures * num_projections_calc)
-    total_units = num_exposures * num_projections_calc
+        return _unknown_estimate(num_exposures * total_angular_positions)
+    total_units = num_exposures * total_angular_positions
     total_time = float(total_units) * (float(exposure_time) + _transfer_time_per_image(context))
     return _known_estimate(total_time, total_units)
 
@@ -322,3 +336,420 @@ def format_estimated_time(seconds: float | None) -> str:
     if value < 3600.0:
         return f"{value / 60.0:.1f}m"
     return f"{value / 3600.0:.1f}h"
+
+
+def _format_summary_duration(seconds: float) -> str:
+    total_seconds = max(0, int(round(float(seconds))))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours} h {minutes:02d} min {secs:02d} s"
+    if minutes:
+        return f"{minutes} min {secs:02d} s"
+    return f"{secs} s"
+
+
+def format_tomography_plan_summary(
+    params: Mapping[str, Any],
+    *,
+    estimated_time_s: float | None = None,
+) -> str:
+    """Return a compact multiline summary of resolved ``tomo_scan`` inputs."""
+
+    params = dict(params or {})
+    start_angle = _as_float(params.get("start_angle"), 0.0)
+    stop_angle = _as_float(params.get("stop_angle"), 180.0)
+    if start_angle is None or stop_angle is None:
+        return "Tomography scan\nAngular range is invalid."
+    include_stop = bool(params.get("include_stop_angle", True))
+    base_count = _as_int(params.get("num_projections"), None)
+    requested_step = _as_float(
+        params.get("angle_step_size", params.get("angle_step")),
+        None,
+    )
+    if base_count is not None and base_count > 0:
+        denominator = base_count - 1 if include_stop else base_count
+        base_step = (
+            (stop_angle - start_angle) / float(denominator)
+            if denominator > 0
+            else 0.0
+        )
+    elif requested_step is not None:
+        base_count = _num_steps_from_step_size_scan(
+            start_angle,
+            stop_angle,
+            requested_step,
+            include_stop=include_stop,
+        )
+        base_step = requested_step
+    else:
+        base_count = None
+        base_step = None
+
+    lines = ["Tomography scan"]
+    if base_count is None or base_count <= 0 or base_step is None:
+        lines.append(
+            f"Base: {start_angle:g}° → {stop_angle:g}° | projection count unresolved"
+        )
+        return "\n".join(lines)
+
+    lines.append(
+        f"Base: {start_angle:g}° → {stop_angle:g}° | "
+        f"{base_count:,d} projections | step {abs(base_step):.6g}°"
+    )
+    lines.append(
+        "Endpoints: start and stop included"
+        if include_stop
+        else "Endpoints: start included; stop excluded"
+    )
+
+    tilt_count = _as_int(params.get("tilt_correction_projections"), 0)
+    tilt_count = 0 if tilt_count is None else tilt_count
+    full_360 = bool(params.get("full_360_scan", False))
+    if full_360:
+        extra_count = max(0, base_count - 1)
+        coverage = (
+            f"Coverage: full 360° | {extra_count:,d} paired second-half projections "
+            "| includes 360°"
+        )
+    elif tilt_count > 0:
+        extra_count = tilt_count
+        coverage = (
+            f"Coverage: sparse correction | {extra_count:,d} exact 180° pairs "
+            "| includes 360°"
+        )
+    else:
+        extra_count = 0
+        coverage = f"Coverage: base {start_angle:g}–{stop_angle:g}° only"
+    lines.append(coverage)
+
+    def _base_includes_angle(target_angle: float) -> bool:
+        if base_count <= 0:
+            return False
+        if base_count == 1 or math.isclose(base_step, 0.0, abs_tol=1.0e-15):
+            return math.isclose(start_angle, target_angle, rel_tol=0.0, abs_tol=1.0e-9)
+        fractional_index = (target_angle - start_angle) / base_step
+        nearest_index = round(fractional_index)
+        return (
+            0 <= nearest_index < base_count
+            and math.isclose(
+                fractional_index,
+                nearest_index,
+                rel_tol=0.0,
+                abs_tol=1.0e-9,
+            )
+        )
+
+    def _scan_includes_angle(target_angle: float) -> bool:
+        if _base_includes_angle(target_angle):
+            return True
+        if full_360:
+            paired_base_angle = target_angle - 180.0
+            return (
+                not math.isclose(paired_base_angle, start_angle, abs_tol=1.0e-9)
+                and _base_includes_angle(paired_base_angle)
+            )
+        if tilt_count > 0 and math.isclose(target_angle, 360.0, abs_tol=1.0e-9):
+            return _base_includes_angle(180.0)
+        return False
+
+    range_min = min(start_angle, stop_angle)
+    range_max = max(start_angle, stop_angle)
+    second_half_requested = full_360 or tilt_count > 0
+
+    def _landmark_status(target_angle: float) -> str:
+        requested = (
+            range_min - 1.0e-9 <= target_angle <= range_max + 1.0e-9
+            or (second_half_requested and target_angle in (0.0, 180.0, 360.0))
+        )
+        if not requested:
+            return "— not requested"
+        return "✓ included" if _scan_includes_angle(target_angle) else "✗ missing"
+
+    lines.append(
+        "Landmarks: "
+        + " | ".join(
+            f"{angle:g}° {_landmark_status(angle)}"
+            for angle in (0.0, 180.0, 360.0)
+        )
+    )
+
+    total_positions = base_count + extra_count
+    frames_per_angle = max(1, _as_int(params.get("num_exposures"), 1) or 1)
+    total_frames = total_positions * frames_per_angle
+    lines.append(
+        f"Total: {total_positions:,d} angular positions | {total_frames:,d} frames"
+    )
+
+    exposure_time = _as_float(params.get("exposure_time"), None)
+    if exposure_time is None:
+        lines.append(f"Exposure: detector setting × {frames_per_angle} frame(s)/position")
+    else:
+        lines.append(
+            f"Exposure: {exposure_time:g} s × {frames_per_angle} frame(s)/position"
+        )
+        if estimated_time_s is None:
+            lines.append(
+                "Exposure-only time: "
+                + _format_summary_duration(exposure_time * total_frames)
+            )
+
+    if estimated_time_s is not None and math.isfinite(float(estimated_time_s)):
+        lines.append(
+            "Estimated acquisition: "
+            + _format_summary_duration(float(estimated_time_s))
+        )
+    lines.append(
+        "Return to start: "
+        + ("Yes" if bool(params.get("return_to_start", True)) else "No")
+        + " | Temperature check: "
+        + ("Yes" if bool(params.get("check_temperature", True)) else "No")
+    )
+    return "\n".join(lines)
+
+
+def _format_output_line(params: Mapping[str, Any]) -> str | None:
+    file_name = str(params.get("file_name", "") or "").strip()
+    file_dir = str(params.get("file_dir", "") or "").strip()
+    if file_dir and file_name:
+        return f"Output: {file_dir.rstrip('/')}/{file_name}"
+    if file_dir:
+        return f"Output directory: {file_dir}"
+    if file_name:
+        return f"Output name: {file_name}"
+    return None
+
+
+def _append_acquisition_lines(
+    lines: list[str],
+    params: Mapping[str, Any],
+    *,
+    positions: int,
+    frames_per_position: int,
+    estimated_time_s: float | None,
+) -> None:
+    positions = max(1, int(positions))
+    frames_per_position = max(1, int(frames_per_position))
+    total_frames = positions * frames_per_position
+    lines.append(
+        f"Acquisition: {positions:,d} position(s) | {total_frames:,d} frame(s)"
+    )
+    exposure_time = _as_float(params.get("exposure_time"), None)
+    if exposure_time is None:
+        lines.append(
+            f"Exposure: detector setting × {frames_per_position} frame(s)/position"
+        )
+    else:
+        lines.append(
+            f"Exposure: {exposure_time:g} s × {frames_per_position} frame(s)/position"
+        )
+        if estimated_time_s is None:
+            lines.append(
+                "Exposure-only time: "
+                + _format_summary_duration(exposure_time * total_frames)
+            )
+    if estimated_time_s is not None and math.isfinite(float(estimated_time_s)):
+        lines.append(
+            "Estimated acquisition: "
+            + _format_summary_duration(float(estimated_time_s))
+        )
+
+
+def format_imaging_plan_summary(
+    params: Mapping[str, Any],
+    *,
+    estimated_time_s: float | None = None,
+) -> str:
+    """Return a concise summary of a fixed-position imaging acquisition."""
+
+    params = dict(params or {})
+    detector = str(params.get("detector", "cam1") or "cam1")
+    num_exposures = max(1, _as_int(params.get("num_exposures"), 1) or 1)
+    lines = ["Imaging acquisition", f"Detector: {detector}"]
+    _append_acquisition_lines(
+        lines,
+        params,
+        positions=1,
+        frames_per_position=num_exposures,
+        estimated_time_s=estimated_time_s,
+    )
+    output_line = _format_output_line(params)
+    if output_line:
+        lines.append(output_line)
+    gain = params.get("gain", None)
+    offset = params.get("offset", None)
+    lines.append(
+        "Camera: gain "
+        + (str(gain) if gain is not None else "unchanged")
+        + " | offset "
+        + (str(offset) if offset is not None else "unchanged")
+    )
+    lines.append(
+        "Temperature check: "
+        + ("Yes" if bool(params.get("check_temperature", True)) else "No")
+    )
+    return "\n".join(lines)
+
+
+def _resolve_linear_scan_summary(params: Mapping[str, Any]) -> tuple[float, float, int, float] | None:
+    start = _as_float(params.get("start_pos"), None)
+    stop = _as_float(params.get("stop_pos"), None)
+    if start is None or stop is None:
+        return None
+    num_steps = _as_int(params.get("num_steps"), None)
+    requested_step = _as_float(
+        params.get("step_size", params.get("step")),
+        None,
+    )
+    if num_steps is not None and num_steps >= 2:
+        actual_step = (stop - start) / float(num_steps - 1)
+        return start, stop, num_steps, actual_step
+    if requested_step is None:
+        return None
+    num_steps = _num_steps_from_step_size_scan(start, stop, requested_step)
+    if num_steps is None or num_steps < 1:
+        return None
+    actual_stop = start + requested_step * (num_steps - 1)
+    return start, actual_stop, num_steps, requested_step
+
+
+def format_imaging_scan_plan_summary(
+    params: Mapping[str, Any],
+    *,
+    estimated_time_s: float | None = None,
+) -> str:
+    """Return a concise summary of a one-axis imaging scan."""
+
+    params = dict(params or {})
+    motor = str(params.get("motor", "") or "unresolved")
+    detector = str(params.get("detector", "cam1") or "cam1")
+    scan = _resolve_linear_scan_summary(params)
+    lines = ["Imaging motor scan", f"Motor: {motor} | Detector: {detector}"]
+    if scan is None:
+        lines.append("Range: unresolved")
+        positions = max(1, _as_int(params.get("num_steps"), 1) or 1)
+    else:
+        start, stop, positions, step = scan
+        lines.append(f"Range: {start:g} → {stop:g} | step {step:.6g}")
+        lines.append(f"Sampling: {positions:,d} inclusive position(s)")
+    frames_per_position = max(1, _as_int(params.get("num_exposures"), 1) or 1)
+    _append_acquisition_lines(
+        lines,
+        params,
+        positions=positions,
+        frames_per_position=frames_per_position,
+        estimated_time_s=estimated_time_s,
+    )
+    output_line = _format_output_line(params)
+    if output_line:
+        lines.append(output_line)
+    lines.append(
+        "Return to original position: "
+        + ("Yes" if bool(params.get("return_to_original_position", True)) else "No")
+        + " | Temperature check: "
+        + ("Yes" if bool(params.get("check_temperature", True)) else "No")
+    )
+    return "\n".join(lines)
+
+
+def format_adaptive_focus_plan_summary(
+    params: Mapping[str, Any],
+    *,
+    estimated_time_s: float | None = None,
+) -> str:
+    """Return a concise summary of the initial adaptive focus scan."""
+
+    params = dict(params or {})
+    motor = str(params.get("motor", "cam1.focus") or "cam1.focus")
+    detector = str(params.get("detector", "cam1") or "cam1")
+    start = _as_float(params.get("start_pos"), None)
+    stop = _as_float(params.get("stop_pos"), None)
+    if start is None or stop is None:
+        guess = _as_float(params.get("focus_guess"), None)
+        half_range = _as_float(params.get("scan_half_range"), None)
+        if guess is not None and half_range is not None:
+            start, stop = guess - abs(half_range), guess + abs(half_range)
+    num_steps = max(2, _as_int(params.get("num_steps"), 15) or 15)
+    lines = ["Adaptive imaging focus scan", f"Motor: {motor} | Detector: {detector}"]
+    if start is None or stop is None:
+        lines.append("Initial range: unresolved")
+    else:
+        step = (stop - start) / float(num_steps - 1)
+        lines.append(f"Initial range: {start:g} → {stop:g} | step {step:.6g}")
+    _append_acquisition_lines(
+        lines,
+        params,
+        positions=num_steps,
+        frames_per_position=1,
+        estimated_time_s=estimated_time_s,
+    )
+    output_line = _format_output_line(params)
+    if output_line:
+        lines.append(output_line)
+    lines.append("Estimate covers the initial coarse scan; adaptive requests may add frames.")
+    return "\n".join(lines)
+
+
+def _format_generic_plan_summary(
+    plan_name: str,
+    params: Mapping[str, Any],
+    *,
+    estimated_time_s: float | None = None,
+) -> str:
+    title = str(plan_name or "Plan").replace("_", " ").strip().title()
+    lines = [title]
+    motor = params.get("motor", None)
+    detector = params.get("detector", None)
+    if motor is not None or detector is not None:
+        parts = []
+        if motor is not None:
+            parts.append(f"Motor: {motor}")
+        if detector is not None:
+            parts.append(f"Detector: {detector}")
+        lines.append(" | ".join(parts))
+    scan = _resolve_linear_scan_summary(params)
+    if scan is not None:
+        start, stop, count, step = scan
+        lines.append(
+            f"Range: {start:g} → {stop:g} | {count:,d} position(s) | step {step:.6g}"
+        )
+    exposure = _as_float(
+        params.get("exposure_time", params.get("acquire_time")),
+        None,
+    )
+    if exposure is not None:
+        lines.append(f"Exposure/acquire time: {exposure:g} s")
+    if estimated_time_s is not None and math.isfinite(float(estimated_time_s)):
+        lines.append(
+            "Estimated acquisition: "
+            + _format_summary_duration(float(estimated_time_s))
+        )
+    output_line = _format_output_line(params)
+    if output_line:
+        lines.append(output_line)
+    lines.append(f"Configured parameters: {len(params):,d}")
+    return "\n".join(lines)
+
+
+def format_plan_summary(
+    plan_name: str,
+    params: Mapping[str, Any],
+    *,
+    estimated_time_s: float | None = None,
+) -> str:
+    """Format a plan-aware hover summary, with a fallback for any plan."""
+
+    formatters = {
+        "tomo_scan": format_tomography_plan_summary,
+        "imaging": format_imaging_plan_summary,
+        "imaging_scan": format_imaging_scan_plan_summary,
+        "adaptive_imaging_focus_scan": format_adaptive_focus_plan_summary,
+    }
+    formatter = formatters.get(str(plan_name))
+    if formatter is not None:
+        return formatter(params, estimated_time_s=estimated_time_s)
+    return _format_generic_plan_summary(
+        plan_name,
+        dict(params or {}),
+        estimated_time_s=estimated_time_s,
+    )
