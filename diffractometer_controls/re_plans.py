@@ -22,7 +22,10 @@ except Exception:
     from re_queue_widget import QtRePlanQueueEstimated
 
 from bluesky_widgets.models.run_engine_client import RunEngineClient
-import display
+try:
+    from diffractometer_controls import display
+except ModuleNotFoundError:
+    import display
 
 class REPlans(display.MITRDisplay):
     def __init__(self, parent=None, args=None, macros=None, ui_filename='re_plans.ui'):
@@ -44,6 +47,15 @@ class REPlans(display.MITRDisplay):
                     shutdown(wait=True, timeout=0.25)
                 except Exception:
                     pass
+
+    @staticmethod
+    def _connect_queue_editor_workflows(queue_widget, editor_widget):
+        """Connect queue gestures to the shared plan viewer/editor."""
+
+        editor_activator = editor_widget.edit_queue_item
+        registered_editors = queue_widget.registered_item_editors
+        if editor_activator not in registered_editors:
+            registered_editors.append(editor_activator)
 
     @staticmethod
     def _refresh_queue_table_layout(queue_widget):
@@ -202,7 +214,10 @@ class REPlans(display.MITRDisplay):
             table.verticalHeader().setDefaultSectionSize(max(table.fontMetrics().height() + 8, 28))
 
     def customize_ui(self):
-        from application import MITRApplication
+        try:
+            from diffractometer_controls.application import MITRApplication
+        except ModuleNotFoundError:
+            from application import MITRApplication
 
         app = MITRApplication.instance()
         re_client = app.re_client
@@ -210,6 +225,9 @@ class REPlans(display.MITRDisplay):
         re_queue = QtRePlanQueueEstimated(re_client)
         re_plan_editor = RePlanEditorWidget(re_client)
         re_plan_editor.setObjectName("REPlanEditorWidget")
+        self._connect_queue_editor_workflows(re_queue, re_plan_editor)
+        self.re_queue = re_queue
+        self.re_plan_editor = re_plan_editor
         self.ui.RE_Queue.layout().addWidget(re_queue)
         self.ui.RE_Plan_Editor.layout().addWidget(re_plan_editor)
 

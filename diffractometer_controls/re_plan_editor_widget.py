@@ -1842,6 +1842,8 @@ class RePlanEditorWidget(rec.QtRePlanEditor):
     combo boxes.
     """
 
+    signal_refresh_queue_viewer = QtCore.Signal(int)
+
     def __init__(self, model, parent=None):
         super().__init__(model, parent)
         self._pending_parameters_valid = None
@@ -1862,7 +1864,48 @@ class RePlanEditorWidget(rec.QtRePlanEditor):
             # Fall back silently if internal layout changes in future versions
             # of bluesky-widgets and attribute names differ.
             pass
+        self.signal_refresh_queue_viewer.connect(
+            self._plan_viewer.slot_change_selection
+        )
+        self._plan_viewer.signal_update_selection.connect(
+            self._show_viewer_for_queue_selection
+        )
+        self.model.events.plan_queue_changed.connect(
+            self._on_plan_queue_changed
+        )
         self._install_plan_summary_indicator()
+        # Queue selection may predate construction of this widget, in which
+        # case the model will not emit another selection-changed event.
+        QtCore.QTimer.singleShot(0, self._sync_initial_queue_selection)
+
+    def _selected_queue_item_position(self):
+        selected_uids = list(
+            getattr(self.model, "selected_queue_item_uids", []) or []
+        )
+        if len(selected_uids) != 1:
+            return -1
+        try:
+            return int(self.model.queue_item_uid_to_pos(selected_uids[0]))
+        except Exception:
+            return -1
+
+    def _sync_initial_queue_selection(self):
+        position = self._selected_queue_item_position()
+        self.signal_refresh_queue_viewer.emit(position)
+        if position >= 0:
+            self._switch_tab("view")
+
+    def _on_plan_queue_changed(self, _event):
+        """Refresh viewer contents even when the selected UID did not change."""
+
+        self.signal_refresh_queue_viewer.emit(
+            self._selected_queue_item_position()
+        )
+
+    @QtCore.Slot(int)
+    def _show_viewer_for_queue_selection(self, position):
+        if position >= 0:
+            self._switch_tab("view")
 
     def _on_destroyed(self, *args):
         self.shutdown(wait=False)
