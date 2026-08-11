@@ -1,4 +1,5 @@
 import ast
+import copy
 import inspect
 import json
 import logging
@@ -11,9 +12,16 @@ from datetime import datetime
 from pathlib import Path
 from qtpy import QtCore
 from qtpy import QtGui
-from qtpy.QtWidgets import QComboBox, QShortcut, QTableWidgetItem
+from qtpy.QtWidgets import QComboBox, QLabel, QShortcut, QTableWidgetItem
 
 import bluesky_widgets.qt.run_engine_client as rec
+
+try:
+    from diffractometer_controls.plan_time_estimation import (
+        format_plan_summary,
+    )
+except ModuleNotFoundError:
+    from plan_time_estimation import format_plan_summary
 
 try:
     from bluesky_queueserver_api import BFunc
@@ -1849,9 +1857,150 @@ class RePlanEditorWidget(rec.QtRePlanEditor):
             # Fall back silently if internal layout changes in future versions
             # of bluesky-widgets and attribute names differ.
             pass
+        self._install_plan_summary_indicator()
 
     def _on_destroyed(self, *args):
         self.shutdown(wait=False)
+
+    def _install_plan_summary_indicator(self):
+        self._plan_summary_indicator = QLabel("ⓘ", self._plan_editor)
+        self._plan_summary_indicator.setObjectName("PlanSummaryIndicator")
+        self._plan_summary_indicator.setAlignment(
+            QtCore.Qt.AlignCenter | QtCore.Qt.AlignVCenter
+        )
+        self._plan_summary_indicator.setStyleSheet(
+            "QLabel { color: palette(mid); font-size: 15px; font-weight: 700; "
+            "padding: 0 3px; }"
+        )
+        self._plan_summary_indicator.setToolTip(
+            "A plan summary is available while editing a plan."
+        )
+        self._plan_summary_indicator.setVisible(False)
+
+        editor_layout = self._plan_editor.layout()
+        controls_layout = None
+        if editor_layout is not None and editor_layout.count():
+            item = editor_layout.itemAt(editor_layout.count() - 1)
+            controls_layout = item.layout() if item is not None else None
+        if controls_layout is not None:
+            add_button = getattr(self._plan_editor, "_pb_add_to_queue", None)
+            add_index = controls_layout.indexOf(add_button) if add_button is not None else -1
+            controls_layout.insertWidget(
+                add_index if add_index >= 0 else 1,
+                self._plan_summary_indicator,
+            )
+
+        table = self._plan_editor._wd_editor
+        try:
+            table.signal_cell_modified.connect(
+                self._schedule_plan_summary_update
+            )
+            table.signal_cell_modified.connect(
+                self._schedule_loaded_plan_revalidation
+            )
+        except Exception:
+            pass
+        try:
+            table.signal_file_dir_choices_ready.connect(
+                self._schedule_loaded_plan_revalidation
+            )
+        except Exception:
+            pass
+        try:
+            self._plan_editor._combo_item_list.currentIndexChanged.connect(
+                self._schedule_plan_summary_update
+            )
+        except Exception:
+            pass
+        self._schedule_plan_summary_update()
+
+    def _schedule_plan_summary_update(self, *_args):
+        QtCore.QTimer.singleShot(0, self._update_plan_summary_tooltip)
+
+    def _schedule_loaded_plan_revalidation(self, *_args):
+        QtCore.QTimer.singleShot(0, self._revalidate_loaded_plan_item)
+
+    def _revalidate_loaded_plan_item(self):
+        """Commit programmatically populated values to editor validity state."""
+
+        table = self._plan_editor._wd_editor
+        validate = getattr(table, "_validate_cell_values", None)
+        if callable(validate):
+            validate()
+        # The custom validity slot normally coalesces rapid cell events. Flush
+        # it here so a transferred plan is immediately submittable without a
+        # user having to re-enter exposure_time or another value.
+        self._flush_parameters_valid_update()
+        self._update_plan_summary_tooltip()
+
+    def _update_plan_summary_tooltip(self):
+        indicator = getattr(self, "_plan_summary_indicator", None)
+        if indicator is None:
+            return
+        table = self._plan_editor._wd_editor
+        try:
+            item = table.get_modified_item()
+        except Exception:
+            item = getattr(table, "queue_item", None)
+        item = item if isinstance(item, dict) else {}
+        is_plan = (
+            item.get("item_type") == "plan"
+            and bool(str(item.get("name", "")).strip())
+        )
+        indicator.setVisible(is_plan)
+        if not is_plan:
+            return
+        kwargs = item.get("kwargs", {}) or {}
+        if not isinstance(kwargs, dict):
+            kwargs = {}
+        indicator.setToolTip(
+            format_plan_summary(str(item.get("name", "")), kwargs)
+        )
+
+    def load_new_plan_item(self, item, *, preserve_existing=True):
+        """Open the editor with a new plan and replace supplied parameters.
+
+        Parameters already entered for the same plan, such as file name,
+        directory, and motor, are retained. Values supplied by ``item`` always
+        win, so repeated calculator transfers replace the prior scan settings.
+        """
+
+        if not isinstance(item, dict):
+            raise TypeError("item must be a Queue Server item dictionary")
+        plan_name = str(item.get("name", "")).strip()
+        if item.get("item_type", "plan") != "plan" or not plan_name:
+            raise ValueError("item must describe a named plan")
+
+        supplied_kwargs = copy.deepcopy(item.get("kwargs", {}) or {})
+        if not isinstance(supplied_kwargs, dict):
+            raise TypeError("plan kwargs must be a dictionary")
+
+        merged_kwargs = {}
+        table = self._plan_editor._wd_editor
+        current_item = getattr(table, "queue_item", None)
+        if preserve_existing and isinstance(current_item, dict):
+            if current_item.get("item_type") == "plan" and current_item.get("name") == plan_name:
+                try:
+                    modified_item = table.get_modified_item()
+                except Exception:
+                    modified_item = current_item
+                existing_kwargs = modified_item.get("kwargs", {}) or {}
+                if isinstance(existing_kwargs, dict):
+                    merged_kwargs.update(copy.deepcopy(existing_kwargs))
+        merged_kwargs.update(supplied_kwargs)
+
+        new_item = {
+            "item_type": "plan",
+            "name": plan_name,
+            "kwargs": merged_kwargs,
+        }
+        self._switch_tab("edit")
+        self._plan_editor._current_item_source = "NEW ITEM"
+        self._plan_editor._edit_item(new_item, edit_mode=True)
+        self._revalidate_loaded_plan_item()
+        for delay_ms in (100, 500, 1500):
+            QtCore.QTimer.singleShot(delay_ms, self._revalidate_loaded_plan_item)
+        return True
 
     def shutdown(self, *, wait=False, timeout=0.2):
         for owner in (self._plan_viewer, self._plan_editor):

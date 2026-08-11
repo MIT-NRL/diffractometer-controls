@@ -42,6 +42,11 @@ except Exception:
         filter_live_image_worker = None
         LiveImageState = None
 
+try:
+    from tomography_scan_calculator import TomographyScanCalculator
+except ImportError:
+    from diffractometer_controls.tomography_scan_calculator import TomographyScanCalculator
+
 WF_NORM_FILTER_SETTINGS_KEY = "analysis/wf_norm_filter_method"
 WF_NORM_FILTER_GAMMA = "gamma"
 WF_NORM_FILTER_OUTLIER = "outlier"
@@ -57,6 +62,7 @@ class MainScreen(display.MITRDisplay):
     wf_norm_ready = QtCore.Signal(object)
     live_filter_ready = QtCore.Signal(object)
     live_filter_worker_idle = QtCore.Signal()
+    queue_server_connection_changed = QtCore.Signal(bool)
 
     def __init__(self, parent=None, args=None, macros=None, ui_filename='tomography_gui.ui'):
         super().__init__(parent, args, macros, ui_filename)
@@ -153,6 +159,9 @@ class MainScreen(display.MITRDisplay):
         self.wf_norm_select_button = None
         self.measure_line_checkbox = None
         self.measure_readout_label = None
+        self.measure_to_tomo_button = None
+        self._last_measure_length_px = None
+        self._pending_tomo_measurement_px = None
         self.profile_checkbox = None
         self._measure_view_box = None
         self._measure_scene = None
@@ -183,6 +192,11 @@ class MainScreen(display.MITRDisplay):
         self.wf_norm_ready.connect(self._on_wf_norm_ready)
         self.live_filter_ready.connect(self._on_live_filter_ready)
         self.live_filter_worker_idle.connect(self._on_live_filter_worker_idle)
+
+        self.scan_calculator = None
+        self._pending_plan_editor_item = None
+        self._install_scan_calculator_tab()
+        self._setup_tomography_plan_transfer()
 
         image_view = self.ui.cameraImage
         self._install_display_controls(image_view)
@@ -225,6 +239,93 @@ class MainScreen(display.MITRDisplay):
         self.destroyed.connect(self._shutdown_wf_norm_worker)
         self.destroyed.connect(self._shutdown_live_filter_worker)
 
+    def _install_scan_calculator_tab(self):
+        tabs = getattr(self.ui, "PyDMTabWidget", None)
+        if tabs is None:
+            tabs = self.findChild(QtWidgets.QTabWidget, "PyDMTabWidget")
+        if tabs is None:
+            return
+
+        existing = tabs.findChild(QtWidgets.QWidget, "TomographyScanCalculator")
+        if existing is not None:
+            self.scan_calculator = existing
+            return
+
+        self.scan_calculator = TomographyScanCalculator(tabs)
+        tabs.insertTab(1, self.scan_calculator, "Tomo Calculator")
+        # PyDMTabBar stores a parallel alarm-channel map. Rebuild its empty
+        # entries after a programmatic insertion so the shifted RE tab has an
+        # entry at its new index.
+        try:
+            tabs.setAlarmChannels([""] * tabs.count())
+        except Exception:
+            pass
+
+    def _setup_tomography_plan_transfer(self):
+        if self.scan_calculator is None:
+            return
+        self.scan_calculator.plan_editor_requested.connect(
+            self._load_tomography_recommendation_in_plan_editor
+        )
+        self.queue_server_connection_changed.connect(
+            self.scan_calculator.set_queue_server_connected
+        )
+        self._queue_connection_timer = QtCore.QTimer(self)
+        self._queue_connection_timer.setInterval(1000)
+        self._queue_connection_timer.timeout.connect(
+            self._refresh_queue_server_connection
+        )
+        self._queue_connection_timer.start()
+        self._refresh_queue_server_connection()
+
+    def _refresh_queue_server_connection(self):
+        app = QtWidgets.QApplication.instance()
+        re_client = getattr(app, "re_client", None)
+        is_connected = bool(
+            re_client is not None
+            and getattr(re_client, "re_manager_connected", False)
+        )
+        self.queue_server_connection_changed.emit(is_connected)
+
+    def _find_re_plan_editor(self):
+        root = self.window()
+        if root is None:
+            return None
+        named_editor = root.findChild(QtWidgets.QWidget, "REPlanEditorWidget")
+        if named_editor is not None and callable(
+            getattr(named_editor, "load_new_plan_item", None)
+        ):
+            return named_editor
+        for widget in root.findChildren(QtWidgets.QWidget):
+            if callable(getattr(widget, "load_new_plan_item", None)):
+                return widget
+        return None
+
+    def _load_tomography_recommendation_in_plan_editor(self, item):
+        self._pending_plan_editor_item = dict(item or {})
+        if self._apply_pending_plan_editor_item():
+            return
+        # Embedded displays may finish constructing one or two event cycles
+        # after the calculator. Retry without requiring a second button click.
+        QtCore.QTimer.singleShot(0, self._apply_pending_plan_editor_item)
+        QtCore.QTimer.singleShot(150, self._apply_pending_plan_editor_item)
+
+    def _apply_pending_plan_editor_item(self):
+        if not self._pending_plan_editor_item:
+            return False
+        editor = self._find_re_plan_editor()
+        if editor is None:
+            return False
+        try:
+            editor.load_new_plan_item(
+                self._pending_plan_editor_item,
+                preserve_existing=True,
+            )
+        except Exception:
+            return False
+        self._pending_plan_editor_item = None
+        return True
+
     def _set_manual_channels_connected(self, connected):
         connected = bool(connected)
         if connected == self._manual_channels_connected:
@@ -247,6 +348,9 @@ class MainScreen(display.MITRDisplay):
         timer = getattr(self, "_startup_autoscale_timer", None)
         if timer is not None:
             timer.stop()
+        queue_timer = getattr(self, "_queue_connection_timer", None)
+        if queue_timer is not None:
+            queue_timer.stop()
         self._set_manual_channels_connected(False)
         self._shutdown_profile_worker()
         self._shutdown_wf_norm_worker()
@@ -269,6 +373,10 @@ class MainScreen(display.MITRDisplay):
         timer = getattr(self, "_startup_autoscale_timer", None)
         if timer is not None and self._startup_autoscale_attempts < self._startup_autoscale_max_attempts:
             timer.start()
+        queue_timer = getattr(self, "_queue_connection_timer", None)
+        if queue_timer is not None:
+            queue_timer.start()
+            self._refresh_queue_server_connection()
 
     def _get_image_viewbox(self):
         image_view = self.ui.cameraImage
@@ -392,9 +500,121 @@ class MainScreen(display.MITRDisplay):
         if self.measure_readout_label is None:
             return
         if length_px is None:
-            self.measure_readout_label.setText("Length: -- px")
+            self.measure_readout_label.setText("-- px | -- mm")
+            self.measure_readout_label.setToolTip(
+                "Draw a line in the image to measure its pixel and physical length."
+            )
+            self._last_measure_length_px = None
+            if self.measure_to_tomo_button is not None:
+                self.measure_to_tomo_button.setEnabled(False)
             return
-        self.measure_readout_label.setText(f"Length: {float(length_px):.1f} px")
+        try:
+            length_px = float(length_px)
+        except (TypeError, ValueError):
+            self._set_measure_readout(None)
+            return
+        if not np.isfinite(length_px) or length_px <= 0:
+            self._set_measure_readout(None)
+            return
+        self._last_measure_length_px = length_px
+        pixel_size_um = None
+        if self.scan_calculator is not None:
+            try:
+                pixel_size_um = float(self.scan_calculator.pixel_size_spin.value())
+            except Exception:
+                pixel_size_um = None
+        if pixel_size_um is not None and np.isfinite(pixel_size_um) and pixel_size_um > 0:
+            length_mm = self._last_measure_length_px * pixel_size_um / 1000.0
+            if length_mm < 1.0:
+                physical_text = f"{length_mm * 1000.0:.1f} µm"
+            else:
+                physical_text = f"{length_mm:.2f} mm"
+            self.measure_readout_label.setText(
+                f"{self._last_measure_length_px:.1f}px / {physical_text.replace(' ', '')}"
+            )
+            self.measure_readout_label.setToolTip(
+                f"{self._last_measure_length_px:.3f} px = {length_mm:.6g} mm "
+                f"using {pixel_size_um:.4g} µm per pixel."
+            )
+        else:
+            self.measure_readout_label.setText(f"{self._last_measure_length_px:.1f} px")
+            self.measure_readout_label.setToolTip("Physical pixel size is unavailable.")
+        if self.measure_to_tomo_button is not None:
+            self.measure_to_tomo_button.setEnabled(True)
+
+    def _refresh_measure_readout(self, *_args):
+        if self._last_measure_length_px is not None:
+            self._set_measure_readout(self._last_measure_length_px)
+
+    def _use_measurement_in_tomo_calculator(self):
+        length_px = self._last_measure_length_px
+        if length_px is None:
+            return
+        self._pending_tomo_measurement_px = float(length_px)
+        tabs = getattr(self.ui, "PyDMTabWidget", None)
+        calculator = self._resolve_scan_calculator()
+        if tabs is not None and calculator is not None:
+            calculator_index = tabs.indexOf(calculator)
+            if calculator_index >= 0 and tabs.currentIndex() != calculator_index:
+                tabs.setCurrentIndex(calculator_index)
+        # Apply after changing pages. PyDM may perform additional page setup in
+        # the next event cycle, so repeat the idempotent assignment once on the
+        # queued cycle and once after that setup has settled.
+        self._apply_pending_tomo_measurement(clear_pending=False)
+        QtCore.QTimer.singleShot(
+            0,
+            lambda: self._apply_pending_tomo_measurement(clear_pending=False),
+        )
+        QtCore.QTimer.singleShot(150, self._apply_pending_tomo_measurement)
+
+    def _resolve_scan_calculator(self):
+        calculator = self.scan_calculator
+        if calculator is None:
+            calculator = self.findChild(QtWidgets.QWidget, "TomographyScanCalculator")
+            self.scan_calculator = calculator
+        return calculator
+
+    def _apply_pending_tomo_measurement(self, clear_pending=True):
+        length_px = self._pending_tomo_measurement_px
+        calculator = self._resolve_scan_calculator()
+        if calculator is None or length_px is None:
+            return False
+
+        pixel_size_spin = getattr(calculator, "pixel_size_spin", None)
+        if pixel_size_spin is None:
+            return False
+        pixel_size_um = float(pixel_size_spin.value())
+        if not np.isfinite(pixel_size_um) or pixel_size_um <= 0:
+            return False
+        diameter_mm = float(length_px) * pixel_size_um / 1000.0
+
+        set_object_diameter = getattr(calculator, "set_object_diameter_mm", None)
+        if not callable(set_object_diameter):
+            return False
+        set_object_diameter(diameter_mm)
+
+        update_estimate = getattr(calculator, "update_estimate", None)
+        if callable(update_estimate):
+            update_estimate()
+        diameter_spin = getattr(calculator, "object_diameter_mm_spin", None)
+        if diameter_spin is not None:
+            expected_value = min(
+                diameter_spin.maximum(),
+                max(diameter_spin.minimum(), diameter_mm),
+            )
+            display_tolerance = 0.5 * 10.0 ** (-diameter_spin.decimals())
+            if not np.isclose(
+                diameter_spin.value(),
+                expected_value,
+                rtol=0.0,
+                atol=display_tolerance,
+            ):
+                return False
+            diameter_spin.setFocus(QtCore.Qt.OtherFocusReason)
+            diameter_spin.selectAll()
+        if clear_pending:
+            self._pending_tomo_measurement_px = None
+        return True
 
     def _clear_measure_line(self):
         self._measure_drag_active = False
@@ -2016,28 +2236,57 @@ class MainScreen(display.MITRDisplay):
         auto_layout.addWidget(self.reset_levels_button)
         controls_layout.addWidget(auto_block)
 
-        self.measure_line_checkbox = QtWidgets.QCheckBox("Measure line")
+        self.measure_line_checkbox = QtWidgets.QCheckBox("Line")
+        self.measure_line_checkbox.setToolTip("Draw a line to measure the object diameter.")
         self.measure_line_checkbox.setChecked(False)
         self.measure_line_checkbox.toggled.connect(self._on_measure_line_toggled)
-        self.measure_readout_label = QtWidgets.QLabel("Length: -- px")
+        self.measure_readout_label = QtWidgets.QLabel("-- px | -- mm")
         measure_font = self.measure_readout_label.font()
-        measure_font.setPointSize(max(8, measure_font.pointSize() - 1))
+        measure_font.setPointSize(9)
         self.measure_readout_label.setFont(measure_font)
-        measure_block = QtWidgets.QWidget()
-        measure_layout = QtWidgets.QVBoxLayout(measure_block)
-        measure_layout.setContentsMargins(0, 0, 0, 0)
-        measure_layout.setSpacing(2)
-        measure_layout.addWidget(self.measure_line_checkbox)
-        measure_layout.addWidget(self.measure_readout_label)
+        self.measure_readout_label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+        self.measure_readout_label.setFixedWidth(150)
+        self.measure_readout_label.setToolTip(
+            "Draw a line in the image to measure its pixel and physical length."
+        )
         self.profile_checkbox = QtWidgets.QCheckBox("Profile")
+        compact_checkbox_font = self.profile_checkbox.font()
+        compact_checkbox_font.setPointSize(9)
+        self.measure_line_checkbox.setFont(compact_checkbox_font)
+        self.profile_checkbox.setFont(compact_checkbox_font)
         self.profile_checkbox.setChecked(False)
         self.profile_checkbox.toggled.connect(self._on_profile_toggled)
         if pg is None:
             self.profile_checkbox.setEnabled(False)
             self.profile_checkbox.setToolTip("pyqtgraph is unavailable.")
+        self.measure_to_tomo_button = QtWidgets.QPushButton("Use in Tomo Calc")
+        self.measure_to_tomo_button.setEnabled(False)
+        self.measure_to_tomo_button.setToolTip(
+            "Use this line as the object diameter and open the Tomo Calculator tab."
+        )
+        self.measure_to_tomo_button.clicked.connect(self._use_measurement_in_tomo_calculator)
+        self.measure_to_tomo_button.setSizePolicy(
+            QtWidgets.QSizePolicy.Fixed,
+            QtWidgets.QSizePolicy.Fixed,
+        )
+        self.measure_to_tomo_button.setFixedWidth(150)
+        measure_block = QtWidgets.QWidget()
+        measure_layout = QtWidgets.QHBoxLayout(measure_block)
+        measure_layout.setContentsMargins(0, 0, 0, 0)
+        measure_layout.setSpacing(8)
+        measure_layout.addWidget(self.measure_line_checkbox)
         measure_layout.addWidget(self.profile_checkbox)
-        measure_block.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
-        measure_block.setMaximumWidth(165)
+        measure_layout.addWidget(self.measure_readout_label)
+        measure_layout.addWidget(self.measure_to_tomo_button)
+        measure_layout.addStretch(1)
+        if self.scan_calculator is not None:
+            self.scan_calculator.pixel_size_spin.valueChanged.connect(
+                self._refresh_measure_readout
+            )
+        measure_block.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,
+            QtWidgets.QSizePolicy.Fixed,
+        )
 
         self.min_spinbox = QtWidgets.QDoubleSpinBox()
         self.min_spinbox.setDecimals(3)
@@ -2237,8 +2486,6 @@ class MainScreen(display.MITRDisplay):
             self.live_filter_checkbox.setEnabled(False)
             self._update_live_filter_tooltip(error="neutron-imaging-tools is unavailable")
 
-        controls_layout.addWidget(measure_block)
-
         histogram_block = self._create_histogram_block()
         if histogram_block is not None:
             controls_layout.addWidget(histogram_block)
@@ -2260,9 +2507,6 @@ class MainScreen(display.MITRDisplay):
         idx = controls_layout.indexOf(live_filter_block)
         if idx >= 0:
             controls_layout.setStretch(idx, 0)
-        idx = controls_layout.indexOf(measure_block)
-        if idx >= 0:
-            controls_layout.setStretch(idx, 0)
         if histogram_block is not None:
             idx = controls_layout.indexOf(histogram_block)
             if idx >= 0:
@@ -2280,11 +2524,26 @@ class MainScreen(display.MITRDisplay):
                 container_layout = QtWidgets.QVBoxLayout(container)
                 container_layout.setContentsMargins(0, 0, 0, 0)
                 container_layout.setSpacing(4)
+
+                analysis_panel = QtWidgets.QGroupBox("Analysis", container)
+                analysis_panel.setObjectName("ImageAnalysisPanel")
+                analysis_panel.setSizePolicy(
+                    QtWidgets.QSizePolicy.Expanding,
+                    QtWidgets.QSizePolicy.Fixed,
+                )
+                analysis_layout = QtWidgets.QHBoxLayout(analysis_panel)
+                analysis_layout.setContentsMargins(9, 4, 9, 4)
+                measure_block.setParent(analysis_panel)
+                analysis_layout.addWidget(measure_block, 1)
+
                 image_view.setParent(container)
+                controls.setParent(container)
+                container_layout.addWidget(analysis_panel, 0)
                 container_layout.addWidget(image_view, 1)
                 container_layout.addWidget(controls, 0)
                 image_parent_layout.insertWidget(idx, container)
                 self._image_controls_container = container
+                self._image_analysis_panel = analysis_panel
 
         self._set_level_slider_scale(int(self._level_slider_high_bound))
         self._sync_level_sliders_from_spinboxes()

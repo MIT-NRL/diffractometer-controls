@@ -209,6 +209,7 @@ class REPlans(display.MITRDisplay):
 
         re_queue = QtRePlanQueueEstimated(re_client)
         re_plan_editor = RePlanEditorWidget(re_client)
+        re_plan_editor.setObjectName("REPlanEditorWidget")
         self.ui.RE_Queue.layout().addWidget(re_queue)
         self.ui.RE_Plan_Editor.layout().addWidget(re_plan_editor)
 

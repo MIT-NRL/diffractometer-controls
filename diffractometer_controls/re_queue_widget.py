@@ -16,6 +16,7 @@ try:
         build_estimation_context,
         estimate_plan_runtime,
         format_estimated_time,
+        format_plan_summary,
     )
 except ModuleNotFoundError:
     package_root = Path(__file__).resolve().parent.parent
@@ -25,6 +26,7 @@ except ModuleNotFoundError:
         build_estimation_context,
         estimate_plan_runtime,
         format_estimated_time,
+        format_plan_summary,
     )
 
 try:
@@ -201,6 +203,10 @@ class QtRePlanQueueEstimated(QtRePlanQueue):
             parameters_col = labels.index("Parameters")
         except ValueError:
             return
+        try:
+            name_col = labels.index("Name")
+        except ValueError:
+            name_col = None
 
         fm = table.fontMetrics()
         params_width = fm.horizontalAdvance("Parameters") + 28
@@ -214,7 +220,25 @@ class QtRePlanQueueEstimated(QtRePlanQueue):
             if table_item is None:
                 continue
             table_item.setText(wrapped_text)
-            table_item.setToolTip(raw_text)
+            tooltip = raw_text
+            item_dict = self._normalize_item(item)
+            plan_name = str(item_dict.get("name", ""))
+            if str(item_dict.get("item_type", "") or "plan") == "plan" and plan_name:
+                item_uid = str(item_dict.get("item_uid", ""))
+                estimate = self._estimate_cache.get(item_uid, {}) or {}
+                summary = format_plan_summary(
+                    plan_name,
+                    self._normalize_plan_kwargs(item_dict),
+                    estimated_time_s=estimate.get("estimated_total_time_s"),
+                )
+                tooltip = summary
+                if raw_text:
+                    tooltip += "\n\nParameters:\n" + raw_text
+                if name_col is not None:
+                    name_item = table.item(row, name_col)
+                    if name_item is not None:
+                        name_item.setToolTip(summary)
+            table_item.setToolTip(tooltip)
             table_item.setTextAlignment(int(Qt.AlignLeft | Qt.AlignTop))
             line_width = 0
             for line in wrapped_text.splitlines() or [""]:
@@ -390,4 +414,5 @@ class QtRePlanQueueEstimated(QtRePlanQueue):
         running_item_uid = str(self._current_running_item().get("item_uid", ""))
         result_running_uid = str(results.get("running_item_uid", ""))
         self._running_estimate = results.get("running_estimate", None) if running_item_uid == result_running_uid else None
+        self._refresh_parameter_column()
         self._apply_estimates_to_table()
