@@ -1360,6 +1360,11 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             # Ensure Enter commits even when popup is closed and focus is on combo.
             _commit_shortcut_return = QShortcut(QtGui.QKeySequence("Return"), combo)
             _commit_shortcut_enter = QShortcut(QtGui.QKeySequence("Enter"), combo)
+            # Keep plan-editor commit shortcuts local to this combo and its
+            # line edit. The default WindowShortcut scope intercepts Enter in
+            # unrelated PyDM motor fields elsewhere in the main window.
+            _commit_shortcut_return.setContext(QtCore.Qt.WidgetWithChildrenShortcut)
+            _commit_shortcut_enter.setContext(QtCore.Qt.WidgetWithChildrenShortcut)
             _commit_shortcut_return.activated.connect(_on_combo_commit)
             _commit_shortcut_enter.activated.connect(_on_combo_commit)
             combo._dc_commit_shortcuts = (_commit_shortcut_return, _commit_shortcut_enter)
