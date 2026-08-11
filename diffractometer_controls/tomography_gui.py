@@ -12,7 +12,10 @@ from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher
 from pydm.widgets.channel import PyDMChannel
 
 from bluesky_widgets.models.run_engine_client import RunEngineClient
-import display
+try:
+    from diffractometer_controls import display
+except ModuleNotFoundError:
+    import display
 
 try:
     import pyqtgraph as pg
@@ -90,6 +93,9 @@ class MainScreen(display.MITRDisplay):
         self._last_image = None
         self._startup_autoscale_attempts = 0
         self._startup_autoscale_max_attempts = 30
+        self._startup_autoscale_valid_attempts = 0
+        self._startup_autoscale_settle_attempts = 5
+        self._auto_levels_reapply_pending = False
         self._level_slider_low_bound = 0.0
         self._level_slider_high_bound = 65535.0
         self._level_slider_ui_min = 0
@@ -3275,11 +3281,33 @@ class MainScreen(display.MITRDisplay):
         self._apply_robust_normalization()
 
         if self._last_image is not None:
-            self._startup_autoscale_timer.stop()
+            # Do not stop on the first valid image. PyDM redraws images in a
+            # worker thread that may already have captured the old colormap
+            # limits, so allow several event-loop passes for those updates to
+            # settle while reapplying the robust levels.
+            self._startup_autoscale_valid_attempts += 1
+            if (
+                self._startup_autoscale_valid_attempts
+                >= self._startup_autoscale_settle_attempts
+            ):
+                self._startup_autoscale_timer.stop()
             return
 
+        self._startup_autoscale_valid_attempts = 0
         if self._startup_autoscale_attempts >= self._startup_autoscale_max_attempts:
             self._startup_autoscale_timer.stop()
+
+    def _schedule_auto_levels_reapply(self):
+        if self._auto_levels_reapply_pending:
+            return
+        self._auto_levels_reapply_pending = True
+        QtCore.QTimer.singleShot(0, self._reapply_auto_levels_after_image_update)
+
+    def _reapply_auto_levels_after_image_update(self):
+        self._auto_levels_reapply_pending = False
+        checkbox = getattr(self, "auto_levels_checkbox", None)
+        if checkbox is not None and checkbox.isChecked():
+            self._auto_levels_from_current_image()
 
     def _on_new_image_event(self, *args):
         if self._display_image_update_in_progress:
@@ -3296,6 +3324,7 @@ class MainScreen(display.MITRDisplay):
             source_exposure_s=frame_exposure_s,
             source_is_new_frame=True,
         )
+        self._schedule_auto_levels_reapply()
 
     def _on_image_changed_event(self, *args):
         # Fallback for image widgets without newImageSignal. Internal display
@@ -3311,6 +3340,7 @@ class MainScreen(display.MITRDisplay):
             source_exposure_s=frame_exposure_s,
             source_is_new_frame=True,
         )
+        self._schedule_auto_levels_reapply()
 
     def _apply_robust_normalization(self, *args, source_exposure_s=None, source_is_new_frame=False):
         if self._display_image_update_in_progress:
