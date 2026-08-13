@@ -13,6 +13,39 @@ from pathlib import Path
 from qtpy import QtCore, QtGui
 
 
+def _append_unique_addresses(existing, addresses):
+    """Append EPICS search endpoints without accumulating duplicates."""
+    values = str(existing or "").split()
+    for address in addresses:
+        if address and address not in values:
+            values.append(address)
+    return " ".join(values)
+
+
+def _configure_epics_search_addresses(host):
+    """Enable LAN discovery and add privately configured production endpoints."""
+    requested_host = str(host or "localhost").strip()
+    local_addresses = ["localhost"]
+    if requested_host.casefold() != "localhost":
+        local_addresses.append(requested_host)
+    private_ca_addresses = os.environ.get("MITR_EPICS_CA_ADDR_LIST", "").split()
+    private_pva_addresses = os.environ.get("MITR_EPICS_PVA_ADDR_LIST", "").split()
+
+    # Keep normal LAN discovery for temporary/demo IOCs. Production IOCs use
+    # private nonstandard search ports and are reached only through the private
+    # endpoint lists appended below.
+    os.environ["EPICS_CA_AUTO_ADDR_LIST"] = "YES"
+    os.environ["EPICS_PVA_AUTO_ADDR_LIST"] = "YES"
+    os.environ["EPICS_CA_ADDR_LIST"] = _append_unique_addresses(
+        os.environ.get("EPICS_CA_ADDR_LIST"),
+        local_addresses + private_ca_addresses,
+    )
+    os.environ["EPICS_PVA_ADDR_LIST"] = _append_unique_addresses(
+        os.environ.get("EPICS_PVA_ADDR_LIST"),
+        local_addresses + private_pva_addresses,
+    )
+
+
 def _load_simple_env_file(path):
     try:
         lines = Path(path).expanduser().read_text().splitlines()
@@ -89,6 +122,7 @@ def main():
     _configure_qt_highdpi()
     os.environ["QT_STYLE_OVERRIDE"] = "Fusion"
     _load_simple_env_file("~/.config/diffractometer-controls/control.env")
+    _load_simple_env_file("~/.config/epics/network.env")
     _load_simple_env_file("~/.config/bluesky-queueserver/client-zmq.env")
 
     from pydm import config
@@ -278,13 +312,9 @@ def main():
     if macros is None:
         macros = dict(P='4dh4:',ioc='4dh4')
 
-    # Set the EPICS CA and PVA addresses
-    os.environ["EPICS_CA_AUTO_ADDR_LIST"] = "NO"
-    os.environ["EPICS_CA_ADDR_LIST"] = os.environ.get("EPICS_CA_ADDR_LIST", "") + " " + pydm_args.ip_addr 
-    os.environ["EPICS_PVA_ADDR_LIST"] = os.environ.get("EPICS_PVA_ADDR_LIST", "") + " " + pydm_args.ip_addr 
- 
-    if pydm_args.ip_addr == 'localhost':
-        os.environ["EPICS_CA_AUTO_ADDR_LIST"] = "NO"
+    # Use ordinary LAN discovery for demo IOCs and private configuration for
+    # production endpoints that do not listen on standard discovery ports.
+    _configure_epics_search_addresses(pydm_args.ip_addr)
 
     # ic(macros)
 
