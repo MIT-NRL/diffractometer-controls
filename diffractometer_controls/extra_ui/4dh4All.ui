@@ -1474,6 +1474,27 @@ background-color: rgb(25, 102, 255);</string>
           <string notr="true">color: rgb(228, 228, 228);
 background-color: rgb(25, 102, 255);</string>
          </property>
+         <property name="text">
+          <string>Reolink Cameras</string>
+         </property>
+         <property name="toolTip">
+          <string>Open the two-camera ADReolink video and PTZ controls</string>
+         </property>
+         <property name="filenames" stdset="0">
+          <stringlist>
+           <string>reolink_cameras.py</string>
+          </stringlist>
+         </property>
+         <property name="titles" stdset="0">
+          <stringlist>
+           <string>Reolink Camera Viewer</string>
+          </stringlist>
+         </property>
+         <property name="macros" stdset="0">
+          <stringlist>
+           <string>P=${P}</string>
+          </stringlist>
+         </property>
          <property name="showIcon" stdset="0">
           <bool>false</bool>
          </property>
@@ -3923,11 +3944,11 @@ background-color: rgb(25, 102, 255);</string>
 background-color: rgb(25, 102, 255);</string>
        </property>
        <property name="text">
-        <string>IOC Status</string>
+        <string>IOC Control</string>
        </property>
        <property name="filenames" stdset="0">
         <stringlist>
-         <string>ioc_stats_soft.ui</string>
+         <string>ioc_control_panel.py</string>
         </stringlist>
        </property>
        <property name="showIcon" stdset="0">

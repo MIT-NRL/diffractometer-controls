@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ReolinkCameras</class>
+ <widget class="QWidget" name="ReolinkCameras">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1200</width>
+    <height>800</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Diffractometer Cameras</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QTabWidget" name="cameraTabs">
+     <property name="currentIndex"><number>0</number></property>
+     <widget class="QWidget" name="camera1Tab">
+      <attribute name="title"><string>Camera 1 — 192.168.138.210</string></attribute>
+      <layout class="QVBoxLayout" name="camera1Layout">
+       <item>
+        <widget class="PyDMEmbeddedDisplay" name="camera1Display">
+         <property name="macros" stdset="0">
+          <string>P=${P},R=Reolink1:,IMAGE_PV=${P}Reolink1:Pva1:Image,TITLE=Camera 1 (.210)</string>
+         </property>
+         <property name="filename" stdset="0"><string>reolink_display.py</string></property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="camera2Tab">
+      <attribute name="title"><string>Camera 2 — 192.168.138.211</string></attribute>
+      <layout class="QVBoxLayout" name="camera2Layout">
+       <item>
+        <widget class="PyDMEmbeddedDisplay" name="camera2Display">
+         <property name="macros" stdset="0">
+          <string>P=${P},R=Reolink2:,IMAGE_PV=${P}Reolink2:Pva1:Image,TITLE=Camera 2 (.211)</string>
+         </property>
+         <property name="filename" stdset="0"><string>reolink_display.py</string></property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>PyDMEmbeddedDisplay</class>
+   <extends>QFrame</extends>
+   <header>pydm.widgets.embedded_display</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

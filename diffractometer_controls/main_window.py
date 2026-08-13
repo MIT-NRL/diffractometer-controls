@@ -130,6 +130,7 @@ class MITRMainWindow(PyDMMainWindow):
         self._focus_doc_subscription = None
         self._focus_data_addr = None
         self._bluesky_environment_update_dialog = None
+        self._ioc_control_panel = None
         self._focus_qs_control_addr = "tcp://localhost:60615"
         self._focus_qs_info_addr = "tcp://localhost:60625"
         self._focus_launched_sessions = set()
@@ -186,13 +187,24 @@ class MITRMainWindow(PyDMMainWindow):
         camera_button = QToolButton(self)
         camera_button.setIcon(self._load_camera_icon())
         camera_button.setText("Camera")
+        camera_button.setToolTip("Open Reolink camera video and controls")
         camera_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         camera_button.setIconSize(QSize(24, 24))
         camera_button.clicked.connect(self.launch_camera_viewer)
 
+        ioc_button = QToolButton(self)
+        ioc_button.setIcon(self._make_themed_icon('fa6s.server'))
+        ioc_button.setText("IOCs")
+        ioc_button.setToolTip("Open IOC process controls and EPICS health")
+        ioc_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        ioc_button.setIconSize(QSize(24, 24))
+        ioc_button.clicked.connect(self.launch_ioc_control_panel)
+        self._register_themed_icon(ioc_button, 'fa6s.server')
+
         # Add the button to the navbar
         self.ui.navbar.addWidget(controlsAll)
         self.ui.navbar.addWidget(camera_button)
+        self.ui.navbar.addWidget(ioc_button)
         self._setup_run_status_widget(self.ui.navbar)
 
         # controlsAll = CustomRelatedDisplayButtonWrapper(
@@ -402,29 +414,10 @@ class MITRMainWindow(PyDMMainWindow):
         # add line to the menu
         epics_menu.addSeparator()
 
-        # Add start action to the "EPICS Controls" submenu
-        epics_ioc_start = epics_menu.addAction("IOC Start")
-        epics_ioc_start.triggered.connect(lambda: self.control_servers("4dh4ioc", "start"))
-        self._set_themed_action_icon(epics_ioc_start, 'fa5s.play')
-        epics_ioc_start.setToolTip("Start the EPICS IOC")
-        self._configure_local_maintenance_action(epics_ioc_start)
-        epics_menu.addAction(epics_ioc_start)
-
-        # Add actions to the "EPICS Controls" submenu
-        epics_ioc_reset = epics_menu.addAction("IOC Reset")
-        epics_ioc_reset.triggered.connect(lambda: self.control_servers("4dh4ioc", "restart"))
-        self._set_themed_action_icon(epics_ioc_reset, 'fa5s.redo')
-        epics_ioc_reset.setToolTip("Reset the EPICS IOC")
-        self._configure_local_maintenance_action(epics_ioc_reset)
-        epics_menu.addAction(epics_ioc_reset)
-
-        # Add stop action to the "EPICS Controls" submenu
-        epics_ioc_stop = epics_menu.addAction("IOC Stop")
-        epics_ioc_stop.triggered.connect(lambda: self.control_servers("4dh4ioc", "stop"))
-        self._set_themed_action_icon(epics_ioc_stop, 'fa5s.stop')
-        epics_ioc_stop.setToolTip("Stop the EPICS IOC")
-        self._configure_local_maintenance_action(epics_ioc_stop)
-        epics_menu.addAction(epics_ioc_stop)
+        ioc_panel_action = epics_menu.addAction("IOC Control and Status")
+        ioc_panel_action.triggered.connect(self.launch_ioc_control_panel)
+        self._set_themed_action_icon(ioc_panel_action, 'fa6s.server')
+        ioc_panel_action.setToolTip("Control and monitor the main and camera IOCs")
 
         # Add the "Controls" action to the menu bar
         controls_action = QAction(gear_icon, "Old Control Menu", self)
@@ -1127,16 +1120,51 @@ class MITRMainWindow(PyDMMainWindow):
 
         app = MITRApplication.instance()
         macros = dict(self.macros)
-        macros.update({"R": "camURL:", "im": "urlimage1:"})
+        macros.pop("R", None)
+        macros.pop("im", None)
         try:
             if app is not None:
-                app.new_pydm_process("extra_ui/cam_url.ui", macros=macros)
+                app.new_pydm_process(
+                    "extra_ui/reolink_cameras.py", macros=macros
+                )
             else:
-                load_file("extra_ui/cam_url.ui", macros=macros, target=ScreenTarget.NEW_PROCESS)
+                load_file(
+                    "extra_ui/reolink_cameras.py",
+                    macros=macros,
+                    target=ScreenTarget.NEW_PROCESS,
+                )
         except Exception as ex:
             msg = f"Unable to launch camera viewer: {ex}"
             log.warning(msg)
             QMessageBox.warning(self, "Camera Viewer", msg)
+
+    def launch_ioc_control_panel(self):
+        try:
+            panel = self._ioc_control_panel
+            if panel is not None:
+                panel.show()
+                panel.raise_()
+                panel.activateWindow()
+                return
+
+            panel = load_file(
+                "extra_ui/ioc_control_panel.py",
+                macros=self.macros,
+                target=ScreenTarget.DIALOG,
+            )
+            # load_file() returns a top-level widget. Keep a Python reference;
+            # otherwise it is collected as soon as this method returns, taking
+            # its asynchronous status QProcesses with it.
+            self._ioc_control_panel = panel
+            panel.destroyed.connect(self._ioc_control_panel_destroyed)
+        except Exception as ex:
+            msg = f"Unable to open IOC control panel: {ex}"
+            log.warning(msg)
+            QMessageBox.warning(self, "IOC Control", msg)
+
+    @Slot()
+    def _ioc_control_panel_destroyed(self):
+        self._ioc_control_panel = None
 
     def launch_focus_program(self):
         viewer_script = Path(__file__).resolve().parent / "focus_offline_viewer.py"
