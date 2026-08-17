@@ -80,6 +80,23 @@ def _collect_tomo_motor_names():
             names.append(f"{parent_name}.{attr}")
     return names
 
+
+def _collect_imaging_detector_names():
+    """Collect supported imaging detectors for Queue Server dropdowns."""
+    names = []
+    for name in ("cam1", "sim_focus_cam"):
+        detector = globals().get(name, None)
+        if detector is None:
+            continue
+        if not callable(getattr(detector, "read", None)):
+            continue
+        if not callable(getattr(detector, "trigger", None)):
+            continue
+        if not hasattr(detector, "cam") or not hasattr(detector, "tiff1"):
+            continue
+        names.append(name)
+    return names
+
 def _one_nd_step_repeat(
     detectors,
     step,
@@ -278,9 +295,11 @@ def _reset_detector_array_counter(detectors):
 @parameter_annotation_decorator({
     "parameters": {
         "detector": {
-            "annotation": "__READABLE__",
+            "annotation": "ImagingDetectors",
             "default": "cam1",
-            "description": "Imaging detector (must be readable, default: cam1)"
+            "description": "Imaging detector (default: cam1)",
+            "devices": {"ImagingDetectors": _collect_imaging_detector_names()},
+            "convert_device_names": True,
         },
         "motor": {
             "annotation": "typing.Union[str, Motors]",
@@ -516,9 +535,11 @@ def tomo_scan(file_name:str,
 @parameter_annotation_decorator({
     "parameters": {
         "detector": {
-            "annotation": "__READABLE__",
+            "annotation": "ImagingDetectors",
             "default": "cam1",
-            "description": "Imaging detector (must be readable, default: cam1)"
+            "description": "Imaging detector (default: cam1)",
+            "devices": {"ImagingDetectors": _collect_imaging_detector_names()},
+            "convert_device_names": True,
         }
     }
 })
@@ -642,9 +663,11 @@ def imaging(
 @parameter_annotation_decorator({
     "parameters": {
         "detector": {
-            "annotation": "__READABLE__",
+            "annotation": "ImagingDetectors",
             "default": "cam1",
-            "description": "Imaging detector (must be readable, default: cam1)"
+            "description": "Imaging detector (default: cam1)",
+            "devices": {"ImagingDetectors": _collect_imaging_detector_names()},
+            "convert_device_names": True,
         },
         "motor": {
             "annotation": "typing.Union[str, Motors]",

@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import datetime as _dt
 import math
 import os
 import re
-import subprocess
+import signal
 import sys
 import threading
 import time
@@ -37,11 +38,17 @@ except Exception:
     REManagerAPI = None
 
 try:
-    from focus_offline_viewer import FocusOfflineWindow, FrameInfo, _build_focus_program_icon
+    from focus_offline_viewer import (
+        FocusOfflineWindow,
+        FrameInfo,
+        _apply_saved_theme,
+        _build_focus_program_icon,
+    )
 except Exception:
     from diffractometer_controls.focus_offline_viewer import (
         FocusOfflineWindow,
         FrameInfo,
+        _apply_saved_theme,
         _build_focus_program_icon,
     )
 
@@ -51,86 +58,6 @@ def _is_number(value) -> bool:
         return math.isfinite(float(value))
     except Exception:
         return False
-
-
-THEME_MODE_SETTINGS_KEY = "appearance/theme_mode"
-SETTINGS_ORGANIZATION = "MITR"
-SETTINGS_APPLICATION = "MITR"
-DEFAULT_QT_STYLE = "Fusion"
-
-
-def _desktop_prefers_dark() -> bool:
-    override = os.environ.get("MITR_FORCE_DARK_MODE")
-    if override is not None:
-        return override.strip().lower() in {"1", "true", "yes", "on", "dark"}
-
-    gtk_theme = os.environ.get("GTK_THEME", "").strip().lower()
-    if gtk_theme and "dark" in gtk_theme:
-        return True
-
-    for key in ("color-scheme", "gtk-theme"):
-        try:
-            proc = subprocess.run(
-                ["gsettings", "get", "org.gnome.desktop.interface", key],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=1.5,
-            )
-        except Exception:
-            continue
-        value = proc.stdout.strip().strip("'").lower()
-        if key == "color-scheme" and value == "prefer-dark":
-            return True
-        if "dark" in value:
-            return True
-    return False
-
-
-def _build_dark_palette() -> QtGui.QPalette:
-    palette = QtGui.QPalette()
-    palette.setColor(QtGui.QPalette.Window, QtGui.QColor(45, 45, 45))
-    palette.setColor(QtGui.QPalette.WindowText, QtGui.QColor(240, 240, 240))
-    palette.setColor(QtGui.QPalette.Base, QtGui.QColor(30, 30, 30))
-    palette.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(45, 45, 45))
-    palette.setColor(QtGui.QPalette.ToolTipBase, QtGui.QColor(45, 45, 45))
-    palette.setColor(QtGui.QPalette.ToolTipText, QtGui.QColor(240, 240, 240))
-    palette.setColor(QtGui.QPalette.Text, QtGui.QColor(240, 240, 240))
-    palette.setColor(QtGui.QPalette.Button, QtGui.QColor(53, 53, 53))
-    palette.setColor(QtGui.QPalette.ButtonText, QtGui.QColor(240, 240, 240))
-    palette.setColor(QtGui.QPalette.BrightText, QtGui.QColor(255, 80, 80))
-    palette.setColor(QtGui.QPalette.Link, QtGui.QColor(66, 153, 225))
-    palette.setColor(QtGui.QPalette.Highlight, QtGui.QColor(66, 153, 225))
-    palette.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor(15, 15, 15))
-    palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.Base, QtGui.QColor(38, 38, 38))
-    palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.Window, QtGui.QColor(45, 45, 45))
-    palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.Text, QtGui.QColor(127, 127, 127))
-    palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.ButtonText, QtGui.QColor(127, 127, 127))
-    return palette
-
-
-def _sync_pyqtgraph_palette(palette: QtGui.QPalette):
-    bg = palette.color(QtGui.QPalette.Window)
-    fg = palette.color(QtGui.QPalette.WindowText)
-    pg.setConfigOption("background", (bg.red(), bg.green(), bg.blue()))
-    pg.setConfigOption("foreground", (fg.red(), fg.green(), fg.blue()))
-
-
-def _apply_saved_theme(app: QtWidgets.QApplication):
-    QtCore.QCoreApplication.setOrganizationName(SETTINGS_ORGANIZATION)
-    QtCore.QCoreApplication.setApplicationName(SETTINGS_APPLICATION)
-    base_style = QtWidgets.QStyleFactory.create(DEFAULT_QT_STYLE)
-    if base_style is not None:
-        app.setStyle(base_style)
-    base_palette = QtGui.QPalette(app.palette())
-    settings = QtCore.QSettings(SETTINGS_ORGANIZATION, SETTINGS_APPLICATION)
-    mode = str(settings.value(THEME_MODE_SETTINGS_KEY, "system")).strip().lower()
-    if mode not in {"system", "light", "dark"}:
-        mode = "system"
-    dark_requested = _desktop_prefers_dark() if mode == "system" else (mode == "dark")
-    palette = _build_dark_palette() if dark_requested else base_palette
-    app.setPalette(palette)
-    _sync_pyqtgraph_palette(palette)
 
 
 def _acquire_session_lock(session_id: Optional[str]):
@@ -184,7 +111,13 @@ class QueueServerAdaptiveClient:
         self._user = str(user)
         self._user_group = str(user_group)
 
-    def submit(self, command: str, payload: Optional[Dict] = None) -> Dict:
+    def submit(
+        self,
+        command: str,
+        payload: Optional[Dict] = None,
+        *,
+        confirmation_timeout_s: float = 10.0,
+    ) -> Dict:
         item = BFunc(
             "adaptive_focus_submit_command",
             str(self.session_id),
@@ -200,7 +133,7 @@ class QueueServerAdaptiveClient:
             )
 
         try:
-            return _exec()
+            response = _exec()
         except Exception as ex:
             msg = str(ex)
             # Queue Server may keep stale permissions in memory until reloaded.
@@ -210,7 +143,7 @@ class QueueServerAdaptiveClient:
                 except Exception:
                     pass
                 try:
-                    return _exec()
+                    response = _exec()
                 except Exception as ex2:
                     return {
                         "success": False,
@@ -218,12 +151,59 @@ class QueueServerAdaptiveClient:
                         "error": str(ex2),
                         "command": str(command),
                     }
+            else:
+                return {
+                    "success": False,
+                    "ok": False,
+                    "error": msg,
+                    "command": str(command),
+                }
+
+        response = dict(response or {})
+        if not bool(response.get("success", False)):
+            response.setdefault("ok", False)
+            return response
+        task_uid = str(response.get("task_uid", "")).strip()
+        if not task_uid:
             return {
+                **response,
                 "success": False,
                 "ok": False,
-                "error": msg,
-                "command": str(command),
+                "error": "missing_task_uid",
             }
+
+        try:
+            self._api.wait_for_completed_task(
+                task_uid,
+                timeout=float(max(1.0, confirmation_timeout_s)),
+                treat_not_found_as_completed=False,
+            )
+            task_reply = dict(self._api.task_result(task_uid) or {})
+        except Exception as ex:
+            return {
+                **response,
+                "success": False,
+                "ok": False,
+                "error": f"command_confirmation_failed: {ex}",
+            }
+
+        task_result = dict(task_reply.get("result", {}) or {})
+        if task_reply.get("status") != "completed" or not bool(task_result.get("success", False)):
+            return {
+                **response,
+                "success": False,
+                "ok": False,
+                "error": str(task_result.get("msg") or task_reply.get("msg") or "command_task_failed"),
+            }
+        return_value = task_result.get("return_value", {})
+        if not isinstance(return_value, dict):
+            return_value = {"ok": True, "return_value": return_value}
+        return {
+            **response,
+            **return_value,
+            "success": bool(return_value.get("ok", True)),
+            "task_uid": task_uid,
+        }
 
 
 class FocusOnlineBridge(QtCore.QObject):
@@ -238,6 +218,7 @@ class FocusOnlineBridge(QtCore.QObject):
     _extend_right_requested = QtCore.Signal()
     _mark_complete_requested = QtCore.Signal()
     _mark_aborted_requested = QtCore.Signal()
+    _terminal_command_failed = QtCore.Signal(str)
 
     def __init__(
         self,
@@ -323,6 +304,7 @@ class FocusOnlineBridge(QtCore.QObject):
         self._complete_button: Optional[QtWidgets.QPushButton] = None
         self._complete_sent = False
         self._suppress_close_complete = False
+        self._focus_action_timer: Optional[QtCore.QTimer] = None
 
         self._frame_received.connect(self._on_frame_received)
         self._log_received.connect(self._on_log_received)
@@ -333,6 +315,7 @@ class FocusOnlineBridge(QtCore.QObject):
         self._extend_right_requested.connect(self._on_extend_right_requested)
         self._mark_complete_requested.connect(self._on_mark_complete_requested)
         self._mark_aborted_requested.connect(self._on_mark_aborted_requested)
+        self._terminal_command_failed.connect(self._on_terminal_command_failed)
 
     def _ensure_window(self):
         if self.window is not None:
@@ -348,6 +331,7 @@ class FocusOnlineBridge(QtCore.QObject):
             preprocess_size=self.preprocess_size,
             allow_file_open=False,
         )
+        self.window.warm_full_process_pool()
         self.window.installEventFilter(self)
         self.window.setWindowTitle("Online Focus Scan Viewer")
         try:
@@ -431,8 +415,14 @@ class FocusOnlineBridge(QtCore.QObject):
         step_spin.setToolTip("Step size for Scan Around Focus (scroll mouse wheel to adjust).")
         go_btn = QtWidgets.QPushButton("Go to Focus", self.window)
         scan_btn = QtWidgets.QPushButton("Scan Around Focus", self.window)
-        extend_left_btn = QtWidgets.QPushButton("Extend Left +3", self.window)
-        extend_right_btn = QtWidgets.QPushButton("Extend Right +3", self.window)
+        extend_left_btn = QtWidgets.QPushButton("Extend Left (3 pts)", self.window)
+        extend_right_btn = QtWidgets.QPushButton("Extend Right (3 pts)", self.window)
+        extend_left_btn.setToolTip(
+            "Acquire three points beyond the current left bound using the coarse-scan spacing."
+        )
+        extend_right_btn.setToolTip(
+            "Acquire three points beyond the current right bound using the coarse-scan spacing."
+        )
         complete_btn = QtWidgets.QPushButton("Complete", self.window)
         go_btn.clicked.connect(lambda: self._go_focus_requested.emit(str(combo.currentText())))
         scan_btn.clicked.connect(
@@ -460,6 +450,28 @@ class FocusOnlineBridge(QtCore.QObject):
         self._extend_left_button = extend_left_btn
         self._extend_right_button = extend_right_btn
         self._complete_button = complete_btn
+        combo.currentTextChanged.connect(lambda _text: self._refresh_focus_action_state())
+        self._focus_action_timer = QtCore.QTimer(self)
+        self._focus_action_timer.setInterval(250)
+        self._focus_action_timer.timeout.connect(self._refresh_focus_action_state)
+        self._focus_action_timer.start()
+        self._refresh_focus_action_state()
+
+    @QtCore.Slot()
+    def _refresh_focus_action_state(self, *_args):
+        if self._focus_metric_combo is None:
+            return
+        metric = str(self._focus_metric_combo.currentText())
+        target = self.get_focus_target(metric)
+        ready = bool((not self._complete_sent) and target is not None)
+        for button in (self._go_focus_button, self._scan_focus_button):
+            if button is not None:
+                button.setEnabled(ready)
+                button.setToolTip(
+                    f"Validated full-quality target: {float(target):.5f}"
+                    if ready
+                    else "Waiting for at least five full-quality, in-range focus points."
+                )
 
     @QtCore.Slot(str)
     def _on_go_focus_requested(self, metric: str):
@@ -545,36 +557,29 @@ class FocusOnlineBridge(QtCore.QObject):
         except Exception as ex:
             self._log_received.emit(f"Abort handler failed: {ex}")
 
+    @QtCore.Slot(str)
+    def _on_terminal_command_failed(self, message: str):
+        self._complete_sent = False
+        if self._scan_step_spin is not None:
+            self._scan_step_spin.setEnabled(True)
+        for button in (
+            self._extend_left_button,
+            self._extend_right_button,
+            self._complete_button,
+        ):
+            if button is not None:
+                button.setEnabled(True)
+        self._refresh_focus_action_state()
+        self._log_received.emit(str(message))
+
     def get_focus_target(self, metric: str = "mtf50") -> Optional[float]:
         if self.window is None:
             return None
-        m = str(metric or "mtf50").strip().lower()
-        if m == "mtf50":
-            target = getattr(self.window, "_optimal_mtf50_position", np.nan)
-        elif m == "lsf_sigma":
-            target = getattr(self.window, "_optimal_psf_position", np.nan)
-        else:
-            target = getattr(self.window, "_optimal_focus_position", np.nan)
         try:
-            target = float(target)
+            target = self.window.validated_focus_target(str(metric))
         except Exception:
-            target = np.nan
-        if np.isfinite(target):
-            return target
-        # Fallbacks if selected metric is unavailable.
-        for attr in (
-            "_optimal_mtf50_position",
-            "_optimal_psf_position",
-            "_optimal_focus_position",
-        ):
-            val = getattr(self.window, attr, np.nan)
-            try:
-                val = float(val)
-            except Exception:
-                val = np.nan
-            if np.isfinite(val):
-                return val
-        return None
+            target = None
+        return float(target) if target is not None and np.isfinite(float(target)) else None
 
     def eventFilter(self, watched, event):
         if (
@@ -885,14 +890,49 @@ class FocusOnlineBridge(QtCore.QObject):
                         candidates.append(key_text)
 
         if not candidates:
-            for key, entry in data_keys.items():
+            # Score motor-like fields instead of accepting the first field that
+            # contains "focus".  A detector named e.g. ``sim_focus_cam`` puts
+            # that word in every detector field and previously caused an image
+            # total or blur sigma to be used as the plot's motor coordinate.
+            excluded_terms = (
+                "image", "file", "path", "count", "sum", "total", "mean",
+                "sigma", "mtf", "psf", "lsf", "blur", "stats", "array",
+            )
+            scored = []
+            for order, (key, entry) in enumerate(data_keys.items()):
                 key_text = str(key).strip()
-                if "setpoint" in key_text.lower():
+                key_lower = key_text.lower()
+                if "setpoint" in key_lower:
                     continue
-                object_name = str((entry or {}).get("object_name", "")).strip()
-                text = f"{key_text} {object_name}".lower()
-                if "focus" in text or "motor" in text or "position" in text:
-                    candidates.append(key_text)
+                entry = entry or {}
+                dtype = str(entry.get("dtype", "")).lower()
+                shape = entry.get("shape", [])
+                if not (dtype in {"number", "integer", "float"} or shape in ([], (), None)):
+                    continue
+                object_name = str(entry.get("object_name", "")).strip()
+                object_lower = object_name.lower()
+                combined = f"{key_lower} {object_lower}"
+                score = 0
+                if key_lower.endswith("_position") or key_lower == "position":
+                    score += 120
+                if "motor" in key_lower:
+                    score += 100
+                if "motor" in object_lower:
+                    score += 80
+                if "position" in key_lower:
+                    score += 60
+                if "position" in object_lower:
+                    score += 40
+                if "focus" in key_lower:
+                    score += 20
+                if "focus" in object_lower:
+                    score += 10
+                if any(term in combined for term in excluded_terms):
+                    score -= 200
+                if score > 0:
+                    scored.append((score, -order, key_text))
+            if scored:
+                candidates.append(max(scored)[2])
 
         for key in candidates:
             entry = data_keys.get(key, {}) or {}
@@ -1213,6 +1253,8 @@ class FocusOnlineBridge(QtCore.QObject):
                 f"Image file did not appear within {self.file_wait_timeout_s:.1f}s: {path}"
             )
             self._path_first_seen_ts.pop(norm, None)
+            self._path_retry_count.pop(norm, None)
+            return
         self._path_retry_count.pop(norm, None)
         self._path_first_seen_ts.pop(norm, None)
 
@@ -1222,6 +1264,7 @@ class FocusOnlineBridge(QtCore.QObject):
 
         idx = int(len(self.window.frames))
         self.window.frames.append(FrameInfo(index=idx, path=path, position=float(position)))
+        self.window.note_stream_frame_added()
         if idx == 0:
             self.window._log(
                 f"First streamed frame: {path.name} @ motor={float(position):.5f}"
@@ -1426,7 +1469,10 @@ def main(argv=None) -> int:
         run_file_dir=args.run_file_dir,
         run_data_root=args.run_data_root,
     )
-    bridge._ensure_window()
+    command_executor = None
+    pending_command_future = None
+    terminal_future = None
+    viewer_ready_callback = None
 
     if args.session_id:
         try:
@@ -1437,48 +1483,79 @@ def main(argv=None) -> int:
                 user=str(args.qserver_user),
                 user_group=str(args.qserver_user_group),
             )
+            command_executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="focus-command",
+            )
 
             def _submit(command: str, payload: Optional[Dict] = None):
+                nonlocal pending_command_future
+                command_name = str(command or "").strip().lower()
+                is_terminal = command_name in {"complete", "abort"}
+                if (
+                    not is_terminal
+                    and pending_command_future is not None
+                    and not pending_command_future.done()
+                ):
+                    bridge._log_received.emit(
+                        f"Adaptive command ignored while another command is being confirmed: {command_name}"
+                    )
+                    return None
+
                 def _worker():
                     try:
-                        resp = cmd_client.submit(command, payload=payload)
+                        resp = cmd_client.submit(command_name, payload=payload)
                         ok = bool(resp.get("success", resp.get("ok", False)))
                         if ok:
                             bridge._log_received.emit(
-                                f"Adaptive command submitted: {command}"
+                                f"Adaptive command confirmed: {command_name}"
                             )
                         else:
                             bridge._log_received.emit(
-                                f"Adaptive command failed: {command} :: {resp}"
+                                f"Adaptive command failed: {command_name} :: {resp}"
                             )
+                            if is_terminal:
+                                bridge._terminal_command_failed.emit(
+                                    f"Terminal command failed: {command_name} :: {resp}"
+                                )
                     except Exception as ex:
                         bridge._log_received.emit(
-                            f"Adaptive command failed: {command} :: {ex}"
+                            f"Adaptive command failed: {command_name} :: {ex}"
                         )
+                        if is_terminal:
+                            bridge._terminal_command_failed.emit(
+                                f"Terminal command failed: {command_name} :: {ex}"
+                            )
 
-                threading.Thread(
-                    target=_worker,
-                    daemon=True,
-                    name=f"focus-cmd-{str(command)}",
-                ).start()
+                pending_command_future = command_executor.submit(_worker)
+                return pending_command_future
 
             def _on_go_to_focus(metric: str):
                 target = bridge.get_focus_target(metric)
-                payload = {}
-                if target is not None and np.isfinite(float(target)):
-                    payload["target_position"] = float(target)
-                payload["metric"] = str(metric)
+                if target is None or not np.isfinite(float(target)):
+                    bridge._log_received.emit(
+                        f"Go to Focus blocked: no validated {metric} target is ready."
+                    )
+                    return
+                payload = {
+                    "target_position": float(target),
+                    "metric": str(metric),
+                }
                 _submit("go_to_focus", payload=payload)
 
             def _on_scan_around_focus(metric: str, step_size: float):
                 target = bridge.get_focus_target(metric)
+                if target is None or not np.isfinite(float(target)):
+                    bridge._log_received.emit(
+                        f"Scan Around Focus blocked: no validated {metric} target is ready."
+                    )
+                    return
                 payload = {
                     "metric": str(metric),
                     "step_size": float(max(1e-4, float(step_size))),
                     "num_points": 7,
+                    "center": float(target),
                 }
-                if target is not None and np.isfinite(float(target)):
-                    payload["center"] = float(target)
                 _submit("scan_around_focus", payload=payload)
 
             def _on_extend_left():
@@ -1488,18 +1565,40 @@ def main(argv=None) -> int:
                 _submit("extend_right", payload={"num_points": 3})
 
             def _on_complete(command: str = "complete"):
+                nonlocal terminal_future
                 command_name = str(command or "complete").strip().lower()
                 if command_name not in {"complete", "abort"}:
                     command_name = "complete"
-                _submit(command_name, payload={})
+                terminal_future = _submit(command_name, payload={})
+
+            def _on_viewer_ready():
+                _submit("viewer_ready", payload={"subscriber": "online_focus_viewer"})
 
             bridge.on_go_to_focus = _on_go_to_focus
             bridge.on_scan_around_focus = _on_scan_around_focus
             bridge.on_extend_left = _on_extend_left
             bridge.on_extend_right = _on_extend_right
             bridge.on_mark_complete = _on_complete
+            viewer_ready_callback = _on_viewer_ready
         except Exception as ex:
             print(f"Adaptive command client init failed: {ex}")
+
+    def _abort_unfinished_session():
+        if args.session_id and not bridge._complete_sent and bridge.on_mark_complete is not None:
+            bridge._mark_aborted_requested.emit()
+
+    app.aboutToQuit.connect(_abort_unfinished_session)
+
+    def _request_qt_shutdown(_signum, _frame):
+        app.quit()
+
+    for _signal_name in ("SIGTERM", "SIGINT"):
+        _signal_value = getattr(signal, _signal_name, None)
+        if _signal_value is not None:
+            try:
+                signal.signal(_signal_value, _request_qt_shutdown)
+            except Exception:
+                pass
 
     try:
         from bluesky.callbacks.zmq import RemoteDispatcher
@@ -1511,6 +1610,10 @@ def main(argv=None) -> int:
 
     dispatch_thread = threading.Thread(target=dispatcher.start, daemon=True)
     dispatch_thread.start()
+    if viewer_ready_callback is not None:
+        # Avoid the PUB/SUB slow-joiner window: report readiness only after the
+        # receiving thread has had time to establish its subscription.
+        QtCore.QTimer.singleShot(500, viewer_ready_callback)
 
     # Guard 1: don't leave detached viewers if launcher is gone.
     parent_pid = int(max(0, int(args.parent_pid or 0)))
@@ -1548,6 +1651,18 @@ def main(argv=None) -> int:
     try:
         return int(app.exec_())
     finally:
+        if terminal_future is not None:
+            try:
+                terminal_future.result(timeout=12.0)
+            except Exception:
+                pass
+        if command_executor is not None:
+            try:
+                command_executor.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                command_executor.shutdown(wait=False)
+            except Exception:
+                pass
         try:
             dispatcher.stop()
         except Exception:

@@ -1,6 +1,8 @@
 import unittest
 
 from diffractometer_controls.adaptive_focus import (
+    MAX_EXTENSION_POINTS,
+    MAX_LOCAL_SCAN_POINTS,
     FocusAdaptiveSessionStore,
     FocusScanSpec,
     build_focus_adaptive_metadata,
@@ -45,6 +47,31 @@ class FocusAdaptiveSessionStoreTests(unittest.TestCase):
         self.assertFalse(store.submit_command("missing", "complete")["ok"])
         self.assertIsNone(store.pop_command("missing"))
 
+    def test_commands_are_bounded_and_terminal_command_preempts_queue(self):
+        store = FocusAdaptiveSessionStore(max_pending_commands=2)
+        session_id = store.create()
+
+        self.assertTrue(store.submit_command(session_id, "go_to_focus")["ok"])
+        self.assertTrue(store.submit_command(session_id, "extend_left")["ok"])
+        full = store.submit_command(session_id, "extend_right")
+        self.assertFalse(full["ok"])
+        self.assertEqual(full["error"], "command_queue_full")
+
+        terminal = store.submit_command(session_id, "abort")
+        self.assertTrue(terminal["ok"])
+        self.assertEqual(terminal["queued_commands"], 1)
+        self.assertEqual(store.pop_command(session_id)["command"], "abort")
+        self.assertIsNone(store.pop_command(session_id))
+
+    def test_unsupported_command_is_rejected_at_ingress(self):
+        store = FocusAdaptiveSessionStore()
+        session_id = store.create()
+
+        response = store.submit_command(session_id, "dance")
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"], "unsupported_command")
+
 
 class FocusScanSpecTests(unittest.TestCase):
     def test_explicit_bounds(self):
@@ -78,6 +105,14 @@ class FocusCommandTests(unittest.TestCase):
         self.assertEqual(abort.kind, "terminal")
         self.assertEqual(abort.status, "aborted")
 
+    def test_viewer_ready(self):
+        action = normalize_focus_command(
+            "viewer_ready", {"subscriber": "online_focus_viewer"}
+        )
+        self.assertEqual(action.kind, "ready")
+        self.assertTrue(action.state_update["viewer_ready"])
+        self.assertEqual(action.history_event, "viewer_ready")
+
     def test_go_to_focus(self):
         action = normalize_focus_command("go_to_focus", {"target_position": 3.5})
         self.assertEqual(action.kind, "acquire")
@@ -100,15 +135,37 @@ class FocusCommandTests(unittest.TestCase):
         self.assertEqual(ignored.kind, "ignore")
         self.assertEqual(ignored.reason, "bad_step")
 
+        bounded = normalize_focus_command(
+            "scan_around_focus",
+            {"center": 0.0, "step_size": 0.1, "num_points": 100000},
+        )
+        self.assertEqual(len(bounded.positions), MAX_LOCAL_SCAN_POINTS)
+
     def test_extend_commands(self):
         left = normalize_focus_command("extend_left", {"num_points": 2}, coarse_step_size=0.5, left_bound=1.0)
         right = normalize_focus_command("extend_right", {"num_points": 2}, coarse_step_size=0.5, right_bound=2.0)
         self.assertEqual(left.positions, (0.5, 0.0))
         self.assertEqual(right.positions, (2.5, 3.0))
 
+        next_left = normalize_focus_command(
+            "extend_left",
+            {"num_points": 3},
+            coarse_step_size=0.5,
+            left_bound=min(left.positions),
+        )
+        self.assertEqual(next_left.positions, (-0.5, -1.0, -1.5))
+
         ignored = normalize_focus_command("extend_left", {}, coarse_step_size=None, left_bound=1.0)
         self.assertEqual(ignored.kind, "ignore")
         self.assertEqual(ignored.reason, "no_coarse_step")
+
+        bounded = normalize_focus_command(
+            "extend_right",
+            {"num_points": 100000},
+            coarse_step_size=0.5,
+            right_bound=2.0,
+        )
+        self.assertEqual(len(bounded.positions), MAX_EXTENSION_POINTS)
 
     def test_unknown_command(self):
         action = normalize_focus_command("dance")
@@ -125,6 +182,7 @@ class FocusMetadataTests(unittest.TestCase):
             detector_names=["cam1"],
             detector_config={"exposure_time": 1.0},
             motor_name="cam1_focus",
+            motor_event_key="cam1_focus_position",
             scan_spec=spec,
             session_id="session-1",
             total_time=3.0,
@@ -137,6 +195,9 @@ class FocusMetadataTests(unittest.TestCase):
         self.assertEqual(md["focus_adaptive"]["command_submit_fn"], "adaptive_focus_submit_command")
         self.assertEqual(md["focus_adaptive"]["command_state_fn"], "adaptive_focus_get_session")
         self.assertIn("complete", md["focus_adaptive"]["accepted_commands"])
+        self.assertEqual(md["focus_adaptive"]["command_idle_timeout_s"], 900.0)
+        self.assertEqual(md["focus_adaptive"]["viewer_start_timeout_s"], 15.0)
+        self.assertEqual(md["focus_adaptive"]["motor_event_key"], "cam1_focus_position")
         self.assertEqual(md["sample"], "sample-a")
 
 

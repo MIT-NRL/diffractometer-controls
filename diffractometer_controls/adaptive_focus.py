@@ -16,6 +16,7 @@ import uuid
 
 
 ACCEPTED_FOCUS_COMMANDS = (
+    "viewer_ready",
     "go_to_focus",
     "scan_around_focus",
     "extend_left",
@@ -23,6 +24,11 @@ ACCEPTED_FOCUS_COMMANDS = (
     "complete",
     "abort",
 )
+MAX_PENDING_FOCUS_COMMANDS = 16
+MAX_LOCAL_SCAN_POINTS = 101
+MAX_EXTENSION_POINTS = 25
+DEFAULT_FOCUS_COMMAND_IDLE_TIMEOUT_S = 900.0
+DEFAULT_FOCUS_VIEWER_START_TIMEOUT_S = 15.0
 
 
 def focus_adaptive_now() -> float:
@@ -144,8 +150,15 @@ class FocusScanSpec:
 class FocusAdaptiveSessionStore:
     """Thread-safe in-memory session registry used by Queue Server functions."""
 
-    def __init__(self, *, history_limit: int = 500, now_func=focus_adaptive_now):
+    def __init__(
+        self,
+        *,
+        history_limit: int = 500,
+        max_pending_commands: int = MAX_PENDING_FOCUS_COMMANDS,
+        now_func=focus_adaptive_now,
+    ):
         self.history_limit = int(max(1, history_limit))
+        self.max_pending_commands = int(max(1, max_pending_commands))
         self._now = now_func
         self._sessions: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
@@ -192,9 +205,17 @@ class FocusAdaptiveSessionStore:
             entry["updated"] = rec["ts"]
 
     def submit_command(self, session_id: str, command: str, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        command_normalized = str(command or "").strip().lower()
+        if command_normalized not in ACCEPTED_FOCUS_COMMANDS:
+            return {
+                "ok": False,
+                "error": "unsupported_command",
+                "session_id": str(session_id),
+                "command": command_normalized,
+            }
         cmd = {
             "ts": float(self._now()),
-            "command": str(command),
+            "command": command_normalized,
             "payload": dict(payload or {}),
         }
         with self._lock:
@@ -205,14 +226,26 @@ class FocusAdaptiveSessionStore:
                     "error": "session_not_found",
                     "session_id": str(session_id),
                 }
-            entry["commands"].append(cmd)
+            if command_normalized in {"complete", "abort"}:
+                # A terminal request must never sit behind additional motor moves.
+                entry["commands"].clear()
+                entry["commands"].appendleft(cmd)
+            elif len(entry["commands"]) >= self.max_pending_commands:
+                return {
+                    "ok": False,
+                    "error": "command_queue_full",
+                    "session_id": str(session_id),
+                    "queued_commands": int(len(entry["commands"])),
+                }
+            else:
+                entry["commands"].append(cmd)
             entry["updated"] = cmd["ts"]
             queued = int(len(entry["commands"]))
         return {
             "ok": True,
             "session_id": str(session_id),
             "queued_commands": queued,
-            "accepted_command": str(command),
+            "accepted_command": command_normalized,
         }
 
     def get_session(self, session_id: str) -> dict[str, Any]:
@@ -294,6 +327,15 @@ def normalize_focus_command(
             history_payload={"status": end_status, "command": cmd, "payload": dict(payload)},
         )
 
+    if cmd == "viewer_ready":
+        return FocusCommandAction(
+            kind="ready",
+            command=cmd,
+            state_update={"viewer_ready": True},
+            history_event="viewer_ready",
+            history_payload={"payload": dict(payload)},
+        )
+
     if cmd == "go_to_focus":
         target = to_float(
             _payload_value(payload, "target_position", "position", "focus_position"),
@@ -323,7 +365,7 @@ def normalize_focus_command(
         )
         local_step_size = to_float(_payload_value(payload, "step_size", "step"), default=default_step_size)
         pts = to_int(_payload_value(payload, "num_points", "points"), default=7)
-        pts = int(max(3, pts if pts is not None else 7))
+        pts = int(min(MAX_LOCAL_SCAN_POINTS, max(3, pts if pts is not None else 7)))
         if pts % 2 == 0:
             pts += 1
         if local_step_size is None or local_step_size <= 0:
@@ -337,7 +379,7 @@ def normalize_focus_command(
         if step_size is None or step_size <= 0:
             return FocusCommandAction(kind="ignore", command=cmd, reason="no_coarse_step")
         ext_n = to_int(_payload_value(payload, "num_points", "points"), default=3)
-        ext_n = int(max(1, ext_n if ext_n is not None else 3))
+        ext_n = int(min(MAX_EXTENSION_POINTS, max(1, ext_n if ext_n is not None else 3)))
         if cmd == "extend_left":
             start = to_float(left_bound, default=0.0)
             positions = tuple(float(start) - float(step_size) * i for i in range(1, ext_n + 1))
@@ -361,6 +403,9 @@ def build_focus_adaptive_metadata(
     total_time: float,
     total_units: int,
     plan_patterns_module: str,
+    motor_event_key: str | None = None,
+    command_idle_timeout_s: float = DEFAULT_FOCUS_COMMAND_IDLE_TIMEOUT_S,
+    viewer_start_timeout_s: float = DEFAULT_FOCUS_VIEWER_START_TIMEOUT_S,
     md: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the start-document metadata used by the adaptive focus plan."""
@@ -384,9 +429,12 @@ def build_focus_adaptive_metadata(
             "notes": "Runs coarse scan, then executes queued adaptive commands",
             "scan_mode": str(scan_spec.scan_mode),
             "session_id": str(session_id),
+            "motor_event_key": str(motor_event_key or motor_name),
             "command_submit_fn": "adaptive_focus_submit_command",
             "command_state_fn": "adaptive_focus_get_session",
             "accepted_commands": list(ACCEPTED_FOCUS_COMMANDS),
+            "command_idle_timeout_s": float(command_idle_timeout_s),
+            "viewer_start_timeout_s": float(viewer_start_timeout_s),
         },
     }
     out.update(dict(md or {}))

@@ -127,6 +127,7 @@ class MITRMainWindow(PyDMMainWindow):
         self._focus_online_run_uid = None
         self._focus_online_file_name = ""
         self._focus_online_file_dir = ""
+        self._focus_online_motor_key = ""
         self._focus_doc_subscription = None
         self._focus_data_addr = None
         self._bluesky_environment_update_dialog = None
@@ -301,7 +302,11 @@ class MITRMainWindow(PyDMMainWindow):
         analysis_menu.addSeparator()
         launch_focus_program_action = analysis_menu.addAction("Launch focus program")
         launch_focus_program_action.setIcon(self._load_focus_program_icon())
-        launch_focus_program_action.setToolTip("Open offline focus analysis in a separate process.")
+        launch_focus_program_action.setToolTip(
+            "Open the offline slanted-edge focus viewer for TIFF sequences, "
+            "ROI fitting, and LSF/MTF50 focus analysis. SSH X11 forwarding "
+            "is inherited automatically."
+        )
         launch_focus_program_action.triggered.connect(self.launch_focus_program)
 
         # Add a "Bluesky Controls" submenu
@@ -1054,6 +1059,7 @@ class MITRMainWindow(PyDMMainWindow):
         run_uid = str((doc or {}).get("uid", "")).strip()
         self._focus_online_file_name = str((doc or {}).get("file_name", "")).strip()
         self._focus_online_file_dir = str((doc or {}).get("file_dir", "")).strip()
+        self._focus_online_motor_key = str(focus_md.get("motor_event_key", "")).strip()
         if not session_id:
             return
         if self._should_ignore_adaptive_focus_launch(session_id, run_uid):
@@ -1114,6 +1120,38 @@ class MITRMainWindow(PyDMMainWindow):
         # CONDA_PREFIX may describe the parent shell rather than this process
         # when launcher.py is invoked with an absolute Python path.
         return Path(sys.executable)
+
+    @staticmethod
+    def _analysis_launcher_environment(environ=None):
+        """Build a Qt child environment that preserves SSH X11 forwarding."""
+        env = dict(os.environ if environ is None else environ)
+        overrides = {
+            "DISPLAY": "MITR_ANALYSIS_DISPLAY",
+            "XAUTHORITY": "MITR_ANALYSIS_XAUTHORITY",
+            "QT_QPA_PLATFORM": "MITR_ANALYSIS_QT_QPA_PLATFORM",
+        }
+        for target, source in overrides.items():
+            value = str(env.get(source, "")).strip()
+            if value:
+                env[target] = value
+
+        display = str(env.get("DISPLAY", "")).strip().lower()
+        forwarded_display = bool(display) and (
+            bool(str(env.get("SSH_CONNECTION", "")).strip())
+            or bool(str(env.get("SSH_CLIENT", "")).strip())
+            or display.startswith("localhost:")
+            or display.startswith("127.0.0.1:")
+            or display.startswith("[::1]:")
+        )
+        platform_override = str(env.get("MITR_ANALYSIS_QT_QPA_PLATFORM", "")).strip()
+        if forwarded_display and not platform_override:
+            # A stale local Wayland environment can otherwise win over the
+            # forwarded X display when Qt chooses its platform plugin.
+            env["QT_QPA_PLATFORM"] = "xcb"
+        if forwarded_display and env.get("QT_QPA_PLATFORM") == "xcb":
+            env.pop("WAYLAND_DISPLAY", None)
+            env.pop("QT_WAYLAND_SHELL_INTEGRATION", None)
+        return env
 
     def launch_camera_viewer(self):
         from application import MITRApplication
@@ -1180,7 +1218,7 @@ class MITRMainWindow(PyDMMainWindow):
             proc = subprocess.Popen(
                 cmd,
                 cwd=str(viewer_script.parent),
-                env=dict(os.environ),
+                env=MITRMainWindow._analysis_launcher_environment(),
             )
             self.statusBar().showMessage(
                 f"Launched focus program (pid={proc.pid})", 3000
@@ -1209,7 +1247,9 @@ class MITRMainWindow(PyDMMainWindow):
             if proc.poll() is None:
                 proc.terminate()
                 try:
-                    proc.wait(timeout=2.0)
+                    # The viewer handles SIGTERM by submitting a confirmed abort
+                    # for any unfinished adaptive session before it exits.
+                    proc.wait(timeout=5.0)
                 except Exception:
                     proc.kill()
         except Exception:
@@ -1286,11 +1326,13 @@ class MITRMainWindow(PyDMMainWindow):
             cmd.extend(["--run-file-name", str(self._focus_online_file_name)])
         if self._focus_online_file_dir:
             cmd.extend(["--run-file-dir", str(self._focus_online_file_dir)])
+        if self._focus_online_motor_key:
+            cmd.extend(["--motor-key", str(self._focus_online_motor_key)])
         try:
             proc = subprocess.Popen(
                 cmd,
                 cwd=str(viewer_script.parent),
-                env=dict(os.environ),
+                env=MITRMainWindow._analysis_launcher_environment(),
             )
             self._focus_online_proc = proc
             self._focus_online_session_id = str(session_id)

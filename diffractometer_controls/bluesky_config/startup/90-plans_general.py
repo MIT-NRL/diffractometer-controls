@@ -20,6 +20,19 @@ def _component_walk_name_and_cls(comp_walk):
     return comp_name, getattr(comp, "cls", None)
 
 
+def _object_is_movable(obj):
+    """Recognize both PositionerBase motors and protocol-based soft motors."""
+    if isinstance(obj, PositionerBase):
+        return True
+    # ophyd.sim.SynAxis intentionally implements the Bluesky movable protocol
+    # without inheriting PositionerBase.
+    return bool(
+        callable(getattr(obj, "set", None))
+        and hasattr(obj, "position")
+        and callable(getattr(obj, "read", None))
+    )
+
+
 def _collect_movable_names():
     """Collect movable device names for Queue Server dropdowns.
 
@@ -52,7 +65,7 @@ def _collect_movable_names():
                             continue
             if nested_names:
                 names.extend(nested_names)
-            elif isinstance(obj, PositionerBase):
+            elif _object_is_movable(obj):
                 names.append(var)
         except Exception:
             continue

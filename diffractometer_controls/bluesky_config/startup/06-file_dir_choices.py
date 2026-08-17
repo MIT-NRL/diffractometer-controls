@@ -38,7 +38,7 @@ def _resolve_imaging_roots():
     roots = []
 
     # Prefer roots derived from configured detector TIFF write templates.
-    for det_name in ("cam1", "cam_zwo", "cam_qhy"):
+    for det_name in ("cam1", "cam_zwo", "cam_qhy", "sim_focus_cam"):
         det = g.get(det_name, None)
         if det is None:
             continue

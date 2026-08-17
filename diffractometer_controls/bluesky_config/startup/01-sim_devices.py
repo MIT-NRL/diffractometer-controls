@@ -6,6 +6,24 @@ from ophyd import (Device, Component as Cpt,
                    EpicsMotor, Signal)
 from ophyd.device import DeviceStatus
 from ophyd.status import Status, SubscriptionStatus
+from bluesky_queueserver import register_device
+
+try:
+    from diffractometer_controls.sim_focus import (
+        SimulatedFocusDetector,
+        SimulatedFocusMotor,
+    )
+except ModuleNotFoundError:
+    from pathlib import Path
+    import sys
+
+    package_root = Path(__file__).resolve().parents[3]
+    if str(package_root) not in sys.path:
+        sys.path.insert(0, str(package_root))
+    from diffractometer_controls.sim_focus import (
+        SimulatedFocusDetector,
+        SimulatedFocusMotor,
+    )
 
 
 sim_motor = EpicsMotor("4dh4:m6", name="sim_motor")
@@ -185,3 +203,16 @@ sim_he3psd1 = SimHE3PSD(
     noise_scale=1.1,
     random_seed=17,
 )
+
+
+# End-to-end adaptive-focus simulation. These names appear as selectable
+# detector/motor devices in the Queue Server plan editor.
+sim_focus_motor = SimulatedFocusMotor(name="sim_focus_motor", value=0.0)
+sim_focus_cam = SimulatedFocusDetector(
+    name="sim_focus_cam",
+    motor=sim_focus_motor,
+    best_focus=0.0,
+)
+register_device("sim_focus_motor", depth=1)
+register_device("sim_focus_cam", depth=2)
+sd.baseline.append(sim_focus_motor)

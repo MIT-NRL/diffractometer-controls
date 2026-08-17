@@ -14,8 +14,10 @@ import concurrent.futures
 import csv
 import inspect
 import math
+import multiprocessing as mp
 import os
 import re
+import subprocess
 import sys
 import threading
 from collections import OrderedDict, deque
@@ -54,6 +56,100 @@ try:
     import lmfit as lm
 except Exception:
     lm = None
+
+
+THEME_MODE_SETTINGS_KEY = "appearance/theme_mode"
+SETTINGS_ORGANIZATION = "MITR"
+SETTINGS_APPLICATION = "MITR"
+DEFAULT_QT_STYLE = "Fusion"
+
+
+def _desktop_prefers_dark() -> bool:
+    override = os.environ.get("MITR_FORCE_DARK_MODE")
+    if override is not None:
+        return override.strip().lower() in {"1", "true", "yes", "on", "dark"}
+
+    gtk_theme = os.environ.get("GTK_THEME", "").strip().lower()
+    if gtk_theme and "dark" in gtk_theme:
+        return True
+
+    for key in ("color-scheme", "gtk-theme"):
+        try:
+            proc = subprocess.run(
+                ["gsettings", "get", "org.gnome.desktop.interface", key],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=1.5,
+            )
+        except Exception:
+            continue
+        value = proc.stdout.strip().strip("'").lower()
+        if key == "color-scheme" and value == "prefer-dark":
+            return True
+        if "dark" in value:
+            return True
+    return False
+
+
+def _build_dark_palette() -> "QtGui.QPalette":
+    palette = QtGui.QPalette()
+    palette.setColor(QtGui.QPalette.Window, QtGui.QColor(45, 45, 45))
+    palette.setColor(QtGui.QPalette.WindowText, QtGui.QColor(240, 240, 240))
+    palette.setColor(QtGui.QPalette.Base, QtGui.QColor(30, 30, 30))
+    palette.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(45, 45, 45))
+    palette.setColor(QtGui.QPalette.ToolTipBase, QtGui.QColor(45, 45, 45))
+    palette.setColor(QtGui.QPalette.ToolTipText, QtGui.QColor(240, 240, 240))
+    palette.setColor(QtGui.QPalette.Text, QtGui.QColor(240, 240, 240))
+    palette.setColor(QtGui.QPalette.Button, QtGui.QColor(53, 53, 53))
+    palette.setColor(QtGui.QPalette.ButtonText, QtGui.QColor(240, 240, 240))
+    palette.setColor(QtGui.QPalette.BrightText, QtGui.QColor(255, 80, 80))
+    palette.setColor(QtGui.QPalette.Link, QtGui.QColor(66, 153, 225))
+    palette.setColor(QtGui.QPalette.Highlight, QtGui.QColor(66, 153, 225))
+    palette.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor(15, 15, 15))
+    palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.Base, QtGui.QColor(38, 38, 38))
+    palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.Window, QtGui.QColor(45, 45, 45))
+    palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.Text, QtGui.QColor(127, 127, 127))
+    palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.ButtonText, QtGui.QColor(127, 127, 127))
+    return palette
+
+
+def _sync_pyqtgraph_palette(palette: "QtGui.QPalette"):
+    bg = palette.color(QtGui.QPalette.Window)
+    fg = palette.color(QtGui.QPalette.WindowText)
+    pg.setConfigOption("background", (bg.red(), bg.green(), bg.blue()))
+    pg.setConfigOption("foreground", (fg.red(), fg.green(), fg.blue()))
+
+
+def _apply_saved_theme(app: "QtWidgets.QApplication"):
+    """Apply the same persisted MITR/system theme to either focus entry point."""
+    QtCore.QCoreApplication.setOrganizationName(SETTINGS_ORGANIZATION)
+    QtCore.QCoreApplication.setApplicationName(SETTINGS_APPLICATION)
+    base_style = QtWidgets.QStyleFactory.create(DEFAULT_QT_STYLE)
+    if base_style is not None:
+        app.setStyle(base_style)
+    base_palette = QtGui.QPalette(app.palette())
+    settings = QtCore.QSettings(SETTINGS_ORGANIZATION, SETTINGS_APPLICATION)
+    mode = str(settings.value(THEME_MODE_SETTINGS_KEY, "system")).strip().lower()
+    if mode not in {"system", "light", "dark"}:
+        mode = "system"
+    dark_requested = _desktop_prefers_dark() if mode == "system" else (mode == "dark")
+    palette = _build_dark_palette() if dark_requested else base_palette
+    app.setPalette(palette)
+    _sync_pyqtgraph_palette(palette)
+
+
+def _initialize_focus_worker():
+    """Lower worker scheduling priority so control applications stay responsive."""
+    try:
+        os.nice(10)
+    except (AttributeError, OSError):
+        pass
+
+
+def _focus_worker_ready() -> int:
+    """Small picklable task used to start process workers before frames arrive."""
+    return int(os.getpid())
 
 
 def _build_focus_program_icon() -> "QtGui.QIcon":
@@ -1064,29 +1160,6 @@ def _bulk_reprocess_worker(
     return filtered, fit
 
 
-def _bulk_reprocess_roi_worker(
-    path: Path,
-    roi_rect: Tuple[float, float, float, float],
-    fixed_edge_line: Optional[Tuple[float, float]],
-) -> Tuple[None, FitResult]:
-    # Fast full-quality reprocess for non-displayed frames: process only ROI.
-    raw = _read_image(path)
-    bounds = _bounds_from_roi_rect(raw.shape, roi_rect)
-    x0, x1, y0, y1 = bounds
-    roi_raw = raw[y0:y1, x0:x1]
-    # Clip-only preprocessing here; analyze_roi applies ROI median for edge detect.
-    roi_filtered = preprocess_image(roi_raw, median_size=1)
-    fit = analyze_roi(
-        roi_filtered,
-        x0_abs=float(x0),
-        x1_abs=float(x1),
-        y0_abs=float(y0),
-        y1_abs=float(y1),
-        fixed_edge_line=fixed_edge_line,
-    )
-    return None, fit
-
-
 def _bulk_reprocess_cached_worker(
     filtered: np.ndarray,
     roi_rect: Tuple[float, float, float, float],
@@ -1203,9 +1276,15 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         self._full_refresh_active_indices: Set[int] = set()
         self._full_prepared_indices: Set[int] = set()
         self._full_future_to_index: Dict[object, Tuple[int, int]] = {}
+        # The online viewer starts workers after Qt and the ZMQ dispatch thread
+        # exist. Explicit spawn avoids forking that multithreaded process.
+        self._full_mp_context = mp.get_context("spawn")
         self._full_process_pool = concurrent.futures.ProcessPoolExecutor(
-            max_workers=self._full_worker_count
+            max_workers=self._full_worker_count,
+            mp_context=self._full_mp_context,
+            initializer=_initialize_focus_worker,
         )
+        self._full_warmup_futures: List[object] = []
         self._pause_full_prepare = False
         self._bulk_reprocess_active = False
         self._bulk_reprocess_token = 0
@@ -1789,6 +1868,72 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             return True
         return bool(self._full_prepared_count() >= len(self.frames))
 
+    def _missing_full_metric_indices(self) -> List[int]:
+        return [
+            i
+            for i in range(len(self.frames))
+            if (i not in self._results) or (not bool(self._result_is_full.get(i, False)))
+        ]
+
+    def note_stream_frame_added(self):
+        """Allow full-metric finalization to run again for an extended dataset."""
+        self._full_prepare_refresh_requested = False
+
+    def warm_full_process_pool(self):
+        """Start all full-filter workers while the online scan is acquiring."""
+        if self._shutting_down or self._full_warmup_futures:
+            return
+        for _ in range(self._full_worker_count):
+            try:
+                self._full_warmup_futures.append(
+                    self._full_process_pool.submit(_focus_worker_ready)
+                )
+            except Exception as ex:
+                self._log(f"Full worker warmup failed: {ex}")
+                break
+        if self._full_warmup_futures:
+            self._log(
+                f"Starting {len(self._full_warmup_futures)} full-filter workers in background."
+            )
+
+    def _maybe_finalize_full_metric_pass(self):
+        """Finish full-quality metrics without scheduling a duplicate all-frame pass."""
+        if self._shutting_down or self._bulk_reprocess_active:
+            return
+        if not self._all_frames_full_prepared():
+            return
+        if self._full_refresh_active_indices or self._analysis_inflight or self._task_worker_busy:
+            return
+
+        missing = self._missing_full_metric_indices()
+        if missing:
+            if self._full_prepare_refresh_requested:
+                return
+            self._full_prepare_refresh_requested = True
+            self._log(
+                "Full filtering complete. Filling missing full-quality ROI metrics "
+                f"for {len(missing)} frame(s)..."
+            )
+            self._start_bulk_reprocess(
+                preserve_existing_results=True,
+                frame_indices=missing,
+                allow_disk_fallback=self._needs_disk_fallback_for_all_frames(),
+                clear_queues=False,
+                reason="missing-full-metrics",
+            )
+            return
+
+        self._full_prepare_refresh_requested = True
+        if self._fixed_edge_line is None:
+            if not self._full_dynamic_results_ready:
+                self._log(
+                    "Full filtering and dynamic ROI metrics complete. "
+                    "Locking the global edge without another dynamic pass."
+                )
+            self._full_dynamic_results_ready = True
+            self._full_dynamic_pass_requested = True
+            self._try_lock_edge_from_focus_minimum()
+
     def _needs_disk_fallback_for_all_frames(self) -> bool:
         # Full filtered images are cached with bounded capacity. Once frame count
         # exceeds cache size, all-frame reruns must use disk+cache.
@@ -2317,12 +2462,6 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 # Promote this frame's plotted point from quick(gray) to full(color)
                 # as soon as full filtering completes.
                 self._start_full_frame_refresh(frame_index)
-            if (
-                (self._fixed_edge_line is None)
-                and (not self._bulk_reprocess_active)
-                and self._all_frames_full_prepared()
-            ):
-                self._try_lock_edge_from_focus_minimum()
             full_ready = self._full_prepared_count()
             if (
                 (full_ready != int(self._last_full_prepare_logged_count))
@@ -2336,31 +2475,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 self._log(
                     f"Full prepare progress: {full_ready}/{len(self.frames)} cached"
                 )
-        if (
-            self._all_frames_full_prepared()
-            and (not self._bulk_reprocess_active)
-            and (not self._full_prepare_refresh_requested)
-        ):
-            self._full_prepare_refresh_requested = True
-            needs_full_refresh = any(
-                (i not in self._results) or (not bool(self._result_is_full.get(i, False)))
-                for i in range(len(self.frames))
-            )
-            if needs_full_refresh:
-                self._log(
-                    "Full filtering queue complete. Recomputing ROI metrics on fully filtered frames..."
-                )
-                self._start_bulk_reprocess(
-                    preserve_existing_results=True,
-                    frame_indices=None,
-                    allow_disk_fallback=self._needs_disk_fallback_for_all_frames(),
-                    clear_queues=False,
-                    reason="full-prepare-complete-refresh",
-                )
-            else:
-                self._log(
-                    "Full filtering queue complete. Per-frame ROI metrics are already current."
-                )
+        self._maybe_finalize_full_metric_pass()
         self._pump_full_queue()
         self._maybe_start_full_reprocess_after_scan()
         self._update_filter_queue_indicator()
@@ -2695,11 +2810,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
 
     def _on_task_done(self, kind: str, token: int, frame_index: int, result, error):
         if self._shutting_down:
-            if kind == "prepare_full":
-                self._full_running_count = max(0, int(self._full_running_count) - 1)
-                self._full_queued_indices.discard(frame_index)
-                self._full_active_indices.discard(frame_index)
-            elif kind == "refresh_full_frame":
+            if kind == "refresh_full_frame":
                 self._full_refresh_active_indices.discard(frame_index)
             elif kind == "load_filter_display":
                 self._task_worker_busy = False
@@ -2712,10 +2823,6 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 self._analysis_inflight = False
             self._update_filter_queue_indicator()
             return
-        if kind == "prepare_full":
-            self._handle_full_prepare_result(frame_index, result, error)
-            return
-
         if kind == "bulk_reprocess":
             if token != self._bulk_reprocess_token:
                 self._pump_task_queue()
@@ -2727,7 +2834,6 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 fit_result = self._preserve_previous_edge_geometry(frame_index, fit_result)
                 if filtered_opt is not None:
                     self._cache_full_filtered(frame_index, filtered_opt)
-                    self._cache_filtered(frame_index, filtered_opt)
                     if frame_index == self.current_index:
                         self._current_filtered = filtered_opt
                         self._set_display_image(filtered_opt)
@@ -2744,9 +2850,9 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 self._bulk_reprocess_active = False
                 self._bulk_reprocess_uses_disk = False
                 if (
-                    self._bulk_reprocess_all_frames
-                    and self._fixed_edge_line is None
+                    self._fixed_edge_line is None
                     and not self._current_bulk_used_fixed
+                    and not self._missing_full_metric_indices()
                 ):
                     self._full_dynamic_results_ready = True
                     self._full_dynamic_pass_requested = True
@@ -2789,6 +2895,9 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 if self._fixed_edge_line is not None:
                     self._log_final_summary("Final summary after fixed-edge reprocess")
                 self._bulk_reprocess_all_frames = False
+                # Frames may have arrived while this batch was active. Ensure
+                # every appended frame receives a full-quality metric result.
+                self._maybe_finalize_full_metric_pass()
             else:
                 self.statusBar().showMessage(
                     f"ROI reprocessing... {self._bulk_reprocess_done}/{self._bulk_reprocess_total}"
@@ -2819,11 +2928,11 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                     self._result_is_full[frame_index] = True
                     if frame_index == self.current_index:
                         self._update_profile_plot(fit_result)
-                        self._try_lock_edge_from_focus_minimum()
                     self._update_metric_plot()
                 elif error is not None:
                     self._log(f"Full-frame ROI refresh failed for frame {frame_index + 1}: {error}")
             self._maybe_start_full_reprocess_after_scan()
+            self._maybe_finalize_full_metric_pass()
             self._update_filter_queue_indicator()
             return
 
@@ -2881,7 +2990,6 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 self._update_metric_plot()
                 if frame_index == self.current_index:
                     self._update_profile_plot(result)
-                    self._try_lock_edge_from_focus_minimum()
 
             if self._pending_analysis_request is not None:
                 pending = self._pending_analysis_request
@@ -2895,6 +3003,7 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                         pframe,
                         fixed_edge_line=pfixed,
                     )
+            self._maybe_finalize_full_metric_pass()
             self._pump_task_queue()
             self._update_filter_queue_indicator()
             return
@@ -3056,38 +3165,43 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
         yf = yf[order]
         if xf.size < 3:
             return None
-        center_x = np.nan
+        radius = float(max(1e-6, local_radius))
+        hint_x = np.nan
         if center_hint is not None:
             try:
                 hint = float(center_hint)
                 if np.isfinite(hint):
-                    center_x = float(np.clip(hint, float(np.nanmin(xf)), float(np.nanmax(xf))))
+                    hint_x = float(np.clip(hint, float(np.nanmin(xf)), float(np.nanmax(xf))))
             except Exception:
-                center_x = np.nan
+                hint_x = np.nan
 
-        if not np.isfinite(center_x):
-            frac = float(max(0.05, min(0.50, robust_frac)))
-            try:
-                if find == "max":
-                    cutoff = float(np.nanpercentile(yf, 100.0 * (1.0 - frac)))
-                    seed_x = xf[yf >= cutoff]
-                else:
-                    cutoff = float(np.nanpercentile(yf, 100.0 * frac))
-                    seed_x = xf[yf <= cutoff]
-            except Exception:
-                seed_x = np.empty(0, dtype=np.float64)
-
-            if seed_x.size > 0:
-                center_x = float(np.nanmedian(seed_x))
+        # Recompute a robust center from every version of the data. Quick-pass
+        # curves can put a provisional extremum near a scan edge; retaining that
+        # hint after full metrics arrive otherwise locks later fits to the wrong
+        # local window indefinitely.
+        frac = float(max(0.05, min(0.50, robust_frac)))
+        try:
+            if find == "max":
+                cutoff = float(np.nanpercentile(yf, 100.0 * (1.0 - frac)))
+                seed_x = xf[yf >= cutoff]
             else:
-                # Last-resort fallback.
-                if find == "max":
-                    center_idx = int(np.nanargmax(yf))
-                else:
-                    center_idx = int(np.nanargmin(yf))
-                center_x = float(xf[center_idx])
+                cutoff = float(np.nanpercentile(yf, 100.0 * frac))
+                seed_x = xf[yf <= cutoff]
+        except Exception:
+            seed_x = np.empty(0, dtype=np.float64)
 
-        radius = float(max(1e-6, local_radius))
+        if seed_x.size > 0:
+            robust_center_x = float(np.nanmedian(seed_x))
+        else:
+            if find == "max":
+                center_idx = int(np.nanargmax(yf))
+            else:
+                center_idx = int(np.nanargmin(yf))
+            robust_center_x = float(xf[center_idx])
+
+        center_x = robust_center_x
+        if np.isfinite(hint_x) and abs(hint_x - robust_center_x) <= radius:
+            center_x = hint_x
         in_window = np.abs(xf - center_x) <= radius
         idx_local = np.flatnonzero(in_window)
         if idx_local.size < 3:
@@ -3096,9 +3210,21 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             idx_local = np.sort(nearest)
         x_local = xf[idx_local]
         y_local = yf[idx_local]
-        if x_local.size < 3:
+        if x_local.size < 3 or np.unique(x_local).size < 3:
             return None
-        coeff = np.polyfit(x_local, y_local, 2)
+
+        # Center and scale the motor coordinate before fitting. This keeps the
+        # quadratic well-conditioned when absolute motor positions are large.
+        x_origin = float(np.nanmean(x_local))
+        x_scale = float(max(np.nanstd(x_local), 0.5 * np.ptp(x_local), 1e-12))
+        x_scaled = (x_local - x_origin) / x_scale
+        design = np.vander(x_scaled, 3)
+        try:
+            if (not np.isfinite(design).all()) or np.linalg.cond(design) > 1e8:
+                return None
+            coeff = np.polyfit(x_scaled, y_local, 2)
+        except Exception:
+            return None
         a, b, c = (float(coeff[0]), float(coeff[1]), float(coeff[2]))
         if not (np.isfinite(a) and np.isfinite(b) and np.isfinite(c)) or abs(a) < 1e-15:
             return None
@@ -3106,18 +3232,64 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
             return None
         if find != "max" and a <= 0.0:
             return None
+        x_vertex_scaled = -b / (2.0 * a)
+        x_vertex = float(x_origin + x_scale * x_vertex_scaled)
+        sampled_min = float(np.nanmin(x_local))
+        sampled_max = float(np.nanmax(x_local))
+        tolerance = max(1e-9, 1e-9 * max(abs(sampled_min), abs(sampled_max), 1.0))
+        # Never expose an extrapolated vertex as a motor target. The operator
+        # can extend the scan to bring a real extremum inside sampled bounds.
+        if x_vertex < (sampled_min - tolerance) or x_vertex > (sampled_max + tolerance):
+            return None
         # Draw the fitted parabola across the full requested local window,
         # not just where sampled points exist.
         x_line_min = float(center_x - radius)
         x_line_max = float(center_x + radius)
         if not np.isfinite(x_line_min) or not np.isfinite(x_line_max) or (x_line_max <= x_line_min):
-            x_line_min = float(np.nanmin(x_local))
-            x_line_max = float(np.nanmax(x_local))
+            x_line_min = sampled_min
+            x_line_max = sampled_max
         x_line = np.linspace(x_line_min, x_line_max, 200)
-        y_line = np.polyval(coeff, x_line)
-        x_vertex = -b / (2.0 * a)
-        y_vertex = float(np.polyval(coeff, x_vertex))
+        y_line = np.polyval(coeff, (x_line - x_origin) / x_scale)
+        y_vertex = float(np.polyval(coeff, x_vertex_scaled))
         return x_line, y_line, float(x_vertex), y_vertex
+
+    def validated_focus_target(self, metric: str = "mtf50", minimum_points: int = 5) -> Optional[float]:
+        """Return a stable, in-range full-quality focus target, or ``None``."""
+        metric_name = str(metric or "mtf50").strip().lower()
+        metric_fields = {
+            "mtf50": ("_optimal_mtf50_position", "mtf50"),
+            "lsf_sigma": ("_optimal_psf_position", "psf_sigma"),
+            "step_sigma": ("_optimal_focus_position", "step_sigma"),
+        }
+        target_attr, result_attr = metric_fields.get(
+            metric_name,
+            metric_fields["step_sigma"],
+        )
+        if (
+            self._shutting_down
+            or self._bulk_reprocess_active
+            or self._analysis_inflight
+            or self._full_refresh_active_indices
+            or (not self._all_frames_full_prepared())
+        ):
+            return None
+
+        target = float(getattr(self, target_attr, np.nan))
+        rows = []
+        for idx, result in self._results.items():
+            value = float(getattr(result, result_attr, np.nan))
+            if bool(self._result_is_full.get(idx, False)) and np.isfinite(value):
+                rows.append((float(self.frames[idx].position), value))
+        if len(rows) < int(max(3, minimum_points)) or not np.isfinite(target):
+            return None
+
+        positions = np.asarray([row[0] for row in rows], dtype=np.float64)
+        low = float(np.nanmin(positions))
+        high = float(np.nanmax(positions))
+        tolerance = max(1e-9, 1e-9 * max(abs(low), abs(high), 1.0))
+        if target < (low - tolerance) or target > (high + tolerance):
+            return None
+        return target
 
     def _update_metric_plot(self):
         if not self.frames:
@@ -3697,6 +3869,12 @@ class FocusOfflineWindow(QtWidgets.QMainWindow):
                 pool.waitForDone()
             except Exception:
                 pass
+        for future in self._full_warmup_futures:
+            try:
+                future.cancel()
+            except Exception:
+                pass
+        self._full_warmup_futures.clear()
         try:
             self._full_process_pool.shutdown(wait=True, cancel_futures=True)
         except TypeError:
@@ -3817,6 +3995,7 @@ def main(argv=None) -> int:
     effective_max_workers_total = int(max(3, int(args.max_workers_total)))
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    _apply_saved_theme(app)
     app.setApplicationName("MITR Focus Program")
     app_icon = _build_focus_program_icon()
     if not app_icon.isNull():
