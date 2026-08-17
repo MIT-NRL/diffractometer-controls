@@ -55,6 +55,14 @@ WF_NORM_FILTER_GAMMA = "gamma"
 WF_NORM_FILTER_OUTLIER = "outlier"
 WF_NORM_FILTER_MEDIAN = "median"
 WF_NORM_FILTER_RUNTIME_PROPERTY = "analysis_wf_norm_filter_method_runtime"
+WF_NORM_MERGE_SETTINGS_KEY = "analysis/wf_norm_merge_method"
+WF_NORM_MERGE_MAD_ADAPTIVE = "mad_adaptive"
+WF_NORM_MERGE_MAD = "mad"
+WF_NORM_MERGE_MEDIAN = "median"
+WF_NORM_MERGE_MEAN = "mean"
+WF_NORM_MERGE_RUNTIME_PROPERTY = "analysis_wf_norm_merge_method_runtime"
+AUTO_FILTER_SETTINGS_KEY = "analysis/auto_filter_method"
+AUTO_FILTER_RUNTIME_PROPERTY = "analysis_auto_filter_method_runtime"
 
 
 class MainScreen(display.MITRDisplay):
@@ -131,6 +139,7 @@ class MainScreen(display.MITRDisplay):
         self._wf_norm_mismatch_limit = 5
         self._wf_norm_last_dir = ""
         self._wf_norm_filter_method = WF_NORM_FILTER_GAMMA
+        self._wf_norm_merge_method = WF_NORM_MERGE_MAD_ADAPTIVE
         self._wf_norm_outlier_size = 5
         self._wf_norm_median_size = 6
         self._wf_norm_busy = False
@@ -142,14 +151,19 @@ class MainScreen(display.MITRDisplay):
         self._wf_norm_status_index = 0
         self._wf_norm_status_method = ""
         self._wf_norm_requested_method = ""
+        self._wf_norm_requested_merge = ""
         self._wf_norm_tooltip_prefix = ""
         self._wf_norm_gamma_available = None
         self._wf_norm_tomopy_available = None
+        self._wf_norm_merge_available = None
         self._display_image_update_in_progress = False
         self._live_image_state = LiveImageState() if LiveImageState is not None else None
         self._last_source_image = None
         self._last_source_exposure_s = None
         self._live_filter_size = 5
+        self._live_filter_method = WF_NORM_FILTER_GAMMA
+        self._live_filter_method_used = WF_NORM_FILTER_GAMMA
+        self._live_filter_note = ""
         self._live_filter_available = None
         self._live_filter_worker_lock = threading.Lock()
         self._live_filter_worker = ThreadPoolExecutor(
@@ -1005,17 +1019,70 @@ class MainScreen(display.MITRDisplay):
             except Exception:
                 pass
 
+    def _has_live_filter_method(self, method):
+        if filter_live_image_worker is None or self._live_image_state is None:
+            return False
+        m = str(method).strip().lower()
+        if m == WF_NORM_FILTER_GAMMA:
+            return self._wf_norm_has_gamma_filter()
+        if m == WF_NORM_FILTER_OUTLIER:
+            return self._wf_norm_has_tomopy()
+        return m == WF_NORM_FILTER_MEDIAN
+
     def _has_live_gamma_filter(self):
-        if self._live_filter_available is None:
-            if filter_live_image_worker is None or self._live_image_state is None:
-                self._live_filter_available = False
-            else:
-                try:
-                    from neutron_imaging_tools.filtering import remove_gammas  # noqa: F401
-                    self._live_filter_available = True
-                except Exception:
-                    self._live_filter_available = False
-        return bool(self._live_filter_available)
+        """Compatibility helper retained for existing callers and tests."""
+        return self._has_live_filter_method(WF_NORM_FILTER_GAMMA)
+
+    def _set_live_filter_method(self, method, persist=True):
+        m = str(method).strip().lower() if method is not None else WF_NORM_FILTER_GAMMA
+        valid_methods = {WF_NORM_FILTER_GAMMA, WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}
+        if m not in valid_methods:
+            m = WF_NORM_FILTER_GAMMA
+        if m == WF_NORM_FILTER_GAMMA and not self._has_live_filter_method(m):
+            m = (
+                WF_NORM_FILTER_OUTLIER
+                if self._has_live_filter_method(WF_NORM_FILTER_OUTLIER)
+                else WF_NORM_FILTER_MEDIAN
+            )
+        if m == WF_NORM_FILTER_OUTLIER and not self._has_live_filter_method(m):
+            m = (
+                WF_NORM_FILTER_GAMMA
+                if self._has_live_filter_method(WF_NORM_FILTER_GAMMA)
+                else WF_NORM_FILTER_MEDIAN
+            )
+        self._live_filter_method = m
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.setProperty(AUTO_FILTER_RUNTIME_PROPERTY, m)
+        if persist:
+            settings = QtCore.QSettings()
+            settings.setValue(AUTO_FILTER_SETTINGS_KEY, m)
+            settings.sync()
+
+    def _load_live_filter_method_from_settings(self):
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            runtime_value = app.property(AUTO_FILTER_RUNTIME_PROPERTY)
+            if runtime_value is not None:
+                m = str(runtime_value).strip().lower()
+                if m in {WF_NORM_FILTER_GAMMA, WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}:
+                    self._set_live_filter_method(m, persist=False)
+                    return
+        settings = QtCore.QSettings()
+        try:
+            settings.sync()
+        except Exception:
+            pass
+        value = settings.value(AUTO_FILTER_SETTINGS_KEY, self._live_filter_method)
+        self._set_live_filter_method(value, persist=False)
+
+    @staticmethod
+    def _filter_method_label(method):
+        return {
+            WF_NORM_FILTER_GAMMA: "Gamma filter (Neutron Imaging Tools)",
+            WF_NORM_FILTER_OUTLIER: "Remove outliers (tomopy)",
+            WF_NORM_FILTER_MEDIAN: "Median filter",
+        }.get(str(method).strip().lower(), str(method))
 
     def _set_live_filter_checked(self, checked):
         if self.live_filter_checkbox is None:
@@ -1033,7 +1100,11 @@ class MainScreen(display.MITRDisplay):
             return
         diagnostics = self._live_filter_diagnostics
         backend = str(diagnostics.get("backend", "")).strip().lower()
-        parts = ["Apply the NIT Gamma filter to the current raw detector image"]
+        requested = self._filter_method_label(self._live_filter_method)
+        used = self._filter_method_label(self._live_filter_method_used)
+        parts = [f"Apply {requested} to the current raw detector image"]
+        if self._live_filter_method_used != self._live_filter_method:
+            parts.append(f"using fallback={used}")
         if backend:
             parts.append(f"backend={backend}")
         changed = self._to_float(diagnostics.get("changed_fraction", np.nan), default=np.nan)
@@ -1042,6 +1113,8 @@ class MainScreen(display.MITRDisplay):
         threshold = self._to_float(diagnostics.get("threshold", np.nan), default=np.nan)
         if np.isfinite(threshold):
             parts.append(f"threshold={threshold:.6g}")
+        if self._live_filter_note:
+            parts.append(self._live_filter_note.rstrip("."))
         checkbox.setToolTip(". ".join(parts) + ".")
 
     def _on_live_filter_toggled(self, enabled):
@@ -1049,12 +1122,15 @@ class MainScreen(display.MITRDisplay):
             self._set_live_filter_checked(False)
             return
         checked = bool(enabled)
-        if checked and not self._has_live_gamma_filter():
+        self._load_live_filter_method_from_settings()
+        if checked and not self._has_live_filter_method(self._live_filter_method):
             self._set_live_filter_checked(False)
-            self._update_live_filter_tooltip(error="neutron-imaging-tools is unavailable")
+            self._update_live_filter_tooltip(error="the selected filter backend is unavailable")
             return
         self._live_image_state.set_filter_enabled(checked)
         self._live_filter_diagnostics = {}
+        self._live_filter_method_used = self._live_filter_method
+        self._live_filter_note = ""
         with self._live_filter_worker_lock:
             self._live_filter_pending_request = None
         self._render_current_frame(force_set_image=True)
@@ -1070,6 +1146,8 @@ class MainScreen(display.MITRDisplay):
         request = state.make_filter_request()
         if request is None:
             return
+        self._load_live_filter_method_from_settings()
+        selected_method = self._live_filter_method
         with self._live_filter_worker_lock:
             if self._live_filter_worker is None:
                 return
@@ -1081,6 +1159,7 @@ class MainScreen(display.MITRDisplay):
                     filter_live_image_worker,
                     request.image,
                     int(self._live_filter_size),
+                    selected_method,
                 )
             except Exception as ex:
                 self._set_live_filter_checked(False)
@@ -1135,7 +1214,7 @@ class MainScreen(display.MITRDisplay):
         if not is_current:
             return
         if not payload.get("ok", False):
-            error = str(payload.get("error", "Gamma filtering failed."))
+            error = str(payload.get("error", "AutoFilter failed."))
             state.set_filter_enabled(False)
             self._set_live_filter_checked(False)
             with self._live_filter_worker_lock:
@@ -1152,6 +1231,10 @@ class MainScreen(display.MITRDisplay):
             return
         diagnostics = payload.get("filter_diagnostics", {})
         self._live_filter_diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+        self._live_filter_method_used = str(
+            payload.get("filter_used", self._live_filter_method)
+        ).strip().lower()
+        self._live_filter_note = str(payload.get("filter_note", "")).strip()
         self._update_live_filter_tooltip()
         self._render_current_frame(force_set_image=True)
 
@@ -1200,12 +1283,36 @@ class MainScreen(display.MITRDisplay):
                 self._wf_norm_gamma_available = False
         return bool(self._wf_norm_gamma_available)
 
+    def _wf_norm_has_nit_merging(self):
+        if self._wf_norm_merge_available is None:
+            try:
+                from neutron_imaging_tools.merging import combine_images  # noqa: F401
+                self._wf_norm_merge_available = True
+            except Exception:
+                self._wf_norm_merge_available = False
+        return bool(self._wf_norm_merge_available)
+
     def _wf_norm_filter_label(self):
         if self._wf_norm_filter_method == WF_NORM_FILTER_MEDIAN:
             return f"Median filter (size={int(self._wf_norm_median_size)})"
         if self._wf_norm_filter_method == WF_NORM_FILTER_GAMMA:
             return f"Gamma filter (Neutron Imaging Tools, size={int(self._wf_norm_outlier_size)})"
         return f"Remove outliers (tomopy, size={int(self._wf_norm_outlier_size)})"
+
+    def _wf_norm_merge_label(self):
+        return {
+            WF_NORM_MERGE_MAD_ADAPTIVE: "Adaptive MAD",
+            WF_NORM_MERGE_MAD: "MAD average",
+            WF_NORM_MERGE_MEDIAN: "Median",
+            WF_NORM_MERGE_MEAN: "Mean",
+        }.get(self._wf_norm_merge_method, self._wf_norm_merge_method)
+
+    def _update_wf_norm_method_tooltip(self):
+        if self.wf_norm_select_button is not None:
+            self.wf_norm_select_button.setToolTip(
+                f"WF merge: {self._wf_norm_merge_label()}; "
+                f"filter: {self._wf_norm_filter_label()}"
+            )
 
     def _set_wf_norm_filter_method(self, method, persist=True):
         m = str(method).strip().lower() if method is not None else WF_NORM_FILTER_GAMMA
@@ -1224,8 +1331,32 @@ class MainScreen(display.MITRDisplay):
             settings = QtCore.QSettings()
             settings.setValue(WF_NORM_FILTER_SETTINGS_KEY, self._wf_norm_filter_method)
             settings.sync()
-        if self.wf_norm_select_button is not None:
-            self.wf_norm_select_button.setToolTip(f"WF filter: {self._wf_norm_filter_label()}")
+        self._update_wf_norm_method_tooltip()
+
+    def _set_wf_norm_merge_method(self, method, persist=True):
+        m = str(method).strip().lower() if method is not None else WF_NORM_MERGE_MAD_ADAPTIVE
+        valid_methods = {
+            WF_NORM_MERGE_MAD_ADAPTIVE,
+            WF_NORM_MERGE_MAD,
+            WF_NORM_MERGE_MEDIAN,
+            WF_NORM_MERGE_MEAN,
+        }
+        if m not in valid_methods:
+            m = WF_NORM_MERGE_MAD_ADAPTIVE
+        if (
+            m in {WF_NORM_MERGE_MAD_ADAPTIVE, WF_NORM_MERGE_MAD}
+            and not self._wf_norm_has_nit_merging()
+        ):
+            m = WF_NORM_MERGE_MEDIAN
+        self._wf_norm_merge_method = m
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.setProperty(WF_NORM_MERGE_RUNTIME_PROPERTY, m)
+        if persist:
+            settings = QtCore.QSettings()
+            settings.setValue(WF_NORM_MERGE_SETTINGS_KEY, m)
+            settings.sync()
+        self._update_wf_norm_method_tooltip()
 
     def _load_wf_norm_filter_method_from_settings(self):
         app = QtWidgets.QApplication.instance()
@@ -1244,6 +1375,28 @@ class MainScreen(display.MITRDisplay):
             pass
         value = settings.value(WF_NORM_FILTER_SETTINGS_KEY, self._wf_norm_filter_method)
         self._set_wf_norm_filter_method(value, persist=False)
+
+    def _load_wf_norm_merge_method_from_settings(self):
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            runtime_value = app.property(WF_NORM_MERGE_RUNTIME_PROPERTY)
+            if runtime_value is not None:
+                m = str(runtime_value).strip().lower()
+                if m in {
+                    WF_NORM_MERGE_MAD_ADAPTIVE,
+                    WF_NORM_MERGE_MAD,
+                    WF_NORM_MERGE_MEDIAN,
+                    WF_NORM_MERGE_MEAN,
+                }:
+                    self._set_wf_norm_merge_method(m, persist=False)
+                    return
+        settings = QtCore.QSettings()
+        try:
+            settings.sync()
+        except Exception:
+            pass
+        value = settings.value(WF_NORM_MERGE_SETTINGS_KEY, self._wf_norm_merge_method)
+        self._set_wf_norm_merge_method(value, persist=False)
 
     def _clear_wf_norm_reference(self, disable_checkbox=True, restore_display=False):
         self._wf_norm_array = None
@@ -1360,14 +1513,23 @@ class MainScreen(display.MITRDisplay):
                 self.wf_norm_select_button.setToolTip("WF build failed: no source files.")
             return
         self._load_wf_norm_filter_method_from_settings()
+        self._load_wf_norm_merge_method_from_settings()
         selected_method = self._wf_norm_filter_method
+        selected_merge = self._wf_norm_merge_method
         if selected_method == WF_NORM_FILTER_GAMMA and not self._wf_norm_has_gamma_filter():
             selected_method = WF_NORM_FILTER_OUTLIER if self._wf_norm_has_tomopy() else WF_NORM_FILTER_MEDIAN
             self._set_wf_norm_filter_method(selected_method, persist=True)
         if selected_method == WF_NORM_FILTER_OUTLIER and not self._wf_norm_has_tomopy():
             selected_method = WF_NORM_FILTER_GAMMA if self._wf_norm_has_gamma_filter() else WF_NORM_FILTER_MEDIAN
             self._set_wf_norm_filter_method(selected_method, persist=True)
+        if (
+            selected_merge in {WF_NORM_MERGE_MAD_ADAPTIVE, WF_NORM_MERGE_MAD}
+            and not self._wf_norm_has_nit_merging()
+        ):
+            selected_merge = WF_NORM_MERGE_MEDIAN
+            self._set_wf_norm_merge_method(selected_merge, persist=True)
         self._wf_norm_requested_method = selected_method
+        self._wf_norm_requested_merge = selected_merge
         try:
             worker = self._ensure_wf_norm_worker()
             future = worker.submit(
@@ -1376,6 +1538,7 @@ class MainScreen(display.MITRDisplay):
                 selected_method,
                 int(self._wf_norm_outlier_size),
                 int(self._wf_norm_median_size),
+                merge_method=selected_merge,
             )
         except Exception as ex:
             self._stop_wf_norm_status_animation()
@@ -2295,8 +2458,11 @@ class MainScreen(display.MITRDisplay):
         )
 
         self.min_spinbox = QtWidgets.QDoubleSpinBox()
-        self.min_spinbox.setDecimals(3)
-        self.min_spinbox.setRange(-1e12, 1e12)
+        self.min_spinbox.setDecimals(0)
+        self.min_spinbox.setRange(
+            self._level_slider_low_bound,
+            self._level_slider_high_bound,
+        )
         self.min_spinbox.setSingleStep(1.0)
         self.min_spinbox.setMaximumWidth(140)
         self.min_spinbox.valueChanged.connect(self._on_manual_levels_changed)
@@ -2316,11 +2482,13 @@ class MainScreen(display.MITRDisplay):
         min_top.addWidget(self.min_spinbox)
         min_layout.addLayout(min_top)
         min_layout.addWidget(self.min_slider)
-        controls_layout.addWidget(min_block)
 
         self.max_spinbox = QtWidgets.QDoubleSpinBox()
-        self.max_spinbox.setDecimals(3)
-        self.max_spinbox.setRange(-1e12, 1e12)
+        self.max_spinbox.setDecimals(0)
+        self.max_spinbox.setRange(
+            self._level_slider_low_bound,
+            self._level_slider_high_bound,
+        )
         self.max_spinbox.setSingleStep(1.0)
         self.max_spinbox.setMaximumWidth(140)
         self.max_spinbox.valueChanged.connect(self._on_manual_levels_changed)
@@ -2340,7 +2508,6 @@ class MainScreen(display.MITRDisplay):
         max_top.addWidget(self.max_spinbox)
         max_layout.addLayout(max_top)
         max_layout.addWidget(self.max_slider)
-        controls_layout.addWidget(max_block)
 
         self.low_pct_spinbox = QtWidgets.QDoubleSpinBox()
         self.low_pct_spinbox.setDecimals(2)
@@ -2368,7 +2535,6 @@ class MainScreen(display.MITRDisplay):
         low_pct_top.addWidget(self.low_pct_spinbox)
         low_pct_layout.addLayout(low_pct_top)
         low_pct_layout.addWidget(self.low_pct_slider)
-        controls_layout.addWidget(low_pct_block)
 
         self.high_pct_spinbox = QtWidgets.QDoubleSpinBox()
         self.high_pct_spinbox.setDecimals(2)
@@ -2396,7 +2562,26 @@ class MainScreen(display.MITRDisplay):
         high_pct_top.addWidget(self.high_pct_spinbox)
         high_pct_layout.addLayout(high_pct_top)
         high_pct_layout.addWidget(self.high_pct_slider)
-        controls_layout.addWidget(high_pct_block)
+
+        # Min/Max and Low %/High % are two modes of the same pair of controls.
+        # Stack each automatic control over its manual counterpart so toggling
+        # Auto levels changes the controls in place instead of leaving an
+        # inactive, grayed-out pair in the row.
+        low_level_block = QtWidgets.QWidget()
+        self._low_level_stack = QtWidgets.QStackedLayout(low_level_block)
+        self._low_level_stack.setContentsMargins(0, 0, 0, 0)
+        self._low_level_stack.addWidget(min_block)
+        self._low_level_stack.addWidget(low_pct_block)
+        self._low_level_stack.setCurrentIndex(1)
+        controls_layout.addWidget(low_level_block)
+
+        high_level_block = QtWidgets.QWidget()
+        self._high_level_stack = QtWidgets.QStackedLayout(high_level_block)
+        self._high_level_stack.setContentsMargins(0, 0, 0, 0)
+        self._high_level_stack.addWidget(max_block)
+        self._high_level_stack.addWidget(high_pct_block)
+        self._high_level_stack.setCurrentIndex(1)
+        controls_layout.addWidget(high_level_block)
 
         self.gamma_spinbox = QtWidgets.QDoubleSpinBox()
         self.gamma_spinbox.setDecimals(2)
@@ -2425,7 +2610,7 @@ class MainScreen(display.MITRDisplay):
 
         # Keep these slider-style control blocks compact so they don't dominate row width.
         compact_block_max_width = 180
-        compact_blocks = (min_block, max_block, low_pct_block, high_pct_block, gamma_block)
+        compact_blocks = (low_level_block, high_level_block, gamma_block)
         for block in compact_blocks:
             block.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
             block.setMinimumWidth(0)
@@ -2466,6 +2651,7 @@ class MainScreen(display.MITRDisplay):
         self.wf_norm_select_button.clicked.connect(self._on_select_wf_button_clicked)
         self._set_wf_norm_visual_state("idle")
         self._load_wf_norm_filter_method_from_settings()
+        self._load_wf_norm_merge_method_from_settings()
         wf_norm_block = QtWidgets.QWidget()
         wf_norm_layout = QtWidgets.QVBoxLayout(wf_norm_block)
         wf_norm_layout.setContentsMargins(0, 0, 0, 0)
@@ -2478,6 +2664,7 @@ class MainScreen(display.MITRDisplay):
         self.live_filter_checkbox = QtWidgets.QCheckBox("AutoFilter")
         self.live_filter_checkbox.setChecked(False)
         self.live_filter_checkbox.toggled.connect(self._on_live_filter_toggled)
+        self._load_live_filter_method_from_settings()
         live_filter_block = QtWidgets.QWidget()
         live_filter_layout = QtWidgets.QVBoxLayout(live_filter_block)
         live_filter_layout.setContentsMargins(0, 0, 0, 0)
@@ -2486,11 +2673,11 @@ class MainScreen(display.MITRDisplay):
         live_filter_layout.addStretch(1)
         live_filter_block.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         controls_layout.addWidget(live_filter_block)
-        if self._has_live_gamma_filter():
+        if self._has_live_filter_method(self._live_filter_method):
             self._update_live_filter_tooltip()
         else:
             self.live_filter_checkbox.setEnabled(False)
-            self._update_live_filter_tooltip(error="neutron-imaging-tools is unavailable")
+            self._update_live_filter_tooltip(error="the selected filter backend is unavailable")
 
         histogram_block = self._create_histogram_block()
         if histogram_block is not None:
@@ -2847,18 +3034,9 @@ class MainScreen(display.MITRDisplay):
         self._update_histogram_markers()
 
     def _on_auto_levels_toggled(self, enabled):
-        self.min_spinbox.setEnabled(not enabled)
-        self.max_spinbox.setEnabled(not enabled)
-        self.min_label.setEnabled(not enabled)
-        self.max_label.setEnabled(not enabled)
-        self.min_slider.setEnabled(not enabled)
-        self.max_slider.setEnabled(not enabled)
-        self.low_pct_label.setEnabled(enabled)
-        self.high_pct_label.setEnabled(enabled)
-        self.low_pct_spinbox.setEnabled(enabled)
-        self.high_pct_spinbox.setEnabled(enabled)
-        self.low_pct_slider.setEnabled(enabled)
-        self.high_pct_slider.setEnabled(enabled)
+        mode_index = 1 if enabled else 0
+        self._low_level_stack.setCurrentIndex(mode_index)
+        self._high_level_stack.setCurrentIndex(mode_index)
         if enabled:
             self._auto_levels_from_current_image()
         else:

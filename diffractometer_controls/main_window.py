@@ -78,6 +78,14 @@ WF_NORM_FILTER_GAMMA = "gamma"
 WF_NORM_FILTER_OUTLIER = "outlier"
 WF_NORM_FILTER_MEDIAN = "median"
 WF_NORM_FILTER_RUNTIME_PROPERTY = "analysis_wf_norm_filter_method_runtime"
+WF_NORM_MERGE_SETTINGS_KEY = "analysis/wf_norm_merge_method"
+WF_NORM_MERGE_MAD_ADAPTIVE = "mad_adaptive"
+WF_NORM_MERGE_MAD = "mad"
+WF_NORM_MERGE_MEDIAN = "median"
+WF_NORM_MERGE_MEAN = "mean"
+WF_NORM_MERGE_RUNTIME_PROPERTY = "analysis_wf_norm_merge_method_runtime"
+AUTO_FILTER_SETTINGS_KEY = "analysis/auto_filter_method"
+AUTO_FILTER_RUNTIME_PROPERTY = "analysis_auto_filter_method_runtime"
 
 class MITRMainWindow(PyDMMainWindow):
     re_manager_api: REManagerAPI
@@ -247,16 +255,23 @@ class MITRMainWindow(PyDMMainWindow):
         self._sync_theme_actions()
 
         normalization_menu = analysis_menu.addMenu("Normalization filtering")
+        normalization_menu.setToolTipsVisible(True)
+        normalization_menu.menuAction().setToolTip(
+            "Choose the pixel filter applied after white-field images are merged."
+        )
         normalization_action_group = QtGui.QActionGroup(normalization_menu)
         normalization_action_group.setExclusive(True)
         norm_gamma_action = normalization_menu.addAction("Gamma filter (Neutron Imaging Tools)")
         norm_gamma_action.setCheckable(True)
+        norm_gamma_action.setToolTip("Correct bright and dark gamma outliers using Neutron Imaging Tools.")
         normalization_action_group.addAction(norm_gamma_action)
         norm_outlier_action = normalization_menu.addAction("Remove outliers (tomopy)")
         norm_outlier_action.setCheckable(True)
+        norm_outlier_action.setToolTip("Correct local bright and dark outliers using tomopy.")
         normalization_action_group.addAction(norm_outlier_action)
         norm_median_action = normalization_menu.addAction("Median filter")
         norm_median_action.setCheckable(True)
+        norm_median_action.setToolTip("Apply a local median filter using SciPy or NumPy.")
         normalization_action_group.addAction(norm_median_action)
 
         nit_gamma_available = self._is_nit_gamma_available()
@@ -299,6 +314,132 @@ class MITRMainWindow(PyDMMainWindow):
         norm_outlier_action.triggered.connect(lambda checked=False: self._set_norm_filter_setting(WF_NORM_FILTER_OUTLIER))
         norm_median_action.triggered.connect(lambda checked=False: self._set_norm_filter_setting(WF_NORM_FILTER_MEDIAN))
 
+        merging_menu = analysis_menu.addMenu("Normalization merging")
+        merging_menu.setToolTipsVisible(True)
+        merging_menu.menuAction().setToolTip(
+            "Choose how multiple white-field images are combined before filtering."
+        )
+        merging_action_group = QtGui.QActionGroup(merging_menu)
+        merging_action_group.setExclusive(True)
+        merge_actions = {}
+        for label, method, tip in (
+            (
+                "Adaptive MAD (recommended)",
+                WF_NORM_MERGE_MAD_ADAPTIVE,
+                "Adaptively reject inconsistent samples using median absolute deviation, then average.",
+            ),
+            (
+                "MAD average",
+                WF_NORM_MERGE_MAD,
+                "Reject samples using median absolute deviation, then average accepted samples.",
+            ),
+            ("Median", WF_NORM_MERGE_MEDIAN, "Combine each pixel using the median value."),
+            ("Mean", WF_NORM_MERGE_MEAN, "Combine each pixel using the arithmetic mean."),
+        ):
+            action = merging_menu.addAction(label)
+            action.setCheckable(True)
+            action.setToolTip(tip)
+            merging_action_group.addAction(action)
+            action.triggered.connect(
+                lambda checked=False, m=method: self._set_norm_merge_setting(m)
+            )
+            merge_actions[method] = action
+
+        nit_merging_available = self._is_nit_merging_available()
+        if not nit_merging_available:
+            for method in (WF_NORM_MERGE_MAD_ADAPTIVE, WF_NORM_MERGE_MAD):
+                action = merge_actions[method]
+                action.setText(f"{action.text()} (Neutron Imaging Tools not installed)")
+                action.setEnabled(False)
+                action.setToolTip("neutron-imaging-tools is not available in this environment.")
+        merge_default = (
+            WF_NORM_MERGE_MAD_ADAPTIVE
+            if nit_merging_available
+            else WF_NORM_MERGE_MEDIAN
+        )
+        merge_method = str(
+            settings.value(WF_NORM_MERGE_SETTINGS_KEY, merge_default)
+        ).strip().lower()
+        valid_merge_methods = {
+            WF_NORM_MERGE_MAD_ADAPTIVE,
+            WF_NORM_MERGE_MAD,
+            WF_NORM_MERGE_MEDIAN,
+            WF_NORM_MERGE_MEAN,
+        }
+        if merge_method not in valid_merge_methods:
+            merge_method = merge_default
+        if (
+            merge_method in {WF_NORM_MERGE_MAD_ADAPTIVE, WF_NORM_MERGE_MAD}
+            and not nit_merging_available
+        ):
+            merge_method = WF_NORM_MERGE_MEDIAN
+            settings.setValue(WF_NORM_MERGE_SETTINGS_KEY, merge_method)
+        if app is not None:
+            app.setProperty(WF_NORM_MERGE_RUNTIME_PROPERTY, merge_method)
+        merge_actions[merge_method].setChecked(True)
+
+        auto_filter_menu = analysis_menu.addMenu("AutoFilter")
+        auto_filter_menu.setToolTipsVisible(True)
+        auto_filter_menu.menuAction().setToolTip(
+            "Choose the filter used by the live-view AutoFilter control."
+        )
+        auto_filter_action_group = QtGui.QActionGroup(auto_filter_menu)
+        auto_filter_action_group.setExclusive(True)
+        auto_filter_actions = {}
+        for label, method, tip in (
+            (
+                "Gamma filter (Neutron Imaging Tools)",
+                WF_NORM_FILTER_GAMMA,
+                "Correct bright and dark gamma outliers in live detector frames.",
+            ),
+            (
+                "Remove outliers (tomopy)",
+                WF_NORM_FILTER_OUTLIER,
+                "Correct local bright and dark outliers in live detector frames.",
+            ),
+            (
+                "Median filter",
+                WF_NORM_FILTER_MEDIAN,
+                "Apply a local median filter to live detector frames.",
+            ),
+        ):
+            action = auto_filter_menu.addAction(label)
+            action.setCheckable(True)
+            action.setToolTip(tip)
+            auto_filter_action_group.addAction(action)
+            action.triggered.connect(
+                lambda checked=False, m=method: self._set_auto_filter_setting(m)
+            )
+            auto_filter_actions[method] = action
+        if not nit_gamma_available:
+            action = auto_filter_actions[WF_NORM_FILTER_GAMMA]
+            action.setText("Gamma filter (Neutron Imaging Tools, not installed)")
+            action.setEnabled(False)
+            action.setToolTip("neutron-imaging-tools is not available in this environment.")
+        if not tomopy_available:
+            action = auto_filter_actions[WF_NORM_FILTER_OUTLIER]
+            action.setText("Remove outliers (tomopy, not installed)")
+            action.setEnabled(False)
+            action.setToolTip("tomopy is not available in this environment.")
+        auto_filter_method = str(
+            settings.value(AUTO_FILTER_SETTINGS_KEY, default_method)
+        ).strip().lower()
+        if auto_filter_method not in valid_methods:
+            auto_filter_method = default_method
+        if auto_filter_method == WF_NORM_FILTER_GAMMA and not nit_gamma_available:
+            auto_filter_method = (
+                WF_NORM_FILTER_OUTLIER if tomopy_available else WF_NORM_FILTER_MEDIAN
+            )
+            settings.setValue(AUTO_FILTER_SETTINGS_KEY, auto_filter_method)
+        if auto_filter_method == WF_NORM_FILTER_OUTLIER and not tomopy_available:
+            auto_filter_method = (
+                WF_NORM_FILTER_GAMMA if nit_gamma_available else WF_NORM_FILTER_MEDIAN
+            )
+            settings.setValue(AUTO_FILTER_SETTINGS_KEY, auto_filter_method)
+        if app is not None:
+            app.setProperty(AUTO_FILTER_RUNTIME_PROPERTY, auto_filter_method)
+        auto_filter_actions[auto_filter_method].setChecked(True)
+
         analysis_menu.addSeparator()
         launch_focus_program_action = analysis_menu.addAction("Launch focus program")
         launch_focus_program_action.setIcon(self._load_focus_program_icon())
@@ -308,6 +449,19 @@ class MITRMainWindow(PyDMMainWindow):
             "is inherited automatically."
         )
         launch_focus_program_action.triggered.connect(self.launch_focus_program)
+
+        launch_neutron_imaging_action = analysis_menu.addAction(
+            "Launch Neutron Imaging GUI"
+        )
+        self._set_themed_action_icon(launch_neutron_imaging_action, "fa6s.images")
+        launch_neutron_imaging_action.setToolTip(
+            "Open Neutron Imaging GUI for radiography reduction, white/dark "
+            "normalization, attenuation, ROI analysis, export, and tomography workflows. "
+            "SSH X11 forwarding is inherited automatically."
+        )
+        launch_neutron_imaging_action.triggered.connect(
+            self.launch_neutron_imaging_gui
+        )
 
         # Add a "Bluesky Controls" submenu
         bluesky_menu = control_system_menu.addMenu("Bluesky Controls")
@@ -453,6 +607,13 @@ class MITRMainWindow(PyDMMainWindow):
         except Exception:
             return False
 
+    def _is_nit_merging_available(self):
+        try:
+            from neutron_imaging_tools.merging import combine_images  # noqa: F401
+            return True
+        except Exception:
+            return False
+
     def _set_norm_filter_setting(self, method):
         m = str(method).strip().lower() if method is not None else WF_NORM_FILTER_GAMMA
         valid_methods = {WF_NORM_FILTER_GAMMA, WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}
@@ -476,6 +637,61 @@ class MITRMainWindow(PyDMMainWindow):
                 self.statusBar().showMessage(fallback_note, 3000)
             else:
                 self.statusBar().showMessage(f"Normalization filter set to: {m}", 2500)
+        except Exception:
+            pass
+
+    def _set_norm_merge_setting(self, method):
+        m = str(method).strip().lower() if method is not None else WF_NORM_MERGE_MAD_ADAPTIVE
+        valid_methods = {
+            WF_NORM_MERGE_MAD_ADAPTIVE,
+            WF_NORM_MERGE_MAD,
+            WF_NORM_MERGE_MEDIAN,
+            WF_NORM_MERGE_MEAN,
+        }
+        if m not in valid_methods:
+            m = WF_NORM_MERGE_MAD_ADAPTIVE
+        fallback_note = ""
+        if (
+            m in {WF_NORM_MERGE_MAD_ADAPTIVE, WF_NORM_MERGE_MAD}
+            and not self._is_nit_merging_available()
+        ):
+            m = WF_NORM_MERGE_MEDIAN
+            fallback_note = "neutron-imaging-tools not installed; normalization merge set to: median"
+        settings = QtCore.QSettings()
+        settings.setValue(WF_NORM_MERGE_SETTINGS_KEY, m)
+        settings.sync()
+        app = QApplication.instance()
+        if app is not None:
+            app.setProperty(WF_NORM_MERGE_RUNTIME_PROPERTY, m)
+        try:
+            self.statusBar().showMessage(
+                fallback_note or f"Normalization merge set to: {m}", 2500
+            )
+        except Exception:
+            pass
+
+    def _set_auto_filter_setting(self, method):
+        m = str(method).strip().lower() if method is not None else WF_NORM_FILTER_GAMMA
+        valid_methods = {WF_NORM_FILTER_GAMMA, WF_NORM_FILTER_OUTLIER, WF_NORM_FILTER_MEDIAN}
+        if m not in valid_methods:
+            m = WF_NORM_FILTER_GAMMA
+        fallback_note = ""
+        if m == WF_NORM_FILTER_GAMMA and not self._is_nit_gamma_available():
+            m = WF_NORM_FILTER_OUTLIER if self._is_tomopy_available() else WF_NORM_FILTER_MEDIAN
+            fallback_note = f"neutron-imaging-tools not installed; AutoFilter set to: {m}"
+        if m == WF_NORM_FILTER_OUTLIER and not self._is_tomopy_available():
+            m = WF_NORM_FILTER_GAMMA if self._is_nit_gamma_available() else WF_NORM_FILTER_MEDIAN
+            fallback_note = f"tomopy not installed; AutoFilter set to: {m}"
+        settings = QtCore.QSettings()
+        settings.setValue(AUTO_FILTER_SETTINGS_KEY, m)
+        settings.sync()
+        app = QApplication.instance()
+        if app is not None:
+            app.setProperty(AUTO_FILTER_RUNTIME_PROPERTY, m)
+        try:
+            self.statusBar().showMessage(
+                fallback_note or f"AutoFilter set to: {m}", 2500
+            )
         except Exception:
             pass
 
@@ -1234,6 +1450,44 @@ class MITRMainWindow(PyDMMainWindow):
                 self,
                 "Focus Program",
                 "Failed to launch focus program. See logs for details.",
+            )
+
+    def launch_neutron_imaging_gui(self):
+        module_name = "neutron_imaging_gui"
+        try:
+            module_available = importlib.util.find_spec(module_name) is not None
+        except Exception:
+            module_available = False
+        if not module_available:
+            msg = (
+                "Neutron Imaging GUI is not installed in the Python environment "
+                f"used by this application: {sys.executable}"
+            )
+            log.warning(msg)
+            QMessageBox.warning(self, "Neutron Imaging GUI", msg)
+            return
+
+        viewer_python = self._resolve_focus_python_executable()
+        cmd = [str(viewer_python), "-m", module_name]
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                env=MITRMainWindow._analysis_launcher_environment(),
+            )
+            self.statusBar().showMessage(
+                f"Launched Neutron Imaging GUI (pid={proc.pid})", 3000
+            )
+            log.info(
+                "Launched neutron-imaging-gui pid=%s python=%s",
+                proc.pid,
+                str(viewer_python),
+            )
+        except Exception:
+            log.exception("Failed to launch neutron-imaging-gui")
+            QMessageBox.critical(
+                self,
+                "Neutron Imaging GUI",
+                "Failed to launch Neutron Imaging GUI. See logs for details.",
             )
 
     def _stop_focus_online_viewer(self):

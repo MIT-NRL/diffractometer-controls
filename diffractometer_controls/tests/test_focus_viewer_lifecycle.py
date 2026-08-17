@@ -55,6 +55,74 @@ class FocusViewerInterpreterTests(unittest.TestCase):
 
         self.assertEqual(selected, Path(running_python))
 
+    def test_forwarded_x_display_forces_xcb_and_drops_wayland_target(self):
+        source = {
+            "DISPLAY": "localhost:10.0",
+            "XAUTHORITY": "/tmp/ssh-cookie",
+            "SSH_CONNECTION": "192.0.2.10 50000 192.0.2.20 22",
+            "WAYLAND_DISPLAY": "wayland-0",
+            "QT_QPA_PLATFORM": "wayland",
+        }
+
+        child = MITRMainWindow._analysis_launcher_environment(source)
+
+        self.assertEqual(child["DISPLAY"], "localhost:10.0")
+        self.assertEqual(child["XAUTHORITY"], "/tmp/ssh-cookie")
+        self.assertEqual(child["QT_QPA_PLATFORM"], "xcb")
+        self.assertNotIn("WAYLAND_DISPLAY", child)
+
+    def test_analysis_display_environment_can_be_overridden(self):
+        source = {
+            "DISPLAY": ":0",
+            "MITR_ANALYSIS_DISPLAY": "localhost:12.0",
+            "MITR_ANALYSIS_XAUTHORITY": "/tmp/alternate-cookie",
+            "MITR_ANALYSIS_QT_QPA_PLATFORM": "xcb",
+            "WAYLAND_DISPLAY": "wayland-0",
+        }
+
+        child = MITRMainWindow._analysis_launcher_environment(source)
+
+        self.assertEqual(child["DISPLAY"], "localhost:12.0")
+        self.assertEqual(child["XAUTHORITY"], "/tmp/alternate-cookie")
+        self.assertEqual(child["QT_QPA_PLATFORM"], "xcb")
+        self.assertNotIn("WAYLAND_DISPLAY", child)
+
+    def test_neutron_imaging_gui_uses_running_interpreter_module(self):
+        status_bar = mock.Mock()
+        harness = SimpleNamespace(
+            _resolve_focus_python_executable=lambda: Path("/opt/controls-env/bin/python"),
+            statusBar=lambda: status_bar,
+        )
+        process = SimpleNamespace(pid=4321)
+
+        with (
+            patch("diffractometer_controls.main_window.importlib.util.find_spec", return_value=object()),
+            patch("diffractometer_controls.main_window.subprocess.Popen", return_value=process) as popen,
+        ):
+            MITRMainWindow.launch_neutron_imaging_gui(harness)
+
+        popen.assert_called_once()
+        self.assertEqual(
+            popen.call_args.args[0],
+            ["/opt/controls-env/bin/python", "-m", "neutron_imaging_gui"],
+        )
+        status_bar.showMessage.assert_called_once_with(
+            "Launched Neutron Imaging GUI (pid=4321)", 3000
+        )
+
+    def test_neutron_imaging_gui_missing_package_warns_without_launch(self):
+        harness = SimpleNamespace()
+
+        with (
+            patch("diffractometer_controls.main_window.importlib.util.find_spec", return_value=None),
+            patch("diffractometer_controls.main_window.subprocess.Popen") as popen,
+            patch("diffractometer_controls.main_window.QMessageBox.warning") as warning,
+        ):
+            MITRMainWindow.launch_neutron_imaging_gui(harness)
+
+        popen.assert_not_called()
+        warning.assert_called_once()
+
 
 class FocusViewerStartupTests(unittest.TestCase):
     def test_window_without_frames_has_not_completed_startup(self):

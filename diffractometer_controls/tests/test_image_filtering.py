@@ -145,8 +145,8 @@ class WhiteFieldWorkerTests(unittest.TestCase):
             paths = self._write_stack(directory)
             with mock.patch.object(
                 wf_norm_worker,
-                "_combine_images_mad_adaptive",
-                side_effect=lambda stack, return_diagnostics=False: (
+                "_combine_images_nit",
+                side_effect=lambda stack, method="mad_adaptive", return_diagnostics=False: (
                     np.median(stack, axis=0),
                     {"rejected_fraction": 0.125, "accepted_count": np.ones((16, 16))},
                 ),
@@ -174,6 +174,7 @@ class WhiteFieldWorkerTests(unittest.TestCase):
             {"backend": "opencv", "changed_fraction": 0.025, "threshold": 12.5},
         )
         merge_mock.assert_called_once()
+        self.assertEqual(merge_mock.call_args.kwargs["method"], "mad_adaptive")
         gamma_mock.assert_called_once()
         self.assertEqual(gamma_mock.call_args.kwargs["size"], 5)
         self.assertTrue(gamma_mock.call_args.kwargs["return_diagnostics"])
@@ -199,6 +200,36 @@ class WhiteFieldWorkerTests(unittest.TestCase):
             payload["filter_diagnostics"],
             {"backend": "opencv", "changed_fraction": 0.01, "threshold": 8.0},
         )
+        self.assertEqual(payload["filter_requested"], "gamma")
+        self.assertEqual(payload["filter_used"], "gamma")
+
+    def test_worker_honors_mean_merge_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths = self._write_stack(directory)
+            payload = wf_norm_worker.build_wf_norm_array_worker(
+                paths,
+                filter_method="median",
+                merge_method="mean",
+            )
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["merge_requested"], "mean")
+        self.assertEqual(payload["merge_used"], "mean")
+        self.assertEqual(payload["filter_used"], "median")
+
+    def test_live_filter_worker_honors_median_selection(self):
+        image = np.full((21, 21), 100.0, dtype=np.float32)
+        image[10, 10] = 1000.0
+
+        payload = wf_norm_worker.filter_live_image_worker(
+            image,
+            filter_method="median",
+        )
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["filter_requested"], "median")
+        self.assertEqual(payload["filter_used"], "median")
+        self.assertAlmostEqual(float(payload["filtered_image"][10, 10]), 100.0)
 
     @unittest.skipUnless(
         importlib.util.find_spec("neutron_imaging_tools") is not None,

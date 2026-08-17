@@ -378,13 +378,16 @@ def _remove_gammas_nit(image, size, ncore=None, return_diagnostics=False):
     return filtered
 
 
-def _combine_images_mad_adaptive(images, return_diagnostics=False):
+def _combine_images_nit(images, method="mad_adaptive", return_diagnostics=False):
     from neutron_imaging_tools.merging import combine_images
 
     stack = np.asarray(images, dtype=np.float32)
+    merge_method = str(method).strip().lower()
+    if merge_method not in {"mad_adaptive", "mad", "median", "mean"}:
+        merge_method = "mad_adaptive"
     result = combine_images(
         stack,
-        method="mad_adaptive",
+        method=merge_method,
         axis=0,
         return_diagnostics=bool(return_diagnostics),
     )
@@ -395,11 +398,20 @@ def _combine_images_mad_adaptive(images, return_diagnostics=False):
     expected_shape = tuple(stack.shape[1:])
     if result.shape != expected_shape:
         raise ValueError(
-            f"mad_adaptive merge returned shape {result.shape}; expected {expected_shape}."
+            f"{merge_method} merge returned shape {result.shape}; expected {expected_shape}."
         )
     if return_diagnostics:
         return result, diagnostics
     return result
+
+
+def _combine_images_mad_adaptive(images, return_diagnostics=False):
+    """Compatibility wrapper for callers that used the original fixed merge."""
+    return _combine_images_nit(
+        images,
+        method="mad_adaptive",
+        return_diagnostics=return_diagnostics,
+    )
 
 
 def _finite_diagnostic_float(value):
@@ -448,23 +460,64 @@ def _is_effectively_zero(image, eps=0.0):
     return int(nz) == 0
 
 
-def filter_live_image_worker(image, size=5):
-    """Apply the NIT Gamma filter to one live frame and return scalar diagnostics."""
+def filter_live_image_worker(image, size=5, filter_method="gamma", median_size=6):
+    """Apply the selected AutoFilter method to one live detector frame."""
     try:
         source = np.asarray(image)
         source = np.squeeze(source)
         if source.ndim != 2 or source.size == 0:
             raise ValueError(f"Expected a non-empty 2D live image, got shape {source.shape}.")
-        filtered, diagnostics = _remove_gammas_nit(
-            source,
-            size=int(size),
-            ncore=1,
-            return_diagnostics=True,
-        )
+        requested = str(filter_method).strip().lower() if filter_method is not None else "gamma"
+        if requested in {"nit_gamma", "gamma_filter", "neutron_imaging_tools"}:
+            requested = "gamma"
+        elif requested in {"tomopy", "tomopy_outlier"}:
+            requested = "outlier"
+        elif requested not in {"gamma", "outlier", "median"}:
+            requested = "gamma"
+        method_used = requested
+        note = ""
+        diagnostics = {}
+        if requested == "median":
+            filtered = _median_filter_fallback(source, size=median_size)
+        elif requested == "outlier":
+            try:
+                filtered = _remove_outliers_tomopy(source, size=int(size), ncore=1)
+                if _is_effectively_zero(filtered, eps=0.0):
+                    raise ValueError("tomopy outlier result was degenerate")
+            except Exception:
+                filtered = _median_filter_fallback(source, size=median_size)
+                method_used = "median"
+                note = "tomopy unavailable; used median filter."
+        else:
+            try:
+                filtered, raw_diagnostics = _remove_gammas_nit(
+                    source,
+                    size=int(size),
+                    ncore=1,
+                    return_diagnostics=True,
+                )
+                diagnostics = _summarize_filter_diagnostics(raw_diagnostics)
+                if _is_effectively_zero(filtered, eps=0.0):
+                    raise ValueError("gamma filter result was degenerate")
+            except Exception:
+                diagnostics = {}
+                try:
+                    filtered = _remove_outliers_tomopy(source, size=int(size), ncore=1)
+                    method_used = "outlier"
+                    note = "neutron-imaging-tools gamma filter unavailable; used tomopy fallback."
+                    if _is_effectively_zero(filtered, eps=0.0):
+                        raise ValueError("tomopy fallback result was degenerate")
+                except Exception:
+                    filtered = _median_filter_fallback(source, size=median_size)
+                    method_used = "median"
+                    note = "gamma and tomopy filters unavailable; used median filter."
         return {
             "ok": True,
             "filtered_image": np.asarray(filtered, dtype=np.float32),
-            "filter_diagnostics": _summarize_filter_diagnostics(diagnostics),
+            "filter_requested": requested,
+            "filter_used": method_used,
+            "filter_note": note,
+            "filter_diagnostics": diagnostics,
         }
     except Exception as ex:
         return {"ok": False, "error": str(ex)}
@@ -476,6 +529,7 @@ def build_wf_norm_array_worker(
     outlier_size=5,
     median_size=6,
     progress_queue=None,
+    merge_method="mad_adaptive",
 ):
     if not file_paths:
         return {"ok": False, "error": "No white-field images were selected."}
@@ -505,19 +559,28 @@ def build_wf_norm_array_worker(
 
         _push_progress(progress_queue, "combining", total=total)
         stack = np.stack(images, axis=0)
-        merge_requested = "mad_adaptive"
+        merge_requested = str(merge_method).strip().lower() if merge_method is not None else "mad_adaptive"
+        if merge_requested not in {"mad_adaptive", "mad", "median", "mean"}:
+            merge_requested = "mad_adaptive"
         merge_used = merge_requested
         merge_note = ""
         merge_diagnostics = {}
         try:
-            combined, raw_merge_diagnostics = _combine_images_mad_adaptive(
-                stack, return_diagnostics=True
-            )
-            merge_diagnostics = _summarize_merge_diagnostics(raw_merge_diagnostics)
+            if merge_requested == "median":
+                combined = np.asarray(np.median(stack, axis=0), dtype=np.float32)
+            elif merge_requested == "mean":
+                combined = np.asarray(np.mean(stack, axis=0), dtype=np.float32)
+            else:
+                combined, raw_merge_diagnostics = _combine_images_nit(
+                    stack,
+                    method=merge_requested,
+                    return_diagnostics=True,
+                )
+                merge_diagnostics = _summarize_merge_diagnostics(raw_merge_diagnostics)
         except Exception:
             combined = np.asarray(np.median(stack, axis=0), dtype=np.float32)
             merge_used = "median"
-            merge_note = "mad_adaptive merge unavailable; used median merge."
+            merge_note = f"{merge_requested} merge unavailable; used median merge."
 
         requested = str(filter_method).strip().lower() if filter_method is not None else "gamma"
         if requested in {"nit_gamma", "gamma_filter", "neutron_imaging_tools"}:
