@@ -52,7 +52,7 @@ class Pinhole(Device):
     y = Cpt(EpicsMotorCustom, "m16", name="y", labels=["positioner"])
 
 # Define the pinhole
-pinhole = Pinhole("4dh4:", name="pinhole")
+pinhole = Pinhole("4dh4:", name="pinhole", read_attrs=["y"])
 
 # Define stages
 class Stage1(Device):
@@ -63,8 +63,8 @@ class Stage2(Device):
     x = Cpt(EpicsMotorCustom, "m14", name="phi", labels=["positioner"])
 
 # Define the stages
-stage1 = Stage1("4dh4:", name="stage1")
-stage2 = Stage2("4dh4:", name="stage2")
+stage1 = Stage1("4dh4:", name="stage1", read_attrs=["theta"])
+stage2 = Stage2("4dh4:", name="stage2", read_attrs=["theta", "x"])
 
 
 #===============================================================================#
@@ -103,8 +103,8 @@ class AnalyzerCurvature(PseudoPositioner):
         return self.PseudoPosition(curve=real_pos.counts*0.0005516111545194904)
     
 
-analyzer1 = AnalyzerCurvature("4dh4:m11",name="analyzer1")
-analyzer2 = AnalyzerCurvature("4dh4:m15",name="analyzer2")
+analyzer1 = AnalyzerCurvature("4dh4:m11", name="analyzer1", read_attrs=["curve", "counts"])
+analyzer2 = AnalyzerCurvature("4dh4:m15", name="analyzer2", read_attrs=["curve", "counts"])
 
 sd.baseline.append(stage1.theta)
 sd.baseline.append(stage2.theta)
