@@ -5,6 +5,7 @@ import math
 import sys
 import os
 import importlib.util
+import threading
 from pathlib import Path
 
 import qtawesome as qta
@@ -49,6 +50,18 @@ except Exception:
         LOCAL_MAINTENANCE_DISABLED_MESSAGE,
         local_maintenance_allowed,
     )
+try:
+    from diffractometer_controls.focus_processing_defaults import (
+        DEFAULT_FOCUS_BULK_WORKERS,
+        DEFAULT_FOCUS_FULL_WORKERS,
+        DEFAULT_FOCUS_MAX_WORKERS_TOTAL,
+    )
+except Exception:
+    from focus_processing_defaults import (
+        DEFAULT_FOCUS_BULK_WORKERS,
+        DEFAULT_FOCUS_FULL_WORKERS,
+        DEFAULT_FOCUS_MAX_WORKERS_TOTAL,
+    )
 from pydm.widgets import PyDMByteIndicator
 from bluesky_queueserver_api.zmq import REManagerAPI
 from pydm.widgets.channel import PyDMChannel
@@ -87,9 +100,14 @@ WF_NORM_MERGE_RUNTIME_PROPERTY = "analysis_wf_norm_merge_method_runtime"
 AUTO_FILTER_SETTINGS_KEY = "analysis/auto_filter_method"
 AUTO_FILTER_RUNTIME_PROPERTY = "analysis_auto_filter_method_runtime"
 
+# A PyDM application may construct more than one MITRMainWindow during display
+# navigation. Keep adaptive viewer launch ownership process-wide, not per window.
+_FOCUS_LAUNCH_GUARD = threading.Lock()
+_FOCUS_LAUNCHED_SESSIONS = set()
+
 class MITRMainWindow(PyDMMainWindow):
     re_manager_api: REManagerAPI
-    adaptive_focus_plan_started = QtCore.Signal(str, str)
+    adaptive_focus_plan_started = QtCore.Signal(str, str, str, str, str, int)
     _RUN_STATE_INDEX_MAP = {
         0: "IDLE",
         1: "RUNNING",
@@ -136,6 +154,7 @@ class MITRMainWindow(PyDMMainWindow):
         self._focus_online_file_name = ""
         self._focus_online_file_dir = ""
         self._focus_online_motor_key = ""
+        self._focus_online_expected_frame_count = 0
         self._focus_doc_subscription = None
         self._focus_data_addr = None
         self._bluesky_environment_update_dialog = None
@@ -146,7 +165,10 @@ class MITRMainWindow(PyDMMainWindow):
         from application import MITRApplication
         app = MITRApplication.instance()
         self.re_manager_api = app.re_manager_api
-        self.adaptive_focus_plan_started.connect(self._on_adaptive_focus_plan_started)
+        self.adaptive_focus_plan_started.connect(
+            self._on_adaptive_focus_plan_started,
+            QtCore.Qt.QueuedConnection,
+        )
         self.customize_ui()
         self._start_adaptive_focus_listener()
 
@@ -1271,28 +1293,55 @@ class MITRMainWindow(PyDMMainWindow):
         if plan_name != "adaptive_imaging_focus_scan":
             return
         focus_md = (doc or {}).get("focus_adaptive", {}) or {}
+        plan_pattern_args = (doc or {}).get("plan_pattern_args", {}) or {}
         session_id = str(focus_md.get("session_id", "")).strip()
         run_uid = str((doc or {}).get("uid", "")).strip()
-        self._focus_online_file_name = str((doc or {}).get("file_name", "")).strip()
-        self._focus_online_file_dir = str((doc or {}).get("file_dir", "")).strip()
-        self._focus_online_motor_key = str(focus_md.get("motor_event_key", "")).strip()
         if not session_id:
             return
+        try:
+            expected_frame_count = max(
+                0,
+                int(
+                    plan_pattern_args.get(
+                        "num_steps", focus_md.get("num_steps", 0)
+                    )
+                ),
+            )
+        except (TypeError, ValueError):
+            expected_frame_count = 0
+        self.adaptive_focus_plan_started.emit(
+            session_id,
+            run_uid,
+            str((doc or {}).get("file_name", "")).strip(),
+            str((doc or {}).get("file_dir", "")).strip(),
+            str(focus_md.get("motor_event_key", "")).strip(),
+            expected_frame_count,
+        )
+
+    @Slot(str, str, str, str, str, int)
+    def _on_adaptive_focus_plan_started(
+        self, session_id, run_uid, file_name, file_dir, motor_key, expected_frame_count
+    ):
+        """Deduplicate and launch only after delivery onto the Qt GUI thread."""
         if self._should_ignore_adaptive_focus_launch(session_id, run_uid):
             return
-        self.adaptive_focus_plan_started.emit(session_id, run_uid)
-
-    @Slot(str, str)
-    def _on_adaptive_focus_plan_started(self, session_id, run_uid):
+        self._focus_online_file_name = str(file_name).strip()
+        self._focus_online_file_dir = str(file_dir).strip()
+        self._focus_online_motor_key = str(motor_key).strip()
+        self._focus_online_expected_frame_count = max(0, int(expected_frame_count))
         self._launch_focus_online_viewer(
             session_id=str(session_id).strip(),
             run_uid=str(run_uid).strip(),
         )
 
     def _should_ignore_adaptive_focus_launch(self, session_id, run_uid):
-        """Debounce duplicate start documents for the same adaptive session."""
+        """Atomically claim one adaptive session across all windows/threads."""
         session_key = str(session_id).strip()
-        if session_key in self._focus_launched_sessions:
+        with _FOCUS_LAUNCH_GUARD:
+            duplicate = session_key in _FOCUS_LAUNCHED_SESSIONS
+            if not duplicate:
+                _FOCUS_LAUNCHED_SESSIONS.add(session_key)
+        if duplicate:
             log.info(
                 "Ignoring duplicate adaptive focus launch session=%s run_uid=%s",
                 session_key,
@@ -1345,6 +1394,9 @@ class MITRMainWindow(PyDMMainWindow):
             "DISPLAY": "MITR_ANALYSIS_DISPLAY",
             "XAUTHORITY": "MITR_ANALYSIS_XAUTHORITY",
             "QT_QPA_PLATFORM": "MITR_ANALYSIS_QT_QPA_PLATFORM",
+            "QT_XCB_GL_INTEGRATION": "MITR_ANALYSIS_QT_XCB_GL_INTEGRATION",
+            "QT_OPENGL": "MITR_ANALYSIS_QT_OPENGL",
+            "LIBGL_ALWAYS_SOFTWARE": "MITR_ANALYSIS_LIBGL_ALWAYS_SOFTWARE",
         }
         for target, source in overrides.items():
             value = str(env.get(source, "")).strip()
@@ -1367,6 +1419,20 @@ class MITRMainWindow(PyDMMainWindow):
         if forwarded_display and env.get("QT_QPA_PLATFORM") == "xcb":
             env.pop("WAYLAND_DISPLAY", None)
             env.pop("QT_WAYLAND_SHELL_INTEGRATION", None)
+            # Forwarded X servers commonly do not expose a GLX framebuffer that
+            # matches Qt's default surface. In that case the child remains alive
+            # but never paints a window. Keep analysis tools on Qt's raster path;
+            # explicit MITR_ANALYSIS_* overrides above can opt back into GLX.
+            if not str(
+                env.get("MITR_ANALYSIS_QT_XCB_GL_INTEGRATION", "")
+            ).strip():
+                env["QT_XCB_GL_INTEGRATION"] = "none"
+            if not str(env.get("MITR_ANALYSIS_QT_OPENGL", "")).strip():
+                env["QT_OPENGL"] = "software"
+            if not str(
+                env.get("MITR_ANALYSIS_LIBGL_ALWAYS_SOFTWARE", "")
+            ).strip():
+                env["LIBGL_ALWAYS_SOFTWARE"] = "1"
         return env
 
     def launch_camera_viewer(self):
@@ -1529,6 +1595,9 @@ class MITRMainWindow(PyDMMainWindow):
         viewer_script = Path(__file__).resolve().parent / "focus_online_viewer.py"
         if not viewer_script.exists():
             log.warning("Focus online viewer script not found: %s", viewer_script)
+            with _FOCUS_LAUNCH_GUARD:
+                _FOCUS_LAUNCHED_SESSIONS.discard(str(session_id).strip())
+            self._focus_launched_sessions.discard(str(session_id).strip())
             return
         viewer_python = self._resolve_focus_python_executable()
         def _env_int(name: str, default: int, min_val: int = 1) -> int:
@@ -1536,9 +1605,17 @@ class MITRMainWindow(PyDMMainWindow):
                 return max(min_val, int(str(os.environ.get(name, default)).strip()))
             except Exception:
                 return int(default)
-        max_workers_total = _env_int("FOCUS_VIEWER_MAX_WORKERS_TOTAL", 8, min_val=3)
-        bulk_workers = _env_int("FOCUS_VIEWER_BULK_WORKERS", 1, min_val=1)
-        full_workers = _env_int("FOCUS_VIEWER_FULL_WORKERS", 6, min_val=1)
+        max_workers_total = _env_int(
+            "FOCUS_VIEWER_MAX_WORKERS_TOTAL",
+            DEFAULT_FOCUS_MAX_WORKERS_TOTAL,
+            min_val=3,
+        )
+        bulk_workers = _env_int(
+            "FOCUS_VIEWER_BULK_WORKERS", DEFAULT_FOCUS_BULK_WORKERS, min_val=1
+        )
+        full_workers = _env_int(
+            "FOCUS_VIEWER_FULL_WORKERS", DEFAULT_FOCUS_FULL_WORKERS, min_val=1
+        )
         def _env_float(name: str, default: float, min_val: float = 0.0) -> float:
             try:
                 return max(min_val, float(str(os.environ.get(name, default)).strip()))
@@ -1582,39 +1659,45 @@ class MITRMainWindow(PyDMMainWindow):
             cmd.extend(["--run-file-dir", str(self._focus_online_file_dir)])
         if self._focus_online_motor_key:
             cmd.extend(["--motor-key", str(self._focus_online_motor_key)])
+        if self._focus_online_expected_frame_count > 0:
+            cmd.extend(
+                [
+                    "--expected-frame-count",
+                    str(self._focus_online_expected_frame_count),
+                ]
+            )
         try:
+            child_env = MITRMainWindow._analysis_launcher_environment()
             proc = subprocess.Popen(
                 cmd,
                 cwd=str(viewer_script.parent),
-                env=MITRMainWindow._analysis_launcher_environment(),
+                env=child_env,
             )
             self._focus_online_proc = proc
             self._focus_online_session_id = str(session_id)
             self._focus_online_run_uid = str(run_uid or "")
+            display = str(child_env.get("DISPLAY", "")).strip()
+            self.statusBar().showMessage(
+                f"Launching adaptive focus viewer (pid={proc.pid}, DISPLAY={display or 'unset'})",
+                6000,
+            )
             log.info(
-                "Launched focus_online_viewer pid=%s python=%s workers(total=%s,bulk=%s,full=%s) session=%s run_uid=%s",
+                "Launched focus_online_viewer pid=%s launcher_pid=%s python=%s display=%s "
+                "workers(total=%s,bulk=%s,full=%s) session=%s run_uid=%s",
                 proc.pid,
+                os.getpid(),
                 str(viewer_python),
+                display or "unset",
                 max_workers_total,
                 bulk_workers,
                 full_workers,
                 session_id,
                 run_uid,
             )
-            def _check_started():
-                p = self._focus_online_proc
-                if p is None:
-                    return
-                rc = p.poll()
-                if rc is not None:
-                    log.error(
-                        "focus_online_viewer exited early rc=%s session=%s run_uid=%s",
-                        rc,
-                        session_id,
-                        run_uid,
-                    )
-            QtCore.QTimer.singleShot(2500, _check_started)
         except Exception:
+            with _FOCUS_LAUNCH_GUARD:
+                _FOCUS_LAUNCHED_SESSIONS.discard(str(session_id).strip())
+            self._focus_launched_sessions.discard(str(session_id).strip())
             log.exception(
                 "Failed to launch focus_online_viewer for session=%s run_uid=%s",
                 session_id,

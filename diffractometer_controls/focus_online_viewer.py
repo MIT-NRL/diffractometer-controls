@@ -39,6 +39,12 @@ except Exception:
 
 try:
     from focus_offline_viewer import (
+        DEFAULT_FOCUS_BULK_WORKERS,
+        DEFAULT_FOCUS_FULL_CACHE_GB,
+        DEFAULT_FOCUS_FULL_WORKERS,
+        DEFAULT_FOCUS_MAX_WORKERS_TOTAL,
+        DEFAULT_FOCUS_PREPROCESS_MODE,
+        DEFAULT_FOCUS_PREPROCESS_SIZE,
         FocusOfflineWindow,
         FrameInfo,
         _apply_saved_theme,
@@ -46,6 +52,12 @@ try:
     )
 except Exception:
     from diffractometer_controls.focus_offline_viewer import (
+        DEFAULT_FOCUS_BULK_WORKERS,
+        DEFAULT_FOCUS_FULL_CACHE_GB,
+        DEFAULT_FOCUS_FULL_WORKERS,
+        DEFAULT_FOCUS_MAX_WORKERS_TOTAL,
+        DEFAULT_FOCUS_PREPROCESS_MODE,
+        DEFAULT_FOCUS_PREPROCESS_SIZE,
         FocusOfflineWindow,
         FrameInfo,
         _apply_saved_theme,
@@ -75,7 +87,21 @@ def _acquire_session_lock(session_id: Optional[str]):
             return lock
     except Exception:
         return None
-    print(f"Focus viewer already running for session {sid}; exiting duplicate process.")
+    owner_text = ""
+    try:
+        has_owner, owner_pid, owner_host, owner_app = lock.getLockInfo()
+        if has_owner:
+            owner_text = (
+                f" owner_pid={owner_pid} owner_host={owner_host} "
+                f"owner_app={owner_app}"
+            )
+    except Exception:
+        pass
+    print(
+        f"Focus viewer already running for session {sid}; exiting duplicate process. "
+        f"duplicate_pid={os.getpid()} parent_pid={os.getppid()} "
+        f"DISPLAY={os.environ.get('DISPLAY', 'unset')}{owner_text}"
+    )
     return None
 
 
@@ -83,6 +109,15 @@ def _has_received_focus_frame(bridge) -> bool:
     """Return whether the viewer has accepted its first valid image file."""
     window = getattr(bridge, "window", None)
     return bool(window is not None and getattr(window, "frames", ()))
+
+
+def _has_observed_run_activity(bridge) -> bool:
+    """Return whether any document for the tracked run has been received.
+
+    Used by the startup guard: a live run whose first exposure is simply long
+    must not be torn down, because exiting also aborts the adaptive session.
+    """
+    return bool(getattr(bridge, "_observed_run_activity", False))
 
 
 class QueueServerAdaptiveClient:
@@ -209,6 +244,7 @@ class QueueServerAdaptiveClient:
 class FocusOnlineBridge(QtCore.QObject):
     """Translate Bluesky documents into incremental frame updates for FocusOfflineWindow."""
 
+    _document_received = QtCore.Signal(str, object)
     _frame_received = QtCore.Signal(str, float)
     _log_received = QtCore.Signal(str)
     _run_stopped = QtCore.Signal()
@@ -219,6 +255,7 @@ class FocusOnlineBridge(QtCore.QObject):
     _mark_complete_requested = QtCore.Signal()
     _mark_aborted_requested = QtCore.Signal()
     _terminal_command_failed = QtCore.Signal(str)
+    _expected_frame_adjustment = QtCore.Signal(int)
 
     def __init__(
         self,
@@ -227,6 +264,7 @@ class FocusOnlineBridge(QtCore.QObject):
         motor_key: Optional[str] = None,
         stream_name: str = "primary",
         run_uid: Optional[str] = None,
+        expected_frame_count: Optional[int] = None,
         follow_latest: bool = True,
         reset_viewer_on_new_run: bool = True,
         on_go_to_focus=None,
@@ -238,12 +276,12 @@ class FocusOnlineBridge(QtCore.QObject):
         default_focus_metric="mtf50",
         default_scan_step=0.1667,
         interval_ms: int = 200,
-        max_workers_total: int = 8,
-        bulk_workers: int = 1,
-        full_workers: int = 6,
-        full_cache_gb: float = 10.0,
-        preprocess_mode: str = "gamma",
-        preprocess_size: int = 5,
+        max_workers_total: int = DEFAULT_FOCUS_MAX_WORKERS_TOTAL,
+        bulk_workers: Optional[int] = None,
+        full_workers: Optional[int] = None,
+        full_cache_gb: float = DEFAULT_FOCUS_FULL_CACHE_GB,
+        preprocess_mode: str = DEFAULT_FOCUS_PREPROCESS_MODE,
+        preprocess_size: int = DEFAULT_FOCUS_PREPROCESS_SIZE,
         file_wait_timeout_s: float = 30.0,
         file_wait_interval_ms: int = 250,
         run_file_name: Optional[str] = None,
@@ -256,6 +294,13 @@ class FocusOnlineBridge(QtCore.QObject):
         self.motor_key = motor_key
         self.stream_name = str(stream_name)
         self.run_uid_filter = str(run_uid).strip() if run_uid else None
+        try:
+            parsed_expected_count = int(expected_frame_count)
+        except (TypeError, ValueError):
+            parsed_expected_count = 0
+        self.expected_frame_count: Optional[int] = (
+            parsed_expected_count if parsed_expected_count > 0 else None
+        )
         self.follow_latest = bool(follow_latest)
         self.reset_viewer_on_new_run = bool(reset_viewer_on_new_run)
         self.on_go_to_focus = on_go_to_focus
@@ -268,8 +313,12 @@ class FocusOnlineBridge(QtCore.QObject):
         self.default_scan_step = float(max(1e-4, default_scan_step))
         self.interval_ms = int(max(50, interval_ms))
         self.max_workers_total = int(max(3, max_workers_total))
-        self.bulk_workers = int(max(1, bulk_workers))
-        self.full_workers = int(max(1, full_workers))
+        self.bulk_workers = (
+            int(max(1, bulk_workers)) if bulk_workers is not None else None
+        )
+        self.full_workers = (
+            int(max(1, full_workers)) if full_workers is not None else None
+        )
         self.full_cache_gb = float(max(0.25, full_cache_gb))
         self.preprocess_mode = str(preprocess_mode or "gamma")
         self.preprocess_size = int(max(1, preprocess_size))
@@ -294,6 +343,9 @@ class FocusOnlineBridge(QtCore.QObject):
         self._path_first_seen_ts: Dict[str, float] = {}
         self._warned_unresolved_datums = set()
         self._warned_no_image_key = False
+        # Set once any document for the tracked run arrives, so the startup guard
+        # can distinguish "no run at all" from "run is live but still exposing".
+        self._observed_run_activity = False
         self._fallback_position = 0.0
         self._focus_metric_combo: Optional[QtWidgets.QComboBox] = None
         self._scan_step_spin: Optional[QtWidgets.QDoubleSpinBox] = None
@@ -306,16 +358,25 @@ class FocusOnlineBridge(QtCore.QObject):
         self._suppress_close_complete = False
         self._focus_action_timer: Optional[QtCore.QTimer] = None
 
-        self._frame_received.connect(self._on_frame_received)
-        self._log_received.connect(self._on_log_received)
-        self._run_stopped.connect(self._on_run_stopped)
-        self._go_focus_requested.connect(self._on_go_focus_requested)
-        self._scan_focus_requested.connect(self._on_scan_focus_requested)
-        self._extend_left_requested.connect(self._on_extend_left_requested)
-        self._extend_right_requested.connect(self._on_extend_right_requested)
-        self._mark_complete_requested.connect(self._on_mark_complete_requested)
-        self._mark_aborted_requested.connect(self._on_mark_aborted_requested)
-        self._terminal_command_failed.connect(self._on_terminal_command_failed)
+        # Documents and Queue Server replies arrive on background Python threads.
+        # Explicit queued delivery is required before any slot touches widgets or
+        # starts Qt timers; AutoConnection can otherwise execute a Python slot on
+        # the emitting thread and produce QObject::startTimer warnings.
+        queued = QtCore.Qt.QueuedConnection
+        self._document_received.connect(self._on_document_received, queued)
+        self._frame_received.connect(self._on_frame_received, queued)
+        self._log_received.connect(self._on_log_received, queued)
+        self._run_stopped.connect(self._on_run_stopped, queued)
+        self._go_focus_requested.connect(self._on_go_focus_requested, queued)
+        self._scan_focus_requested.connect(self._on_scan_focus_requested, queued)
+        self._extend_left_requested.connect(self._on_extend_left_requested, queued)
+        self._extend_right_requested.connect(self._on_extend_right_requested, queued)
+        self._mark_complete_requested.connect(self._on_mark_complete_requested, queued)
+        self._mark_aborted_requested.connect(self._on_mark_aborted_requested, queued)
+        self._terminal_command_failed.connect(self._on_terminal_command_failed, queued)
+        self._expected_frame_adjustment.connect(
+            self._on_expected_frame_adjustment, queued
+        )
 
     def _ensure_window(self):
         if self.window is not None:
@@ -330,6 +391,7 @@ class FocusOnlineBridge(QtCore.QObject):
             preprocess_mode=self.preprocess_mode,
             preprocess_size=self.preprocess_size,
             allow_file_open=False,
+            expected_frame_count=self.expected_frame_count,
         )
         self.window.warm_full_process_pool()
         self.window.installEventFilter(self)
@@ -345,6 +407,32 @@ class FocusOnlineBridge(QtCore.QObject):
         self._install_focus_controls()
         self.window._log("Online stream connected; waiting for frames...")
 
+    @QtCore.Slot(int)
+    def _on_expected_frame_adjustment(self, delta: int):
+        """Update the acquisition target on the window's Qt thread."""
+        if self.window is None:
+            if self.expected_frame_count is not None:
+                self.expected_frame_count = max(
+                    0, int(self.expected_frame_count) + int(delta)
+                )
+            return
+        updated = self.window.adjust_expected_stream_frames(int(delta))
+        if updated is not None:
+            self.expected_frame_count = int(updated)
+
+    def show_window_now(self):
+        """Create and raise the viewer before any frame has arrived.
+
+        The window is opened when the plan starts so the operator can confirm the
+        session is live and pre-position the ROI. Frames populate it afterwards.
+        """
+        self._ensure_window()
+        if self.window is None:
+            return
+        self.window.statusBar().showMessage(
+            "Waiting for the first image; set the ROI around the foil edge."
+        )
+
     @staticmethod
     def _bring_window_to_front(window: QtWidgets.QWidget):
         try:
@@ -354,31 +442,9 @@ class FocusOnlineBridge(QtCore.QObject):
             window.show()
             window.raise_()
             window.activateWindow()
-            # Some window managers apply focus changes asynchronously or ignore
-            # a plain raise()/activate() for newly spawned processes. Use a
-            # one-shot topmost pulse, then clear it.
-            def _pulse_topmost():
-                try:
-                    window.setWindowFlag(QtCore.Qt.WindowStaysOnTopHint, True)
-                    window.show()
-                    window.raise_()
-                    window.activateWindow()
-                    QtCore.QTimer.singleShot(250, _clear_topmost)
-                except Exception:
-                    pass
-
-            def _clear_topmost():
-                try:
-                    window.setWindowFlag(QtCore.Qt.WindowStaysOnTopHint, False)
-                    window.show()
-                    window.raise_()
-                    window.activateWindow()
-                except Exception:
-                    pass
-
-            QtCore.QTimer.singleShot(0, window.raise_)
-            QtCore.QTimer.singleShot(0, window.activateWindow)
-            QtCore.QTimer.singleShot(30, _pulse_topmost)
+            # Do not schedule topmost/raise pulses here. Besides causing the
+            # original unmap/remap flicker on X11, a launch accidentally routed
+            # through a dispatcher thread would also attempt to start Qt timers.
         except Exception:
             pass
 
@@ -989,6 +1055,9 @@ class FocusOnlineBridge(QtCore.QObject):
     def _process_event_data(self, *, descriptor_uid: str, data: Dict):
         if not self._accept_descriptor_for_run_stream(descriptor_uid):
             return
+        # An accepted event proves the tracked run is producing data, even if the
+        # image file cannot be resolved yet.
+        self._observed_run_activity = True
         data = dict(data or {})
         image_key = self._detect_image_key(data)
         if image_key is None:
@@ -1034,6 +1103,14 @@ class FocusOnlineBridge(QtCore.QObject):
 
     def on_document(self, name: str, doc: Dict):
         """Bluesky callback entry point: subscribe this to RE/dispatcher."""
+        # RemoteDispatcher invokes callbacks on its receiving thread. Queue the
+        # complete document before touching bridge/window state; start handling
+        # may close a window and therefore stop its Qt timers.
+        self._document_received.emit(str(name), dict(doc or {}))
+
+    @QtCore.Slot(str, object)
+    def _on_document_received(self, name: str, doc: Dict):
+        """Handle one Bluesky document on the bridge's Qt thread."""
         if name == "start":
             uid = str(doc.get("uid", ""))
             self._active_run_uid = uid
@@ -1048,15 +1125,38 @@ class FocusOnlineBridge(QtCore.QObject):
             self._warned_no_image_key = False
             if self.run_uid_filter and uid != self.run_uid_filter:
                 return
+            # Local RunEngine attachments receive the start document directly.
+            # Spawned viewers normally receive this value through the CLI because
+            # their subscription may begin after the start document was emitted.
+            focus_md = dict(doc.get("focus_adaptive", {}) or {})
+            plan_pattern_args = dict(doc.get("plan_pattern_args", {}) or {})
+            try:
+                start_expected_count = max(
+                    0,
+                    int(
+                        plan_pattern_args.get(
+                            "num_steps", focus_md.get("num_steps", 0)
+                        )
+                    ),
+                )
+            except (TypeError, ValueError):
+                start_expected_count = 0
+            if start_expected_count > 0:
+                self.expected_frame_count = int(start_expected_count)
+                if self.window is not None:
+                    self.window.set_expected_stream_frames(start_expected_count)
+            # This is the run we are tracking; it is live even before any frame.
+            self._observed_run_activity = True
             if self.reset_viewer_on_new_run:
-                # Keep the pre-created placeholder window for the same run.
-                # This avoids a close/reopen flicker when start arrives after launch.
+                # Keep an existing window that has not shown any frame yet.
+                # The viewer is spawned from this plan's start document, so the
+                # placeholder window it created is the window this run needs.
+                # Closing and reopening it here caused the visible
+                # appear/disappear/reappear flicker at scan start.
                 keep_placeholder = bool(
                     (self.window is not None)
                     and (len(getattr(self.window, "frames", [])) == 0)
                     and (not self._seen_paths)
-                    and (self.run_uid_filter is not None)
-                    and (uid == self.run_uid_filter)
                 )
                 if not keep_placeholder:
                     if self.window is not None:
@@ -1181,6 +1281,8 @@ class FocusOnlineBridge(QtCore.QObject):
         if self.window is None:
             return
         total = int(len(self.window.frames))
+        self.window.mark_stream_complete()
+        self.expected_frame_count = total
         if total <= 0:
             return
         # Mark all streamed frames as seen so the window can treat the run as complete.
@@ -1206,6 +1308,11 @@ class FocusOnlineBridge(QtCore.QObject):
                     self.window._log(
                         f"Run stop sync: queued full filtering for all streamed frames ({total})."
                     )
+                    # If every frame was already prepared while the online gate
+                    # was waiting for more acquisition, closing the stream is the
+                    # state change that must retry finalization.
+                    self.window._maybe_start_full_reprocess_after_scan()
+                    self.window._maybe_finalize_full_metric_pass()
             except Exception as ex:
                 self._log_received.emit(f"Run stop sync failed: {ex}")
 
@@ -1264,14 +1371,21 @@ class FocusOnlineBridge(QtCore.QObject):
 
         idx = int(len(self.window.frames))
         self.window.frames.append(FrameInfo(index=idx, path=path, position=float(position)))
-        self.window.note_stream_frame_added()
+        # Pass the index so full-resolution processing is queued even if the
+        # quick-pass load is refused by task backpressure.
+        try:
+            self.window.note_stream_frame_added(idx)
+        except TypeError:
+            self.window.note_stream_frame_added()
         if idx == 0:
             self.window._log(
                 f"First streamed frame: {path.name} @ motor={float(position):.5f}"
             )
         self.window._update_filter_queue_indicator()
         self.window._log(
-            f"Streamed frame {idx + 1}/{len(self.window.frames)}: {path.name} @ motor={float(position):.5f}"
+            "Streamed frame "
+            f"{idx + 1}/{self.expected_frame_count or len(self.window.frames)}: "
+            f"{path.name} @ motor={float(position):.5f}"
         )
         if self.follow_latest:
             self.window._load_frame(idx)
@@ -1284,6 +1398,7 @@ def attach_to_run_engine(
     motor_key: Optional[str] = None,
     stream_name: str = "primary",
     run_uid: Optional[str] = None,
+    expected_frame_count: Optional[int] = None,
     follow_latest: bool = True,
     reset_viewer_on_new_run: bool = True,
     on_go_to_focus=None,
@@ -1295,12 +1410,12 @@ def attach_to_run_engine(
     default_focus_metric="mtf50",
     default_scan_step=0.1667,
     interval_ms: int = 200,
-    max_workers_total: int = 8,
-    bulk_workers: int = 1,
-    full_workers: int = 6,
-    full_cache_gb: float = 10.0,
-    preprocess_mode: str = "gamma",
-    preprocess_size: int = 5,
+    max_workers_total: int = DEFAULT_FOCUS_MAX_WORKERS_TOTAL,
+    bulk_workers: Optional[int] = None,
+    full_workers: Optional[int] = None,
+    full_cache_gb: float = DEFAULT_FOCUS_FULL_CACHE_GB,
+    preprocess_mode: str = DEFAULT_FOCUS_PREPROCESS_MODE,
+    preprocess_size: int = DEFAULT_FOCUS_PREPROCESS_SIZE,
     file_wait_timeout_s: float = 30.0,
     file_wait_interval_ms: int = 250,
     run_file_name: Optional[str] = None,
@@ -1316,6 +1431,7 @@ def attach_to_run_engine(
         motor_key=motor_key,
         stream_name=stream_name,
         run_uid=run_uid,
+        expected_frame_count=expected_frame_count,
         follow_latest=follow_latest,
         reset_viewer_on_new_run=reset_viewer_on_new_run,
         on_go_to_focus=on_go_to_focus,
@@ -1350,6 +1466,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--motor-key", type=str, default=None, help="Event data key containing motor position")
     p.add_argument("--stream-name", type=str, default="primary", help="Bluesky stream name to consume")
     p.add_argument("--run-uid", type=str, default=None, help="Optional UID filter; ignore other runs")
+    p.add_argument(
+        "--expected-frame-count",
+        type=int,
+        default=0,
+        help=(
+            "Expected image frames in the initial online acquisition; final edge "
+            "locking waits until this many unique frames arrive."
+        ),
+    )
     p.add_argument("--no-follow-latest", action="store_true", help="Do not auto-jump to newest frame")
     p.add_argument(
         "--keep-runs-combined",
@@ -1357,21 +1482,41 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Append all runs into one viewer session instead of resetting on each new run.",
     )
     p.add_argument("--interval-ms", type=int, default=200, help="Playback interval for the base viewer")
-    p.add_argument("--max-workers-total", type=int, default=8, help="Total worker cap")
-    p.add_argument("--bulk-workers", type=int, default=1, help="Bulk/ROI workers")
-    p.add_argument("--full-workers", type=int, default=6, help="Full filter process workers")
-    p.add_argument("--full-cache-gb", type=float, default=10.0, help="Full filtered cache budget (GB)")
+    p.add_argument(
+        "--max-workers-total",
+        type=int,
+        default=DEFAULT_FOCUS_MAX_WORKERS_TOTAL,
+        help="Total worker cap",
+    )
+    p.add_argument(
+        "--bulk-workers",
+        type=int,
+        default=DEFAULT_FOCUS_BULK_WORKERS,
+        help="Bulk/ROI workers",
+    )
+    p.add_argument(
+        "--full-workers",
+        type=int,
+        default=DEFAULT_FOCUS_FULL_WORKERS,
+        help="Full filter workers",
+    )
+    p.add_argument(
+        "--full-cache-gb",
+        type=float,
+        default=DEFAULT_FOCUS_FULL_CACHE_GB,
+        help="Full filtered cache budget (GB)",
+    )
     p.add_argument(
         "--preprocess-mode",
         type=str,
         choices=["gamma", "tomopy_outlier", "median"],
-        default="gamma",
+        default=DEFAULT_FOCUS_PREPROCESS_MODE,
         help="Prefilter mode for image processing.",
     )
     p.add_argument(
         "--preprocess-size",
         type=int,
-        default=5,
+        default=DEFAULT_FOCUS_PREPROCESS_SIZE,
         help="Kernel size for selected prefilter mode.",
     )
     p.add_argument(
@@ -1454,6 +1599,7 @@ def main(argv=None) -> int:
         motor_key=args.motor_key,
         stream_name=args.stream_name,
         run_uid=args.run_uid,
+        expected_frame_count=args.expected_frame_count,
         follow_latest=not bool(args.no_follow_latest),
         reset_viewer_on_new_run=not bool(args.keep_runs_combined),
         interval_ms=args.interval_ms,
@@ -1488,10 +1634,16 @@ def main(argv=None) -> int:
                 thread_name_prefix="focus-command",
             )
 
-            def _submit(command: str, payload: Optional[Dict] = None):
+            def _submit(
+                command: str,
+                payload: Optional[Dict] = None,
+                *,
+                expected_additional_frames: int = 0,
+            ):
                 nonlocal pending_command_future
                 command_name = str(command or "").strip().lower()
                 is_terminal = command_name in {"complete", "abort"}
+                expected_delta = max(0, int(expected_additional_frames))
                 if (
                     not is_terminal
                     and pending_command_future is not None
@@ -1501,6 +1653,12 @@ def main(argv=None) -> int:
                         f"Adaptive command ignored while another command is being confirmed: {command_name}"
                     )
                     return None
+
+                # Open the new acquisition batch before submitting it so even a
+                # zero-exposure detector cannot deliver its first image while the
+                # viewer still considers the previous dataset complete.
+                if expected_delta:
+                    bridge._on_expected_frame_adjustment(expected_delta)
 
                 def _worker():
                     try:
@@ -1514,6 +1672,8 @@ def main(argv=None) -> int:
                             bridge._log_received.emit(
                                 f"Adaptive command failed: {command_name} :: {resp}"
                             )
+                            if expected_delta:
+                                bridge._expected_frame_adjustment.emit(-expected_delta)
                             if is_terminal:
                                 bridge._terminal_command_failed.emit(
                                     f"Terminal command failed: {command_name} :: {resp}"
@@ -1522,12 +1682,18 @@ def main(argv=None) -> int:
                         bridge._log_received.emit(
                             f"Adaptive command failed: {command_name} :: {ex}"
                         )
+                        if expected_delta:
+                            bridge._expected_frame_adjustment.emit(-expected_delta)
                         if is_terminal:
                             bridge._terminal_command_failed.emit(
                                 f"Terminal command failed: {command_name} :: {ex}"
                             )
-
-                pending_command_future = command_executor.submit(_worker)
+                try:
+                    pending_command_future = command_executor.submit(_worker)
+                except Exception:
+                    if expected_delta:
+                        bridge._on_expected_frame_adjustment(-expected_delta)
+                    raise
                 return pending_command_future
 
             def _on_go_to_focus(metric: str):
@@ -1541,7 +1707,11 @@ def main(argv=None) -> int:
                     "target_position": float(target),
                     "metric": str(metric),
                 }
-                _submit("go_to_focus", payload=payload)
+                return _submit(
+                    "go_to_focus",
+                    payload=payload,
+                    expected_additional_frames=1,
+                )
 
             def _on_scan_around_focus(metric: str, step_size: float):
                 target = bridge.get_focus_target(metric)
@@ -1556,13 +1726,25 @@ def main(argv=None) -> int:
                     "num_points": 7,
                     "center": float(target),
                 }
-                _submit("scan_around_focus", payload=payload)
+                return _submit(
+                    "scan_around_focus",
+                    payload=payload,
+                    expected_additional_frames=7,
+                )
 
             def _on_extend_left():
-                _submit("extend_left", payload={"num_points": 3})
+                return _submit(
+                    "extend_left",
+                    payload={"num_points": 3},
+                    expected_additional_frames=3,
+                )
 
             def _on_extend_right():
-                _submit("extend_right", payload={"num_points": 3})
+                return _submit(
+                    "extend_right",
+                    payload={"num_points": 3},
+                    expected_additional_frames=3,
+                )
 
             def _on_complete(command: str = "complete"):
                 nonlocal terminal_future
@@ -1610,6 +1792,10 @@ def main(argv=None) -> int:
 
     dispatch_thread = threading.Thread(target=dispatcher.start, daemon=True)
     dispatch_thread.start()
+    # Show the window as soon as the viewer process is up, rather than waiting for
+    # the first image. The plan spawns this process from its start document, so
+    # this is effectively "appears when the plan starts".
+    bridge.show_window_now()
     if viewer_ready_callback is not None:
         # Avoid the PUB/SUB slow-joiner window: report readiness only after the
         # receiving thread has had time to establish its subscription.
@@ -1636,16 +1822,20 @@ def main(argv=None) -> int:
         parent_timer.timeout.connect(_check_parent)
         parent_timer.start()
 
-    # Guard 2: allow the first acquisition and file write to finish, but do not
-    # leave an idle viewer behind if no valid frame ever arrives.
+    # Guard 2: don't leave an idle viewer behind if no run ever reaches us. The
+    # window is now shown at startup, so this must key off run activity rather
+    # than frames: exiting also aborts the adaptive session, and a long first
+    # exposure must never be mistaken for a dead session.
     startup_timeout_s = float(max(0.0, float(args.startup_timeout_s or 0.0)))
     if startup_timeout_s > 0:
         def _check_startup_timeout():
-            if not _has_received_focus_frame(bridge):
-                print(
-                    f"No frames received within {startup_timeout_s:.1f}s; exiting focus viewer."
-                )
-                app.quit()
+            if _has_observed_run_activity(bridge) or _has_received_focus_frame(bridge):
+                return
+            print(
+                f"No run documents received within {startup_timeout_s:.1f}s; "
+                "exiting focus viewer."
+            )
+            app.quit()
         QtCore.QTimer.singleShot(int(startup_timeout_s * 1000), _check_startup_timeout)
 
     try:
