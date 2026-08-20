@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from qtpy import QtCore
 from qtpy import QtGui
-from qtpy.QtWidgets import QComboBox, QLabel, QShortcut, QTableWidgetItem
+from qtpy.QtWidgets import QComboBox, QLabel, QMenu, QShortcut, QTableWidgetItem
 
 import bluesky_widgets.qt.run_engine_client as rec
 
@@ -76,6 +76,90 @@ class _DynamicChoicesComboBox(QComboBox):
     def showPopup(self):
         self.signal_popup_about_to_show.emit()
         super().showPopup()
+
+
+class _GroupedChoicesComboBox(_DynamicChoicesComboBox):
+    """Combo box with optional side menus for grouped choice metadata."""
+
+    signal_grouped_choice_selected = QtCore.Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._choice_groups = {}
+
+    def set_choice_groups(self, groups):
+        def _normalize(entries):
+            if isinstance(entries, dict):
+                return {
+                    str(name): _normalize(values)
+                    for name, values in entries.items()
+                    if values
+                }
+            normalized = []
+            for entry in entries or []:
+                if isinstance(entry, (list, tuple)) and len(entry) == 2:
+                    label, value = entry
+                else:
+                    label = value = entry
+                normalized.append((str(label), str(value)))
+            return normalized
+
+        self._choice_groups = _normalize(groups or {})
+
+    def _select_value(self, value, *, display_text=None):
+        value = str(value)
+        index = self.findText(value)
+        if index >= 0:
+            self.setProperty("dc_selected_value", None)
+            self.setCurrentIndex(index)
+        else:
+            # The displayed camera path is intentionally separate from the
+            # Queue Server-safe alias stored in the plan parameter.
+            self.setProperty("dc_selected_value", value)
+            self.setCurrentIndex(0)
+            self.setEditText(str(display_text if display_text is not None else value))
+            self.signal_grouped_choice_selected.emit(value)
+
+    def selected_value(self):
+        value = self.property("dc_selected_value")
+        return str(value) if value is not None else self.currentText()
+
+    def clear_selected_value(self):
+        self.setProperty("dc_selected_value", None)
+
+    def showPopup(self):
+        self.signal_popup_about_to_show.emit()
+        if not self._choice_groups:
+            return QComboBox.showPopup(self)
+
+        menu = QMenu(self)
+        # Keep the custom-entry choice visually blank, matching the editable
+        # empty first item in the combobox itself.
+        custom_action = menu.addAction("")
+        custom_action.triggered.connect(lambda: self._select_value(""))
+        menu.addSeparator()
+        for index in range(1, self.count()):
+            value = self.itemText(index)
+            action = menu.addAction(value)
+            action.triggered.connect(lambda _checked=False, v=value: self._select_value(v))
+        def _add_submenus(parent_menu, entries):
+            for group_name, group_entries in entries.items():
+                sub_menu = parent_menu.addMenu(group_name)
+                if isinstance(group_entries, dict):
+                    _add_submenus(sub_menu, group_entries)
+                    continue
+                for label, value in group_entries:
+                    action = sub_menu.addAction(label)
+                    action.setData(value)
+                    action.triggered.connect(
+                        lambda _checked=False, v=value, label=label: self._select_value(
+                            v, display_text=label
+                        )
+                    )
+
+        _add_submenus(menu, self._choice_groups)
+        execute_menu = getattr(menu, "exec_", None) or menu.exec
+        execute_menu(self.mapToGlobal(self.rect().bottomLeft()))
 
 
 class _CheckableChoicesComboBox(_DynamicChoicesComboBox):
@@ -303,6 +387,121 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         self._cached_item_params = {}
         self._file_dir_combos = weakref.WeakSet()
         super().show_item(item=item, editable=editable)
+        self._refresh_camera_axis_constraints()
+
+    def _param_index_by_name(self, name):
+        for index, param in enumerate(self._params):
+            if param.get("name") == name:
+                return index
+        return None
+
+    def _param_row_by_name(self, name):
+        index = self._param_index_by_name(name)
+        if index is None:
+            return None
+        try:
+            return self._params_indices.index(index)
+        except ValueError:
+            return None
+
+    def _current_param_text(self, name):
+        index = self._param_index_by_name(name)
+        if index is None:
+            return ""
+        param = self._params[index]
+        value = param.get("value") if param.get("is_value_set") else param["parameters"].default
+        if value is inspect.Parameter.empty or value is None:
+            return ""
+        return str(value)
+
+    @staticmethod
+    def _camera_axis_suffix(value):
+        text = str(value or "").strip()
+        for suffix in ("acquire_time", "gain", "offset"):
+            if text.endswith(f".cam.{suffix}") or text.endswith(f"_{suffix}"):
+                return suffix
+        return None
+
+    @staticmethod
+    def _camera_axis_detector(value):
+        """Return the detector owning an advanced camera axis, if identifiable."""
+        text = str(value or "").strip()
+        for suffix in ("acquire_time", "gain", "offset"):
+            dotted_suffix = f".cam.{suffix}"
+            alias_suffix = f"_{suffix}"
+            if text.endswith(dotted_suffix):
+                return text[: -len(dotted_suffix)]
+            if text.endswith(alias_suffix):
+                return text[: -len(alias_suffix)]
+        return None
+
+    @classmethod
+    def _camera_axis_display_name(cls, value):
+        """Return the dotted camera path shown to users for an axis alias."""
+        detector_name = cls._camera_axis_detector(value)
+        axis_name = cls._camera_axis_suffix(value)
+        if detector_name and axis_name:
+            return f"{detector_name}.cam.{axis_name}"
+        return str(value or "")
+
+    def _select_detector_for_camera_axis(self, axis, advanced_axis_values):
+        """Make a selected advanced axis and detector selection consistent."""
+        if str(axis or "") not in set(advanced_axis_values or []):
+            return False
+        detector_name = self._camera_axis_detector(axis)
+        detector_index = self._param_index_by_name("detector")
+        if not detector_name or detector_index is None:
+            return False
+        detector = self._current_param_text("detector")
+        if detector == detector_name:
+            return False
+        param = self._params[detector_index]
+        param["value"] = detector_name
+        param["is_value_set"] = True
+        param["is_user_modified"] = True
+        row = self._param_row_by_name("detector")
+        if row is not None:
+            QtCore.QTimer.singleShot(0, lambda: self._show_row_value(row=row))
+        return True
+
+    def _clear_mismatched_camera_axis(self):
+        detector = self._current_param_text("detector")
+        motor = self._current_param_text("motor")
+        if not self._camera_axis_suffix(motor):
+            return False
+        if motor.startswith(f"{detector}.cam.") or motor.startswith(f"{detector}_"):
+            return False
+        motor_index = self._param_index_by_name("motor")
+        if motor_index is None:
+            return False
+        param = self._params[motor_index]
+        param["value"] = inspect.Parameter.empty
+        param["is_value_set"] = False
+        param["is_user_modified"] = True
+        row = self._param_row_by_name("motor")
+        if row is not None:
+            QtCore.QTimer.singleShot(0, lambda: self._show_row_value(row=row))
+        return True
+
+    def _refresh_camera_axis_constraints(self):
+        """Hide a fixed camera setting when it is the selected scan axis."""
+        axis = self._camera_axis_suffix(self._current_param_text("motor"))
+        for param_name, axis_name in (
+            ("exposure_time", "acquire_time"),
+            ("gain", "gain"),
+            ("offset", "offset"),
+        ):
+            row = self._param_row_by_name(param_name)
+            if row is None:
+                continue
+            hidden = axis == axis_name
+            self.setRowHidden(row, hidden)
+            if hidden:
+                param_index = self._param_index_by_name(param_name)
+                param = self._params[param_index]
+                param["value"] = inspect.Parameter.empty
+                param["is_value_set"] = False
+                param["is_user_modified"] = True
 
     def _param_index_from_row(self, row):
         if 0 <= row < len(self._params_indices):
@@ -1190,58 +1389,63 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             pass
 
         has_values_meta = isinstance(values_field, (list, tuple)) and bool(values_field)
+        choice_groups = {}
+
+        def _filter_device_choices(raw_choices):
+            """Keep Queue Server device names and prefer dotted aliases."""
+            def _is_device_name(s):
+                if not isinstance(s, str):
+                    return False
+                s = s.strip()
+                if not s or len(s) < 2:
+                    return False
+                bad_tokens = ("typing", "union", "name", "annotation", "__movable__")
+                if any(token in s.lower() for token in bad_tokens):
+                    return False
+                return bool(re.match(r"^[A-Za-z][_A-Za-z0-9\.\_]*$", s))
+
+            filtered = [str(choice) for choice in raw_choices if _is_device_name(choice)]
+            choice_set = set(filtered)
+            return list(
+                dict.fromkeys(
+                    choice
+                    for choice in filtered
+                    if not (
+                        "_" in choice
+                        and choice.replace("_", ".", 1) in choice_set
+                    )
+                )
+            )
 
         # Build choices preferentially from explicit 'values', then from any
-        # declared 'devices' in either the decorator metadata or the
-        # model-provided parameter metadata. This avoids touching real
-        # device objects in the GUI process — we only use their names.
+        # declared devices. Preserve named device groups so the GUI can render
+        # a side menu instead of flattening advanced camera controls.
         if has_values_meta:
             choices = [str(x) for x in values_field]
         else:
-            devs = []
-            devs.extend(_extract_devices_field(devices_field))
-            devs.extend(_extract_devices_field(pmeta_devices_field))
-            choices = devs if devs else None
-
-            # Do NOT parse description text for choices (too noisy). Only use
-            # explicit metadata or model-provided device lists. If those are
-            # present, filter them to likely device names.
-            if choices:
-                # Filter helper: accept dotted or underscore names with letters/numbers
-                import re
-
-                def _is_device_name(s):
-                    if not isinstance(s, str):
-                        return False
-                    s = s.strip()
-                    if not s:
-                        return False
-                    if len(s) < 2:
-                        return False
-                    # Reject obvious non-device tokens
-                    bad_tokens = ("typing", "union", "name", "annotation", "__movable__")
-                    low = s.lower()
-                    for b in bad_tokens:
-                        if b in low:
-                            return False
-                    # Accept names like 'cam1.focus', 'stage1_theta', 'motor'
-                    return bool(re.match(r"^[A-Za-z][_A-Za-z0-9\.\_]*$", s))
-
-                choices = [c for c in choices if _is_device_name(c)]
-                if choices:
-                    # Prefer dotted subdevice names when both dotted and
-                    # underscore aliases are present (e.g., stage1.theta over stage1_theta).
-                    choice_set = set(choices)
-                    filtered = []
-                    for c in choices:
-                        if "_" in c:
-                            dotted = c.replace("_", ".", 1)
-                            if dotted in choice_set:
-                                continue
-                        filtered.append(c)
-                    choices = list(dict.fromkeys(filtered)) if filtered else None
-                else:
-                    choices = None
+            group_source = (
+                devices_field
+                if isinstance(devices_field, dict)
+                else pmeta_devices_field
+            )
+            if isinstance(group_source, dict):
+                for group_name, group_values in group_source.items():
+                    group_choices = _filter_device_choices(
+                        _extract_devices_field(group_values)
+                    )
+                    if group_choices:
+                        choice_groups[str(group_name)] = group_choices
+                choices = [
+                    choice
+                    for group_choices in choice_groups.values()
+                    for choice in group_choices
+                ]
+            else:
+                choices = _filter_device_choices(
+                    _extract_devices_field(devices_field)
+                    + _extract_devices_field(pmeta_devices_field)
+                )
+            choices = list(dict.fromkeys(choices)) or None
 
         if self._is_file_dir_param(p_name):
             combo = _DynamicChoicesComboBox()
@@ -1467,7 +1671,22 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             combo.currentIndexChanged.connect(_on_bool_change)
             self.setCellWidget(row, 2, combo)
         elif choices:
-            combo = _DynamicChoicesComboBox()
+            camera_advanced_choices = {}
+            cam_advanced_group = choice_groups.get("Cam_advanced") or choice_groups.get("Cam advanced")
+            camera_advanced_values = list(cam_advanced_group or [])
+            if p_name == "motor" and cam_advanced_group:
+                # Camera leaves belong in a side menu; standard motor choices
+                # remain in the normal combobox list.
+                choices = [
+                    value
+                    for group_name, group_values in choice_groups.items()
+                    if group_name not in ("Cam_advanced", "Cam advanced")
+                    for value in group_values
+                ]
+                camera_advanced_choices = {"Cam advanced": cam_advanced_group}
+                combo = _GroupedChoicesComboBox()
+            else:
+                combo = _DynamicChoicesComboBox()
             # Keep an explicit empty first option that supports custom typing.
             allow_custom_entry = True
             combo.setEditable(allow_custom_entry)
@@ -1488,6 +1707,26 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                 # Start implicit/default values in gray, but switch to normal style
                 # as soon as the user opens the menu.
                 self._set_combo_implicit_style(_combo, False)
+                if camera_advanced_choices and isinstance(_combo, _GroupedChoicesComboBox):
+                    _combo.set_choice_groups(
+                        {
+                            group_name: {
+                                detector_name: [
+                                    (f"{detector_name}.cam.{axis_name}", value)
+                                    for value in group_values
+                                    if self._camera_axis_detector(value) == detector_name
+                                    for axis_name in [self._camera_axis_suffix(value)]
+                                    if axis_name
+                                ]
+                                for detector_name in dict.fromkeys(
+                                    self._camera_axis_detector(value)
+                                    for value in group_values
+                                    if self._camera_axis_detector(value)
+                                )
+                            }
+                            for group_name, group_values in camera_advanced_choices.items()
+                        }
+                    )
 
             cur_text = None
             if is_value_set and (value != inspect.Parameter.empty):
@@ -1497,6 +1736,14 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             has_cur_text = cur_text is not None and bool(str(cur_text).strip())
             if has_cur_text and cur_text in choices:
                 combo.setCurrentIndex(choices.index(cur_text) + 1)
+            elif (
+                isinstance(combo, _GroupedChoicesComboBox)
+                and cur_text in camera_advanced_values
+            ):
+                combo._select_value(
+                    cur_text,
+                    display_text=self._camera_axis_display_name(cur_text),
+                )
             else:
                 # Keep the explicit blank first item selected unless the model
                 # already supplied a concrete current/default value.
@@ -1519,7 +1766,11 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                     p_index = self._param_index_from_row(_row)
                     if p_index is None:
                         return
-                    txt = _combo.currentText()
+                    txt = (
+                        _combo.selected_value()
+                        if isinstance(_combo, _GroupedChoicesComboBox)
+                        else _combo.currentText()
+                    )
                     if not str(txt).strip():
                         # Treat empty custom entry as "unset"
                         self._params[p_index]["value"] = inspect.Parameter.empty
@@ -1540,6 +1791,14 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                     self._params[p_index]["is_value_set"] = True
                     self._params[p_index]["is_user_modified"] = True
                     self._set_combo_implicit_style(_combo, False)
+                    if p_name == "detector":
+                        self._clear_mismatched_camera_axis()
+                    if p_name == "motor":
+                        self._select_detector_for_camera_axis(
+                            txt, camera_advanced_values
+                        )
+                    if p_name in ("detector", "motor"):
+                        QtCore.QTimer.singleShot(0, self._refresh_camera_axis_constraints)
                     _emit_modified_deferred()
                 except Exception:
                     pass
@@ -1547,8 +1806,12 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             combo.signal_popup_about_to_show.connect(_on_combo_popup_open)
             combo.currentIndexChanged.connect(_on_combo_change)
             combo.currentIndexChanged.connect(_toggle_custom_edit)
+            if isinstance(combo, _GroupedChoicesComboBox):
+                combo.signal_grouped_choice_selected.connect(_on_combo_change)
             if combo.lineEdit() is not None:
                 combo.lineEdit().editingFinished.connect(_on_combo_change)
+                if isinstance(combo, _GroupedChoicesComboBox):
+                    combo.lineEdit().textEdited.connect(combo.clear_selected_value)
                 _toggle_custom_edit(combo.currentIndex())
             self.setCellWidget(row, 2, combo)
         else:
@@ -1610,7 +1873,11 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                                 cell_valid = True
                                 self._set_combo_implicit_style(widget, False)
                             elif isinstance(widget, QComboBox):
-                                txt = widget.currentText()
+                                txt = (
+                                    widget.selected_value()
+                                    if isinstance(widget, _GroupedChoicesComboBox)
+                                    else widget.currentText()
+                                )
                                 is_file_dir = self._is_file_dir_param(p.get("name", ""))
                                 if not str(txt).strip():
                                     # Empty entry is invalid for required params

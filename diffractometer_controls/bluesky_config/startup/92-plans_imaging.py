@@ -28,6 +28,7 @@ from epics import caput, caget, cainfo
 from functools import partial
 from pathlib import Path
 import sys
+from cycler import cycler
 
 try:
     from diffractometer_controls.plan_time_estimation import (
@@ -96,6 +97,66 @@ def _collect_imaging_detector_names():
             continue
         names.append(name)
     return names
+
+
+_CAMERA_ADVANCED_SCAN_ATTRS = ("acquire_time", "gain", "offset")
+
+
+def _camera_advanced_axis_alias(detector_name, attr):
+    """Return the Queue Server-safe top-level alias for a camera control."""
+    return f"{detector_name}_{attr}"
+
+
+def _collect_imaging_advanced_scan_names():
+    """Collect explicitly registered camera configuration scan axes.
+
+    These aliases intentionally avoid resolving ``detector.cam`` here.  The
+    live camera has optional AreaDetector records that must not be eagerly
+    instantiated while Queue Server builds its startup inventory.
+    """
+    names = []
+    g = globals()
+    for detector_name in _collect_imaging_detector_names():
+        for attr in _CAMERA_ADVANCED_SCAN_ATTRS:
+            axis_name = _camera_advanced_axis_alias(detector_name, attr)
+            signal = g.get(axis_name)
+            if (
+                callable(getattr(signal, "set", None))
+                and callable(getattr(signal, "read", None))
+            ):
+                names.append(axis_name)
+    return names
+
+
+def _scan_axis_position(axis):
+    """Return a scan axis value for motors and signal-like configuration axes."""
+    if hasattr(axis, "position"):
+        return axis.position
+    getter = getattr(axis, "get", None)
+    if callable(getter):
+        return getter()
+    raise TypeError(f"Scan axis {axis!r} has neither 'position' nor 'get()'")
+
+
+def _scan_axis_units(axis):
+    """Return display units without requiring a motor-specific ``egu`` attribute."""
+    units = getattr(axis, "egu", None)
+    if units:
+        return str(units)
+    try:
+        units = (axis.metadata or {}).get("units", "")
+    except Exception:
+        units = ""
+    return str(units or "")
+
+
+def _camera_scan_axis_name(detector, axis):
+    """Return the camera attribute scanned by ``axis``, or ``None``."""
+    camera = getattr(detector, "cam", None)
+    for attr in _CAMERA_ADVANCED_SCAN_ATTRS:
+        if axis is getattr(camera, attr, None):
+            return attr
+    return None
 
 def _one_nd_step_repeat(
     detectors,
@@ -531,7 +592,6 @@ def tomo_scan(file_name:str,
     return(yield from main_plan())
 
 
-
 @parameter_annotation_decorator({
     "parameters": {
         "detector": {
@@ -660,32 +720,127 @@ def imaging(
 
 
 
-@parameter_annotation_decorator({
-    "parameters": {
-        "detector": {
-            "annotation": "ImagingDetectors",
-            "default": "cam1",
-            "description": "Imaging detector (default: cam1)",
-            "devices": {"ImagingDetectors": _collect_imaging_detector_names()},
-            "convert_device_names": True,
+def _imaging_scan_parameter_annotation():
+    """Return the shared Queue Server annotations for imaging scan axes."""
+    return {
+        "parameters": {
+            "detector": {
+                "annotation": "ImagingDetectors",
+                "default": "cam1",
+                "description": "Imaging detector (default: cam1)",
+                "devices": {"ImagingDetectors": _collect_imaging_detector_names()},
+                "convert_device_names": True,
+            },
+            "motor": {
+                "annotation": "typing.Union[str, Motors, Cam_advanced]",
+                "description": "Motor or supported camera setting to scan",
+                "devices": {
+                    "Motors": _collect_movable_names(),
+                    # Queue Server group names must be valid Python identifiers.
+                    "Cam_advanced": _collect_imaging_advanced_scan_names(),
+                },
+                "convert_device_names": True,
+            },
         },
-        "motor": {
-            "annotation": "typing.Union[str, Motors]",
-            "description": "Motor to scan (must be movable)",
-            "devices": {"Motors": _collect_movable_names()},
-            "convert_device_names": True,
-        }
     }
-})
-def imaging_scan(
+
+
+def _normalise_discrete_scan_positions(positions):
+    """Validate and normalize an explicit list of imaging scan positions."""
+    try:
+        values = np.asarray(list(positions), dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("positions must be a non-empty sequence of numbers") from exc
+    if values.ndim != 1 or len(values) < 1 or not np.all(np.isfinite(values)):
+        raise ValueError("positions must be a non-empty sequence of finite numbers")
+    return values
+
+
+def _resolve_imaging_scan_positions(
+    scan_kind,
+    *,
+    original_position,
+    start_pos=None,
+    stop_pos=None,
+    start_relative=None,
+    stop_relative=None,
+    positions=None,
+    step_size=None,
+    num_steps=None,
+):
+    """Resolve each public imaging scan form to absolute axis positions."""
+    if scan_kind == "linear":
+        scan_positions, num_steps_calc, step_size_calc, stop_pos_calc = (
+            _scan_positions_from_num_or_step_size(
+                start_pos,
+                stop_pos,
+                num_steps=num_steps,
+                step_size=step_size,
+            )
+        )
+        return scan_positions, {
+            "start_pos": float(start_pos),
+            "stop_pos": float(stop_pos_calc),
+            "step_size": float(step_size_calc),
+            "num_steps": int(num_steps_calc),
+        }
+
+    if scan_kind == "discrete":
+        scan_positions = _normalise_discrete_scan_positions(positions)
+        step_size_calc = (
+            float(scan_positions[1] - scan_positions[0])
+            if len(scan_positions) > 1
+            else None
+        )
+        return scan_positions, {
+            "positions": scan_positions.tolist(),
+            "start_pos": float(scan_positions[0]),
+            "stop_pos": float(scan_positions[-1]),
+            "step_size": step_size_calc,
+            "num_steps": int(len(scan_positions)),
+        }
+
+    if scan_kind == "relative":
+        try:
+            absolute_start = float(original_position) + float(start_relative)
+            absolute_stop = float(original_position) + float(stop_relative)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("start_relative and stop_relative must be numeric") from exc
+        scan_positions, num_steps_calc, step_size_calc, stop_pos_calc = (
+            _scan_positions_from_num_or_step_size(
+                absolute_start,
+                absolute_stop,
+                num_steps=num_steps,
+                step_size=step_size,
+            )
+        )
+        return scan_positions, {
+            "start_relative": float(start_relative),
+            "stop_relative": float(stop_relative),
+            "start_pos": float(absolute_start),
+            "stop_pos": float(stop_pos_calc),
+            "step_size": float(step_size_calc),
+            "num_steps": int(num_steps_calc),
+        }
+
+    raise ValueError(f"Unsupported imaging scan kind: {scan_kind!r}")
+
+
+def _run_imaging_scan_impl(
             file_name:str, 
             file_dir:str, 
             motor, 
-            start_pos:float, 
-            stop_pos:float,
+            *,
+            plan_name,
+            scan_kind,
+            start_pos:float = None,
+            stop_pos:float = None,
+            start_relative:float = None,
+            stop_relative:float = None,
+            positions=None,
             step_size:float = None,
             num_steps:int = None,
-            detector=cam1, 
+            detector=None,
             exposure_time:float = None,
             num_exposures:int = 1,
             gain:int = None,
@@ -697,12 +852,18 @@ def imaging_scan(
     General scan for the imaging detector system.
     '''
 
-    original_pos = motor.position
-
     file_name = str(file_name).strip().replace(" ","_").replace("__","_")
     file_dir = str(file_dir).strip().replace(" ","_").replace("__","_")
 
     detector = [detector]
+    original_pos = _scan_axis_position(motor)
+    camera_axis = _camera_scan_axis_name(detector[0], motor)
+    if camera_axis == "acquire_time" and exposure_time is not None:
+        raise ValueError("Do not pass exposure_time when scanning detector.cam.acquire_time")
+    if camera_axis == "gain" and gain is not None:
+        raise ValueError("Do not pass gain when scanning detector.cam.gain")
+    if camera_axis == "offset" and offset is not None:
+        raise ValueError("Do not pass offset when scanning detector.cam.offset")
 
     # Ensure temperature is checked within the main plan
     if check_temperature:
@@ -723,30 +884,92 @@ def imaging_scan(
         for det in detector:
             yield from bps.mov(det.cam.offset, offset)
 
-    positions, num_steps_calc, step_size_calc, stop_pos_calc = _scan_positions_from_num_or_step_size(
-        start_pos,
-        stop_pos,
-        num_steps=num_steps,
+    positions, scan_details = _resolve_imaging_scan_positions(
+        scan_kind,
+        original_position=original_pos,
+        start_pos=start_pos,
+        stop_pos=stop_pos,
+        start_relative=start_relative,
+        stop_relative=stop_relative,
+        positions=positions,
         step_size=step_size,
+        num_steps=num_steps,
     )
+    num_steps_calc = scan_details["num_steps"]
+    step_size_calc = scan_details["step_size"]
+    stop_pos_calc = scan_details["stop_pos"]
 
+    estimate_kwargs = {
+        "motor": getattr(motor, "name", motor),
+        "scan_axis": camera_axis,
+        "exposure_time": exposure_time,
+        "num_exposures": num_exposures,
+    }
+    if scan_kind == "discrete":
+        estimate_kwargs["positions"] = scan_details["positions"]
+    elif scan_kind == "relative":
+        estimate_kwargs.update(
+            start_relative=scan_details["start_relative"],
+            stop_relative=scan_details["stop_relative"],
+            step_size=step_size_calc,
+            num_steps=num_steps_calc,
+            # The core has read the axis at run start, so this gives the
+            # worker an exact estimate even when the queued relative plan
+            # could not know the starting value yet.
+            resolved_positions=positions.tolist(),
+        )
+    else:
+        estimate_kwargs.update(
+            start_pos=scan_details["start_pos"],
+            stop_pos=stop_pos_calc,
+            step_size=step_size_calc,
+            num_steps=num_steps_calc,
+        )
     estimate = estimate_plan_runtime(
-        "imaging_scan",
-        kwargs={
-            "start_pos": start_pos,
-            "stop_pos": stop_pos_calc,
-            "step_size": step_size_calc,
-            "num_steps": num_steps_calc,
-            "exposure_time": exposure_time,
-            "num_exposures": num_exposures,
-        },
+        plan_name,
+        kwargs=estimate_kwargs,
         context=_plan_estimation_context(),
     )
     total_time = float(estimate.get("estimated_total_time_s") or 0.0)
     total_units = int(estimate.get("estimated_total_units") or (num_exposures * num_steps_calc))
+    progress_unit_durations_s = None
+    if camera_axis == "acquire_time" and total_units > 0:
+        # The scan visits each exposure value in order.  Preserve that known
+        # schedule for the live ETA instead of inferring later, longer
+        # exposures from the shorter points that have already completed.
+        exposure_sum_s = float(sum(max(0.0, float(position)) for position in positions))
+        exposure_total_s = exposure_sum_s * int(num_exposures)
+        transfer_per_frame_s = max(
+            0.0,
+            (total_time - exposure_total_s) / float(total_units),
+        )
+        progress_unit_durations_s = tuple(
+            max(0.0, float(position)) + transfer_per_frame_s
+            for position in positions
+            for _ in range(int(num_exposures))
+        )
 
     print("#===============#")
-    print(f"Starting scan of {motor.name} from {start_pos} to {stop_pos_calc} \nin {num_steps_calc} steps of {step_size_calc} {motor.egu} with {num_exposures} exposures at each position.")
+    axis_name = getattr(motor, "name", type(motor).__name__)
+    axis_units = _scan_axis_units(motor)
+    units_suffix = f" {axis_units}" if axis_units else ""
+    if scan_kind == "discrete":
+        scan_description = f"at {num_steps_calc} specified positions"
+    elif scan_kind == "relative":
+        scan_description = (
+            f"from {scan_details['start_relative']} to {scan_details['stop_relative']} "
+            f"relative to {original_pos}"
+        )
+    else:
+        scan_description = f"from {scan_details['start_pos']} to {stop_pos_calc}"
+    step_description = (
+        f" of {step_size_calc}{units_suffix}" if step_size_calc is not None else ""
+    )
+    print(
+        f"Starting scan of {axis_name} {scan_description} \n"
+        f"in {num_steps_calc} steps{step_description} with {num_exposures} "
+        "exposures at each position."
+    )
     hours = total_time // 3600
     minutes = (total_time % 3600) // 60
     seconds = total_time % 60
@@ -775,10 +998,14 @@ def imaging_scan(
             "offset": detector[0].cam.offset.get(),
         },
         "experiment_type": "imaging",
-        "plan_name": "imaging_scan",
+        "plan_name": plan_name,
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,
-        "plan_pattern_args": dict(motor=motor.name, start_pos=start_pos, stop_pos=stop_pos_calc, step_size=step_size_calc, num_steps=num_steps_calc, num_exposures=num_exposures),  # noqa: C408
+        "plan_pattern_args": dict(
+            motor=motor.name,
+            **scan_details,
+            num_exposures=num_exposures,
+        ),
         "motors": [motor.name],
     }
     _md.update(md)
@@ -790,6 +1017,7 @@ def imaging_scan(
         progress = _ProgressEstimator(
             total_units=total_units,
             initial_total_time_s=total_time,
+            planned_unit_durations_s=progress_unit_durations_s,
         )
         def _on_step_start():
             yield from progress.mark_started()
@@ -832,3 +1060,108 @@ def imaging_scan(
             yield from bps.mv(motor, original_pos)
 
     return(yield from main_plan())
+
+
+def _make_imaging_scan_runner(implementation):
+    """Hide the generator implementation from Queue Server plan discovery."""
+    def runner(*args, **kwargs):
+        return implementation(*args, **kwargs)
+
+    return runner
+
+
+# Queue Server treats every generator function in the startup namespace as a
+# public plan. Keep the implementation in a closure so only the three
+# explicitly annotated public wrappers below are discovered.
+_run_imaging_scan = _make_imaging_scan_runner(_run_imaging_scan_impl)
+del _run_imaging_scan_impl
+
+
+@parameter_annotation_decorator(_imaging_scan_parameter_annotation())
+def imaging_scan(
+    file_name: str,
+    file_dir: str,
+    motor,
+    start_pos: float,
+    stop_pos: float,
+    step_size: float = None,
+    num_steps: int = None,
+    detector=cam1,
+    exposure_time: float = None,
+    num_exposures: int = 1,
+    gain: int = None,
+    offset: int = None,
+    return_to_original_position: bool = True,
+    check_temperature: bool = True,
+    md: dict = None,
+):
+    """Image at inclusive absolute positions along a motor or camera setting."""
+    return (
+        yield from _run_imaging_scan(
+            file_name, file_dir, motor, plan_name="imaging_scan", scan_kind="linear",
+            start_pos=start_pos, stop_pos=stop_pos, step_size=step_size,
+            num_steps=num_steps, detector=detector, exposure_time=exposure_time,
+            num_exposures=num_exposures, gain=gain, offset=offset,
+            return_to_original_position=return_to_original_position,
+            check_temperature=check_temperature, md=md,
+        )
+    )
+
+
+@parameter_annotation_decorator(_imaging_scan_parameter_annotation())
+def imaging_scan_discrete(
+    file_name: str,
+    file_dir: str,
+    motor,
+    positions: list[float],
+    detector=cam1,
+    exposure_time: float = None,
+    num_exposures: int = 1,
+    gain: int = None,
+    offset: int = None,
+    return_to_original_position: bool = True,
+    check_temperature: bool = True,
+    md: dict = None,
+):
+    """Image at the exact, ordered values in ``positions``."""
+    return (
+        yield from _run_imaging_scan(
+            file_name, file_dir, motor, plan_name="imaging_scan_discrete",
+            scan_kind="discrete", positions=positions, detector=detector,
+            exposure_time=exposure_time, num_exposures=num_exposures, gain=gain,
+            offset=offset, return_to_original_position=return_to_original_position,
+            check_temperature=check_temperature, md=md,
+        )
+    )
+
+
+@parameter_annotation_decorator(_imaging_scan_parameter_annotation())
+def imaging_scan_rel(
+    file_name: str,
+    file_dir: str,
+    motor,
+    start_relative: float,
+    stop_relative: float,
+    step_size: float = None,
+    num_steps: int = None,
+    detector=cam1,
+    exposure_time: float = None,
+    num_exposures: int = 1,
+    gain: int = None,
+    offset: int = None,
+    return_to_original_position: bool = True,
+    check_temperature: bool = True,
+    md: dict = None,
+):
+    """Image over offsets from the axis value measured when the run begins."""
+    return (
+        yield from _run_imaging_scan(
+            file_name, file_dir, motor, plan_name="imaging_scan_rel",
+            scan_kind="relative", start_relative=start_relative,
+            stop_relative=stop_relative, step_size=step_size, num_steps=num_steps,
+            detector=detector, exposure_time=exposure_time,
+            num_exposures=num_exposures, gain=gain, offset=offset,
+            return_to_original_position=return_to_original_position,
+            check_temperature=check_temperature, md=md,
+        )
+    )

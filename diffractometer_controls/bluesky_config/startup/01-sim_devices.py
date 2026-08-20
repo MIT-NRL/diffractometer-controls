@@ -214,5 +214,12 @@ sim_focus_cam = SimulatedFocusDetector(
     best_focus=0.0,
 )
 register_device("sim_focus_motor", depth=1)
+# Keep the detector shallow and expose only its supported public scan axis.
 register_device("sim_focus_cam", depth=2)
+for _camera_axis_attr in ("acquire_time",):
+    _camera_axis_name = f"sim_focus_cam_{_camera_axis_attr}"
+    _camera_axis = getattr(sim_focus_cam.cam, _camera_axis_attr)
+    _camera_axis.kind = "hinted"
+    globals()[_camera_axis_name] = _camera_axis
+    register_device(_camera_axis_name, depth=1)
 sd.baseline.append(sim_focus_motor)

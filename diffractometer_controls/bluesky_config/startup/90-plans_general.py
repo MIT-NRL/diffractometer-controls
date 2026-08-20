@@ -250,9 +250,16 @@ def _tomo_positions_from_num_or_step_size(
 
 
 class _ProgressEstimator:
-    """Refine ETA from observed successful plan-unit durations."""
+    """Publish a plan ETA from a known schedule or observed unit durations."""
 
-    def __init__(self, total_units, initial_total_time_s, alpha=0.2, outlier_factor=4.0):
+    def __init__(
+        self,
+        total_units,
+        initial_total_time_s,
+        alpha=0.2,
+        outlier_factor=4.0,
+        planned_unit_durations_s=None,
+    ):
         self.total_units = max(0, int(total_units))
         self.done_units = 0
         self.alpha = float(alpha)
@@ -264,8 +271,22 @@ class _ProgressEstimator:
         )
         self._unit_t0 = None
         self._started = False
+        self._planned_unit_durations_s = None
+        if planned_unit_durations_s is not None:
+            try:
+                planned = tuple(
+                    max(0.0, float(duration))
+                    for duration in planned_unit_durations_s
+                )
+            except Exception:
+                planned = ()
+            if len(planned) == self.total_units:
+                self._planned_unit_durations_s = planned
 
     def _compute_finish_epoch(self):
+        if self._planned_unit_durations_s is not None:
+            remaining_s = sum(self._planned_unit_durations_s[self.done_units:])
+            return float(time.time() + remaining_s)
         if self.total_units <= 0 or self.avg_unit_s <= 0:
             return 0.0
         remaining = max(0, self.total_units - self.done_units)

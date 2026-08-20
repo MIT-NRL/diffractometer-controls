@@ -364,6 +364,133 @@ class TomographyScanEstimateTests(unittest.TestCase):
         self.assertIn("18 frame(s)", summary)
         self.assertIn("Exposure-only time: 54 s", summary)
 
+    def test_imaging_acquire_time_scan_estimate_sums_scan_values(self):
+        estimate = estimate_plan_runtime(
+            "imaging_scan",
+            kwargs={
+                "detector": "cam1",
+                "motor": "cam1_acquire_time",
+                "start_pos": 1.0,
+                "stop_pos": 5.0,
+                "num_steps": 3,
+                "num_exposures": 2,
+            },
+            context={
+                # A different current camera value must not affect this scan.
+                "imaging_exposure_time_s": 99.0,
+                "image_bytes": 0.0,
+                "transfer_time_per_bytes": 0.0,
+            },
+        )
+
+        self.assertEqual(estimate["estimated_total_units"], 6)
+        self.assertAlmostEqual(estimate["estimated_total_time_s"], 18.0)
+
+    def test_imaging_acquire_time_scan_step_size_matches_scan_positions(self):
+        estimate = estimate_plan_runtime(
+            "imaging_scan",
+            kwargs={
+                "detector": "cam1",
+                "motor": "cam1_acquire_time",
+                "start_pos": 0.2,
+                "stop_pos": 0.5,
+                "step_size": 0.1,
+                "num_exposures": 3,
+            },
+            context={"image_bytes": 0.0, "transfer_time_per_bytes": 0.0},
+        )
+
+        # 0.2 + 0.3 + 0.4 + 0.5 seconds at each of three exposures.
+        self.assertEqual(estimate["estimated_total_units"], 12)
+        self.assertAlmostEqual(estimate["estimated_total_time_s"], 4.2)
+
+    def test_imaging_discrete_acquire_time_estimate_sums_exact_positions(self):
+        estimate = estimate_plan_runtime(
+            "imaging_scan_discrete",
+            kwargs={
+                "detector": "cam1",
+                "motor": "cam1_acquire_time",
+                "positions": [0.1, 0.5, 0.2],
+                "num_exposures": 2,
+            },
+            context={"image_bytes": 0.0, "transfer_time_per_bytes": 0.0},
+        )
+
+        self.assertEqual(estimate["estimated_total_units"], 6)
+        self.assertAlmostEqual(estimate["estimated_total_time_s"], 1.6)
+
+    def test_imaging_relative_acquire_time_estimate_uses_run_start_values(self):
+        queued_estimate = estimate_plan_runtime(
+            "imaging_scan_rel",
+            kwargs={
+                "detector": "cam1",
+                "motor": "cam1_acquire_time",
+                "start_relative": -0.1,
+                "stop_relative": 0.1,
+                "num_steps": 3,
+            },
+            context={"image_bytes": 0.0, "transfer_time_per_bytes": 0.0},
+        )
+        worker_estimate = estimate_plan_runtime(
+            "imaging_scan_rel",
+            kwargs={
+                "detector": "cam1",
+                "motor": "cam1_acquire_time",
+                "start_relative": -0.1,
+                "stop_relative": 0.1,
+                "num_steps": 3,
+                "resolved_positions": [0.4, 0.5, 0.6],
+            },
+            context={"image_bytes": 0.0, "transfer_time_per_bytes": 0.0},
+        )
+
+        self.assertEqual(queued_estimate["estimated_total_units"], 3)
+        self.assertIsNone(queued_estimate["estimated_total_time_s"])
+        self.assertEqual(worker_estimate["estimated_total_units"], 3)
+        self.assertAlmostEqual(worker_estimate["estimated_total_time_s"], 1.5)
+
+    def test_imaging_acquire_time_summary_reports_the_exposure_sweep(self):
+        summary = format_plan_summary(
+            "imaging_scan",
+            {
+                "detector": "cam1",
+                "motor": "cam1_acquire_time",
+                "start_pos": 1.0,
+                "stop_pos": 5.0,
+                "num_steps": 3,
+                "num_exposures": 2,
+            },
+        )
+
+        self.assertIn("Imaging acquire-time scan", summary)
+        self.assertIn("Exposure sweep: 1 → 5 s | average 3 s", summary)
+        self.assertIn("Exposure-only time: 18 s", summary)
+
+    def test_imaging_scan_variant_summaries_identify_their_position_forms(self):
+        discrete_summary = format_plan_summary(
+            "imaging_scan_discrete",
+            {
+                "motor": "stage1.x",
+                "positions": [1.0, 2.5, 4.0],
+                "exposure_time": 2.0,
+            },
+        )
+        relative_summary = format_plan_summary(
+            "imaging_scan_rel",
+            {
+                "motor": "stage1.x",
+                "start_relative": -1.0,
+                "stop_relative": 1.0,
+                "num_steps": 3,
+                "exposure_time": 2.0,
+            },
+        )
+
+        self.assertIn("Imaging discrete motor scan", discrete_summary)
+        self.assertIn("Positions (3): 1, 2.5, 4", discrete_summary)
+        self.assertIn("Imaging relative motor scan", relative_summary)
+        self.assertIn("Relative range: -1 → 1 | step 1", relative_summary)
+
     def test_general_plan_summary_resolves_adaptive_focus_initial_scan(self):
         summary = format_plan_summary(
             "adaptive_imaging_focus_scan",

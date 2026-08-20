@@ -43,7 +43,7 @@ class EpicsMotorCustom(EpicsMotor):
 # sample_tomo_th = EpicsMotorCustom("4dh4:m3",name="sample_tomo_th",labels=["positioner"])
 # sample_tomo_z = EpicsMotorCustom("4dh4:m14",name="sample_tomo_z",labels=["positioner"])
 
-cam_focus = EpicsMotorCustom("4dh4:m12",name="cam_focus",labels=["positioner"])
+# cam_focus = EpicsMotorCustom("4dh4:m12",name="cam_focus",labels=["positioner"])
 # cam_x = EpicsMotorCustom("4dh4:m1",name="cam_x",labels=["positioner"])
 
 # pinhole_y = EpicsMotorCustom("4dh4:m16",name="pinhole_y",labels=["positioner"])

@@ -11,6 +11,7 @@ os.environ.setdefault("OPHYD_CONTROL_LAYER", "dummy")
 
 import numpy as np
 import tifffile
+from bluesky.utils import is_plan
 
 from diffractometer_controls.sim_focus import (
     SimulatedFocusDetector,
@@ -52,12 +53,22 @@ class SimulatedFocusImageTests(unittest.TestCase):
             image_shape=(32, 32),
             read_noise=0,
         )
+        advanced_axes = {
+            f"cam1_{attr}": getattr(cam1.cam, attr)
+            for attr in ("acquire_time", "gain", "offset")
+        }
+        advanced_axes.update(
+            {
+                "sim_focus_cam_acquire_time": sim_cam.cam.acquire_time,
+            }
+        )
         imaging_namespace = runpy.run_path(
             str(startup_dir / "92-plans_imaging.py"),
             init_globals={
                 "cam1": cam1,
                 "sim_focus_cam": sim_cam,
                 "_collect_movable_names": lambda: ["sim_focus_motor"],
+                **advanced_axes,
             },
         )
         adaptive_namespace = runpy.run_path(
@@ -77,6 +88,8 @@ class SimulatedFocusImageTests(unittest.TestCase):
             imaging_namespace["tomo_scan"],
             imaging_namespace["imaging"],
             imaging_namespace["imaging_scan"],
+            imaging_namespace["imaging_scan_discrete"],
+            imaging_namespace["imaging_scan_rel"],
             adaptive_namespace["adaptive_imaging_focus_scan"],
         ]
         for plan in plans:
@@ -89,6 +102,161 @@ class SimulatedFocusImageTests(unittest.TestCase):
                     ["cam1", "sim_focus_cam"],
                 )
                 self.assertTrue(annotation["convert_device_names"])
+
+        motor_annotation = imaging_namespace["imaging_scan"]._custom_parameter_annotation_[
+            "parameters"
+        ]["motor"]
+        self.assertEqual(
+            motor_annotation["annotation"],
+            "typing.Union[str, Motors, Cam_advanced]",
+        )
+        self.assertEqual(
+            motor_annotation["devices"]["Cam_advanced"],
+            [
+                "cam1_acquire_time",
+                "cam1_gain",
+                "cam1_offset",
+                "sim_focus_cam_acquire_time",
+            ],
+        )
+        for plan_name in ("imaging_scan_discrete", "imaging_scan_rel"):
+            with self.subTest(plan=plan_name):
+                self.assertEqual(
+                    imaging_namespace[plan_name]._custom_parameter_annotation_["parameters"]["motor"],
+                    motor_annotation,
+                )
+        self.assertFalse(is_plan(imaging_namespace["_run_imaging_scan"]))
+
+    def test_imaging_scan_variants_resolve_shared_absolute_positions(self):
+        startup_dir = Path(__file__).resolve().parents[1] / "bluesky_config" / "startup"
+        motor = SimulatedFocusMotor(name="sim_focus_motor", delay=0)
+        camera = SimulatedFocusDetector(name="cam1", motor=motor, image_shape=(32, 32))
+        namespace = runpy.run_path(
+            str(startup_dir / "92-plans_imaging.py"),
+            init_globals={
+                "cam1": camera,
+                "sim_focus_cam": camera,
+                "_collect_movable_names": lambda: ["sim_focus_motor"],
+                "_scan_positions_from_num_or_step_size": (
+                    lambda start, stop, *, num_steps=None, step_size=None: (
+                        np.linspace(float(start), float(stop), int(num_steps or 2)),
+                        int(num_steps or 2),
+                        (float(stop) - float(start)) / (int(num_steps or 2) - 1),
+                        float(stop),
+                    )
+                ),
+            },
+        )
+
+        discrete, discrete_details = namespace["_resolve_imaging_scan_positions"](
+            "discrete", original_position=5.0, positions=[5.0, 3.0, 4.5]
+        )
+        relative, relative_details = namespace["_resolve_imaging_scan_positions"](
+            "relative",
+            original_position=10.0,
+            start_relative=-2.0,
+            stop_relative=1.0,
+            num_steps=4,
+        )
+
+        np.testing.assert_allclose(discrete, [5.0, 3.0, 4.5])
+        self.assertEqual(discrete_details["num_steps"], 3)
+        np.testing.assert_allclose(relative, [8.0, 9.0, 10.0, 11.0])
+        self.assertEqual(relative_details["start_relative"], -2.0)
+        self.assertEqual(relative_details["stop_relative"], 1.0)
+        self.assertEqual(relative_details["start_pos"], 8.0)
+        self.assertEqual(relative_details["stop_pos"], 11.0)
+
+    def test_imaging_scan_accepts_a_signal_like_camera_axis(self):
+        startup_dir = Path(__file__).resolve().parents[1] / "bluesky_config" / "startup"
+        motor = SimulatedFocusMotor(name="sim_focus_motor", delay=0)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cam = SimulatedFocusDetector(
+                name="cam1",
+                motor=motor,
+                data_root=tmpdir,
+                image_shape=(32, 32),
+                read_noise=0,
+            )
+            sim_cam = SimulatedFocusDetector(
+                name="sim_focus_cam",
+                motor=motor,
+                data_root=tmpdir,
+                image_shape=(32, 32),
+                read_noise=0,
+            )
+            namespace = runpy.run_path(
+                str(startup_dir / "92-plans_imaging.py"),
+                init_globals={
+                    "cam1": cam,
+                    "sim_focus_cam": sim_cam,
+                    "_collect_movable_names": lambda: ["sim_focus_motor"],
+                    "_scan_positions_from_num_or_step_size": (
+                        lambda start, stop, *, num_steps=None, step_size=None: (
+                            np.linspace(float(start), float(stop), int(num_steps or 2)),
+                            int(num_steps or 2),
+                            (float(stop) - float(start)) / (int(num_steps or 2) - 1),
+                            float(stop),
+                        )
+                    ),
+                    "_set_scan_motor_metadata": lambda _md, _motors: [],
+                    **{
+                        f"cam1_{attr}": getattr(cam.cam, attr)
+                        for attr in ("acquire_time", "gain", "offset")
+                    },
+                    **{
+                        f"sim_focus_cam_{attr}": getattr(sim_cam.cam, attr)
+                        for attr in ("acquire_time",)
+                    },
+                },
+            )
+            # Avoid EPICS timing estimates in this unit test.
+            namespace["caget"] = lambda *_args, **_kwargs: 0
+
+            axis = cam.cam.acquire_time
+            self.assertEqual(namespace["_scan_axis_position"](axis), axis.get())
+            self.assertEqual(namespace["_scan_axis_units"](axis), "")
+
+            for attr, fixed_param, fixed_value in (
+                ("acquire_time", "exposure_time", 0.01),
+                ("gain", "gain", 2),
+                ("offset", "offset", 3),
+            ):
+                with self.subTest(axis=attr):
+                    conflicting_plan = namespace["imaging_scan"](
+                        "signal_axis",
+                        "test",
+                        getattr(cam.cam, attr),
+                        0.01,
+                        0.02,
+                        num_steps=2,
+                        detector=cam,
+                        check_temperature=False,
+                        **{fixed_param: fixed_value},
+                    )
+                    with self.assertRaisesRegex(ValueError, fixed_param):
+                        next(conflicting_plan)
+
+    def test_camera_registrations_use_explicit_advanced_axis_aliases(self):
+        startup_dir = Path(__file__).resolve().parents[1] / "bluesky_config" / "startup"
+        area_detector_source = (startup_dir / "21-areaDetector.py").read_text()
+        self.assertIn(
+            'acquire = ADCpt(EpicsSignal, "Acquire")',
+            area_detector_source,
+        )
+        self.assertIn(
+            'register_device("cam1", depth=2)',
+            area_detector_source,
+        )
+        self.assertIn(
+            '_register_camera_advanced_axes("cam1", cam1)',
+            area_detector_source,
+        )
+        self.assertIn('axis.kind = "hinted"', area_detector_source)
+        self.assertIn(
+            'register_device("sim_focus_cam", depth=2)',
+            (startup_dir / "01-sim_devices.py").read_text(),
+        )
 
     def test_sim_motor_is_in_adaptive_plan_motor_choices(self):
         startup_file = (
@@ -107,6 +275,25 @@ class SimulatedFocusImageTests(unittest.TestCase):
         choices = collector()
 
         self.assertIn("sim_focus_motor", choices)
+
+    def test_progress_estimator_uses_known_remaining_unit_schedule(self):
+        startup_file = (
+            Path(__file__).resolve().parents[1]
+            / "bluesky_config"
+            / "startup"
+            / "90-plans_general.py"
+        )
+        namespace = runpy.run_path(str(startup_file))
+        estimator = namespace["_ProgressEstimator"](
+            total_units=6,
+            initial_total_time_s=18.0,
+            planned_unit_durations_s=(1.0, 1.0, 3.0, 3.0, 5.0, 5.0),
+        )
+
+        list(estimator.on_units_success(unit_count=2, elapsed_s=2.0))
+        remaining_s = estimator._compute_finish_epoch() - time.time()
+
+        self.assertAlmostEqual(remaining_s, 16.0, delta=0.2)
 
     def test_motor_position_changes_slanted_edge_blur(self):
         motor = SimulatedFocusMotor(name="test_focus_motor", delay=0)

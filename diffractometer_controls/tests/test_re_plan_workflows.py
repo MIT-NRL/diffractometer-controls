@@ -1,4 +1,5 @@
 import copy
+import inspect
 import os
 import unittest
 
@@ -10,7 +11,11 @@ try:
     from qtpy import QtCore, QtTest, QtWidgets
     from bluesky_widgets.models.run_engine_client import RunEngineClient
 
-    from diffractometer_controls.re_plan_editor_widget import RePlanEditorWidget
+    from diffractometer_controls.re_plan_editor_widget import (
+        RePlanEditorTable,
+        RePlanEditorWidget,
+        _GroupedChoicesComboBox,
+    )
     from diffractometer_controls.re_plans import REPlans
     from diffractometer_controls.re_queue_widget import QtRePlanQueueEstimated
 
@@ -314,6 +319,111 @@ class RePlanWorkflowTests(unittest.TestCase):
         QtTest.QTest.mouseClick(self.queue._pb_deselect, QtCore.Qt.LeftButton)
         self._process_events()
         self.assertEqual(self.model.selected_queue_item_uids, [])
+
+    def test_grouped_camera_choices_keep_selection_and_emit_full_name(self):
+        combo = _GroupedChoicesComboBox()
+        self.addCleanup(combo.deleteLater)
+        combo.setEditable(True)
+        combo.addItem("")
+        combo.addItem("stage1.theta")
+        combo.set_choice_groups(
+            {
+                "Cam advanced": {
+                    "cam1": [
+                        ("cam1.cam.acquire_time", "cam1_acquire_time"),
+                        ("cam1.cam.gain", "cam1_gain"),
+                    ]
+                }
+            }
+        )
+        selected = []
+        combo.signal_grouped_choice_selected.connect(selected.append)
+
+        combo._select_value("stage1.theta")
+        self.assertEqual(combo.currentText(), "stage1.theta")
+        self.assertEqual(selected, [])
+
+        combo._select_value(
+            "cam1_acquire_time", display_text="cam1.cam.acquire_time"
+        )
+        self.assertEqual(combo.currentText(), "cam1.cam.acquire_time")
+        self.assertEqual(combo.selected_value(), "cam1_acquire_time")
+        self.assertEqual(selected, ["cam1_acquire_time"])
+
+    def test_grouped_camera_choices_use_a_blank_custom_entry(self):
+        self.assertIn(
+            'custom_action = menu.addAction("")',
+            inspect.getsource(_GroupedChoicesComboBox.showPopup),
+        )
+
+    def test_camera_axis_constraints_hide_and_omit_matching_fixed_value(self):
+        table = RePlanEditorTable(self.model, editable=True)
+        self.addCleanup(table.deleteLater)
+        parameters = []
+        for name, default, value in (
+            ("detector", "cam1", "cam1"),
+            ("motor", inspect.Parameter.empty, "cam1_acquire_time"),
+            ("exposure_time", None, 0.1),
+            ("gain", None, 2),
+            ("offset", None, 3),
+        ):
+            parameters.append(
+                {
+                    "name": name,
+                    "parameters": inspect.Parameter(
+                        name, inspect.Parameter.POSITIONAL_OR_KEYWORD, default=default
+                    ),
+                    "value": value,
+                    "is_value_set": True,
+                    "is_user_modified": False,
+                }
+            )
+        table._params = parameters
+        table._params_indices = list(range(len(parameters)))
+        table.setRowCount(len(parameters))
+
+        table._refresh_camera_axis_constraints()
+
+        self.assertTrue(table.isRowHidden(2))
+        self.assertFalse(table.isRowHidden(3))
+        self.assertFalse(table.isRowHidden(4))
+        self.assertFalse(table._params[2]["is_value_set"])
+        self.assertIs(table._params[2]["value"], inspect.Parameter.empty)
+
+        table._params[1]["value"] = "stage1.theta"
+        table._refresh_camera_axis_constraints()
+        self.assertFalse(table.isRowHidden(2))
+
+    def test_advanced_camera_axis_selects_its_matching_detector(self):
+        table = RePlanEditorTable(self.model, editable=True)
+        self.addCleanup(table.deleteLater)
+        parameters = []
+        for name, default, value in (
+            ("detector", "cam1", "cam1"),
+            ("motor", inspect.Parameter.empty, "sim_focus_cam_acquire_time"),
+        ):
+            parameters.append(
+                {
+                    "name": name,
+                    "parameters": inspect.Parameter(
+                        name, inspect.Parameter.POSITIONAL_OR_KEYWORD, default=default
+                    ),
+                    "value": value,
+                    "is_value_set": True,
+                    "is_user_modified": False,
+                }
+            )
+        table._params = parameters
+        table._params_indices = list(range(len(parameters)))
+        table.setRowCount(len(parameters))
+
+        changed = table._select_detector_for_camera_axis(
+            "sim_focus_cam_acquire_time",
+            ["cam1_acquire_time", "sim_focus_cam_acquire_time"],
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(table._params[0]["value"], "sim_focus_cam")
 
 
 if __name__ == "__main__":

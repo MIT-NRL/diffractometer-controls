@@ -2,7 +2,7 @@ import numpy as np
 from ophyd import (Device, Component as Cpt,
                    EpicsSignal, EpicsSignalRO, EpicsMotor, Signal,
                    cam)
-from ophyd.device import DeviceStatus
+from ophyd.device import DeviceStatus, do_not_wait_for_lazy_connection
 from ophyd.status import Status, SubscriptionStatus
 
 from ophyd.areadetector import (AreaDetector, SingleTrigger, SimDetector, 
@@ -17,6 +17,11 @@ import uuid
 from datetime import datetime, timedelta
 
 class ZWODetectorCam(CamBase):
+    # This ZWO IOC exposes ``Acquire`` as a single control/status PV; it does
+    # not provide the AreaDetector-style ``Acquire_RBV`` record assumed by
+    # CamBase.  SingleTrigger accesses this signal during detector
+    # construction, so the inherited SignalWithRBV prevents worker startup.
+    acquire = ADCpt(EpicsSignal, "Acquire")
     offset = ADCpt(SignalWithRBV, "Offset")
     abort = ADCpt(EpicsSignal, "Abort")
 
@@ -265,13 +270,41 @@ class SimAreaDetector(SingleTriggerPause, SimDetector):
     #     read_path_template="/home/mitr_4dh4/Data/TestData/HDF/%Y/%m/%d/",        
     # )
 
+
+_CAMERA_ADVANCED_AXIS_ATTRS = ("acquire_time", "gain", "offset")
+
+
+def _register_camera_advanced_axes(detector_name, detector):
+    """Register only the camera controls deliberately supported as scan axes.
+
+    Registering the complete AreaDetector tree at depth 3 makes Queue Server
+    instantiate every lazy camera signal while it builds its device inventory.
+    Some of the ZWO driver's optional ``*_RBV`` records are not present, so
+    that eager discovery aborts startup.  Top-level aliases keep the supported
+    controls addressable by Queue Server without traversing the camera tree.
+    """
+    camera = detector.cam
+    with do_not_wait_for_lazy_connection(camera):
+        for attr in _CAMERA_ADVANCED_AXIS_ATTRS:
+            axis_name = f"{detector_name}_{attr}"
+            axis = getattr(camera, attr)
+            # BestEffortCallback uses hinted fields for its live table.  The
+            # selected camera control is read at every scan point, so expose
+            # it just like a conventional motor readback.
+            axis.kind = "hinted"
+            globals()[axis_name] = axis
+            register_device(axis_name, depth=1)
+
 # Enable when using the ZWO camera
 if 1:
     cam1 = MyZWODetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total','focus','x'])
     cam1.stats1.total.kind = "hinted"
     cam1.focus.user_readback.kind = "normal"
     cam1.x.user_readback.kind = "normal"
+    # Keep the detector shallow: selected camera controls are registered as
+    # explicit aliases below, avoiding Queue Server's eager depth-3 traversal.
     register_device("cam1", depth=2)
+    _register_camera_advanced_axes("cam1", cam1)
     cam1.cam.nd_attributes_file.set("/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml") 
     # caput("4dh4:TIFF1:CreateDirectory", -3)
     caput("4dh4:TIFF1:AutoSave", 0) #Ensure the TIFF plugin does not auto save to prevent overwriting

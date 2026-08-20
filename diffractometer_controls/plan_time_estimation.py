@@ -101,6 +101,75 @@ def _transfer_time_per_image(context: Mapping[str, Any]) -> float:
     return float(image_bytes) * float(transfer_time_per_bytes)
 
 
+def _linear_scan_positions(params: Mapping[str, Any]) -> np.ndarray | None:
+    """Resolve the same inclusive 1-D positions used by ``imaging_scan``."""
+    start = _as_float(params.get("start_pos"), None)
+    stop = _as_float(params.get("stop_pos"), None)
+    if start is None or stop is None:
+        return None
+
+    num_steps = _as_int(params.get("num_steps"), None)
+    if num_steps is not None:
+        if num_steps < 2:
+            return None
+        return np.linspace(start, stop, num_steps, endpoint=True, dtype=float)
+
+    step_size = _as_float(params.get("step_size", params.get("step")), None)
+    if step_size is None or step_size == 0 or (stop - start) * step_size < 0:
+        return None
+    raw_stop = stop + (0.5 * step_size)
+    positions = np.asarray(np.arange(start=start, stop=raw_stop, step=step_size), dtype=float)
+    tol = max(abs(step_size), abs(stop - start), 1.0) * 1e-12
+    if step_size > 0:
+        positions = positions[positions <= stop + tol]
+    else:
+        positions = positions[positions >= stop - tol]
+    if positions.size and abs(float(positions[-1]) - stop) <= tol:
+        positions[-1] = stop
+    return positions if len(positions) >= 2 else None
+
+
+def _explicit_scan_positions(values: Any) -> np.ndarray | None:
+    """Return a finite 1-D position list supplied by a discrete scan."""
+    if isinstance(values, (str, bytes)):
+        return None
+    try:
+        positions = np.asarray(list(values), dtype=float)
+    except (TypeError, ValueError):
+        return None
+    if positions.ndim != 1 or len(positions) < 1 or not np.all(np.isfinite(positions)):
+        return None
+    return positions
+
+
+def _relative_scan_positions(params: Mapping[str, Any]) -> np.ndarray | None:
+    """Resolve relative positions when the worker supplied their absolute values."""
+    resolved = _explicit_scan_positions(params.get("resolved_positions"))
+    if resolved is not None:
+        return resolved
+
+    start = _as_float(params.get("start_relative"), None)
+    stop = _as_float(params.get("stop_relative"), None)
+    if start is None or stop is None:
+        return None
+    relative_params = dict(params)
+    relative_params["start_pos"] = start
+    relative_params["stop_pos"] = stop
+    return _linear_scan_positions(relative_params)
+
+
+def _is_imaging_acquire_time_axis(params: Mapping[str, Any]) -> bool:
+    """Return whether this imaging scan sweeps the detector acquire time."""
+    if str(params.get("scan_axis", "") or "").strip() == "acquire_time":
+        return True
+    detector = str(params.get("detector", "cam1") or "cam1").strip()
+    motor = str(params.get("motor", "") or "").strip()
+    return motor in {
+        f"{detector}_acquire_time",
+        f"{detector}.cam.acquire_time",
+    }
+
+
 def _estimate_imaging(params: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, float | int | None]:
     num_exposures = max(1, _as_int(params.get("num_exposures"), 1) or 1)
     exposure_time = _as_float(params.get("exposure_time"), None)
@@ -112,27 +181,68 @@ def _estimate_imaging(params: Mapping[str, Any], context: Mapping[str, Any]) -> 
     return _known_estimate(total_time, num_exposures)
 
 
-def _estimate_imaging_scan(params: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, float | int | None]:
-    num_steps = _as_int(params.get("num_steps"), None)
-    if num_steps is None:
-        step_size = _as_float(params.get("step_size", params.get("step")), None)
-        start_pos = _as_float(params.get("start_pos"), None)
-        stop_pos = _as_float(params.get("stop_pos"), None)
-        if step_size is None or start_pos is None or stop_pos is None:
-            return _unknown_estimate()
-        num_steps = _num_steps_from_step_size_scan(start_pos, stop_pos, step_size)
-        if num_steps is None:
-            return _unknown_estimate()
-    num_steps = max(1, int(num_steps))
+def _estimate_imaging_positions(
+    params: Mapping[str, Any],
+    context: Mapping[str, Any],
+    positions: np.ndarray | None,
+    *,
+    relative_positions_are_unresolved: bool = False,
+) -> dict[str, float | int | None]:
+    if positions is None:
+        return _unknown_estimate()
+    num_steps = len(positions)
     num_exposures = max(1, _as_int(params.get("num_exposures"), 1) or 1)
+    total_units = num_exposures * num_steps
+    transfer_time = _transfer_time_per_image(context)
+
+    if _is_imaging_acquire_time_axis(params):
+        if relative_positions_are_unresolved:
+            # The values above are offsets, not exposure values. The core
+            # supplies ``resolved_positions`` once it has read the axis.
+            return _unknown_estimate(total_units)
+        # At each scan point the camera is set to that point's value before
+        # triggering.  Exposure time is therefore the sum of the positions,
+        # not the current camera value multiplied by frame count.
+        if np.any(positions < 0):
+            return _unknown_estimate(total_units)
+        exposure_total = float(np.sum(positions)) * float(num_exposures)
+        total_time = exposure_total + float(total_units) * transfer_time
+        return _known_estimate(total_time, total_units)
+
     exposure_time = _as_float(params.get("exposure_time"), None)
     if exposure_time is None:
         exposure_time = _as_float(context.get("imaging_exposure_time_s"), None)
     if exposure_time is None:
-        return _unknown_estimate(num_exposures * num_steps)
-    total_units = num_exposures * num_steps
-    total_time = float(total_units) * (float(exposure_time) + _transfer_time_per_image(context))
+        return _unknown_estimate(total_units)
+    total_time = float(total_units) * (float(exposure_time) + transfer_time)
     return _known_estimate(total_time, total_units)
+
+
+def _estimate_imaging_scan(params: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, float | int | None]:
+    return _estimate_imaging_positions(params, context, _linear_scan_positions(params))
+
+
+def _estimate_imaging_scan_discrete(
+    params: Mapping[str, Any], context: Mapping[str, Any]
+) -> dict[str, float | int | None]:
+    return _estimate_imaging_positions(
+        params,
+        context,
+        _explicit_scan_positions(params.get("positions")),
+    )
+
+
+def _estimate_imaging_scan_rel(
+    params: Mapping[str, Any], context: Mapping[str, Any]
+) -> dict[str, float | int | None]:
+    resolved_positions = _explicit_scan_positions(params.get("resolved_positions"))
+    positions = resolved_positions if resolved_positions is not None else _relative_scan_positions(params)
+    return _estimate_imaging_positions(
+        params,
+        context,
+        positions,
+        relative_positions_are_unresolved=resolved_positions is None,
+    )
 
 
 def _estimate_tomo_scan(params: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, float | int | None]:
@@ -298,6 +408,8 @@ _ESTIMATORS = {
     "count_he3": _estimate_count_he3,
     "imaging": _estimate_imaging,
     "imaging_scan": _estimate_imaging_scan,
+    "imaging_scan_discrete": _estimate_imaging_scan_discrete,
+    "imaging_scan_rel": _estimate_imaging_scan_rel,
     "tomo_scan": _estimate_tomo_scan,
     "adaptive_imaging_focus_scan": _estimate_adaptive_imaging_focus_scan,
     "scan_he3": _estimate_scan_he3,
@@ -624,7 +736,11 @@ def format_imaging_scan_plan_summary(
     motor = str(params.get("motor", "") or "unresolved")
     detector = str(params.get("detector", "cam1") or "cam1")
     scan = _resolve_linear_scan_summary(params)
-    lines = ["Imaging motor scan", f"Motor: {motor} | Detector: {detector}"]
+    acquire_time_axis = _is_imaging_acquire_time_axis(params)
+    lines = [
+        "Imaging acquire-time scan" if acquire_time_axis else "Imaging motor scan",
+        f"Scan axis: {motor} | Detector: {detector}",
+    ]
     if scan is None:
         lines.append("Range: unresolved")
         positions = max(1, _as_int(params.get("num_steps"), 1) or 1)
@@ -633,13 +749,39 @@ def format_imaging_scan_plan_summary(
         lines.append(f"Range: {start:g} → {stop:g} | step {step:.6g}")
         lines.append(f"Sampling: {positions:,d} inclusive position(s)")
     frames_per_position = max(1, _as_int(params.get("num_exposures"), 1) or 1)
-    _append_acquisition_lines(
-        lines,
-        params,
-        positions=positions,
-        frames_per_position=frames_per_position,
-        estimated_time_s=estimated_time_s,
-    )
+    if acquire_time_axis:
+        total_frames = positions * frames_per_position
+        lines.append(
+            f"Acquisition: {positions:,d} position(s) | {total_frames:,d} frame(s)"
+        )
+        exposure_positions = _linear_scan_positions(params)
+        if exposure_positions is None:
+            lines.append("Exposure sweep: unresolved")
+        else:
+            average_exposure = float(np.mean(exposure_positions))
+            exposure_only_time = float(np.sum(exposure_positions)) * frames_per_position
+            lines.append(
+                f"Exposure sweep: {exposure_positions[0]:g} → {exposure_positions[-1]:g} s "
+                f"| average {average_exposure:g} s"
+            )
+            if estimated_time_s is None:
+                lines.append(
+                    "Exposure-only time: "
+                    + _format_summary_duration(exposure_only_time)
+                )
+        if estimated_time_s is not None and math.isfinite(float(estimated_time_s)):
+            lines.append(
+                "Estimated acquisition: "
+                + _format_summary_duration(float(estimated_time_s))
+            )
+    else:
+        _append_acquisition_lines(
+            lines,
+            params,
+            positions=positions,
+            frames_per_position=frames_per_position,
+            estimated_time_s=estimated_time_s,
+        )
     output_line = _format_output_line(params)
     if output_line:
         lines.append(output_line)
@@ -649,6 +791,90 @@ def format_imaging_scan_plan_summary(
         + " | Temperature check: "
         + ("Yes" if bool(params.get("check_temperature", True)) else "No")
     )
+    return "\n".join(lines)
+
+
+def format_imaging_scan_discrete_plan_summary(
+    params: Mapping[str, Any], *, estimated_time_s: float | None = None
+) -> str:
+    """Return a concise summary of an explicit-position imaging scan."""
+    params = dict(params or {})
+    motor = str(params.get("motor", "") or "unresolved")
+    detector = str(params.get("detector", "cam1") or "cam1")
+    positions = _explicit_scan_positions(params.get("positions"))
+    acquire_time_axis = _is_imaging_acquire_time_axis(params)
+    lines = [
+        "Imaging acquire-time discrete scan" if acquire_time_axis else "Imaging discrete motor scan",
+        f"Scan axis: {motor} | Detector: {detector}",
+    ]
+    if positions is None:
+        count = max(1, _as_int(params.get("num_steps"), 1) or 1)
+        lines.append("Positions: unresolved")
+    else:
+        count = len(positions)
+        values = ", ".join(f"{value:g}" for value in positions)
+        lines.append(f"Positions ({count:,d}): {values}")
+    frames_per_position = max(1, _as_int(params.get("num_exposures"), 1) or 1)
+    if acquire_time_axis and positions is not None:
+        exposure_only_time = float(np.sum(positions)) * frames_per_position
+        lines.append(
+            f"Exposure sweep: {positions[0]:g} → {positions[-1]:g} s "
+            f"| average {float(np.mean(positions)):g} s"
+        )
+        if estimated_time_s is None:
+            lines.append("Exposure-only time: " + _format_summary_duration(exposure_only_time))
+    else:
+        _append_acquisition_lines(
+            lines, params, positions=count, frames_per_position=frames_per_position,
+            estimated_time_s=estimated_time_s,
+        )
+    if acquire_time_axis and estimated_time_s is not None:
+        lines.append("Estimated acquisition: " + _format_summary_duration(float(estimated_time_s)))
+    output_line = _format_output_line(params)
+    if output_line:
+        lines.append(output_line)
+    return "\n".join(lines)
+
+
+def format_imaging_scan_rel_plan_summary(
+    params: Mapping[str, Any], *, estimated_time_s: float | None = None
+) -> str:
+    """Return a concise summary of an imaging scan resolved from run-start offsets."""
+    params = dict(params or {})
+    motor = str(params.get("motor", "") or "unresolved")
+    detector = str(params.get("detector", "cam1") or "cam1")
+    acquire_time_axis = _is_imaging_acquire_time_axis(params)
+    positions = _relative_scan_positions(params)
+    lines = [
+        "Imaging relative acquire-time scan" if acquire_time_axis else "Imaging relative motor scan",
+        f"Scan axis: {motor} | Detector: {detector}",
+    ]
+    start = _as_float(params.get("start_relative"), None)
+    stop = _as_float(params.get("stop_relative"), None)
+    if start is None or stop is None or positions is None:
+        count = max(1, _as_int(params.get("num_steps"), 1) or 1)
+        lines.append("Relative range: unresolved")
+    else:
+        count = len(positions)
+        step = float(positions[1] - positions[0]) if count > 1 else 0.0
+        lines.append(f"Relative range: {start:g} → {stop:g} | step {step:.6g}")
+        lines.append(f"Sampling: {count:,d} inclusive position(s)")
+    frames_per_position = max(1, _as_int(params.get("num_exposures"), 1) or 1)
+    if acquire_time_axis and "resolved_positions" not in params:
+        lines.append("Exposure sweep: resolved from the current value at run start")
+    elif acquire_time_axis:
+        exposure_only_time = float(np.sum(positions)) * frames_per_position
+        lines.append("Exposure-only time: " + _format_summary_duration(exposure_only_time))
+    else:
+        _append_acquisition_lines(
+            lines, params, positions=count, frames_per_position=frames_per_position,
+            estimated_time_s=estimated_time_s,
+        )
+    if acquire_time_axis and estimated_time_s is not None:
+        lines.append("Estimated acquisition: " + _format_summary_duration(float(estimated_time_s)))
+    output_line = _format_output_line(params)
+    if output_line:
+        lines.append(output_line)
     return "\n".join(lines)
 
 
@@ -743,6 +969,8 @@ def format_plan_summary(
         "tomo_scan": format_tomography_plan_summary,
         "imaging": format_imaging_plan_summary,
         "imaging_scan": format_imaging_scan_plan_summary,
+        "imaging_scan_discrete": format_imaging_scan_discrete_plan_summary,
+        "imaging_scan_rel": format_imaging_scan_rel_plan_summary,
         "adaptive_imaging_focus_scan": format_adaptive_focus_plan_summary,
     }
     formatter = formatters.get(str(plan_name))
