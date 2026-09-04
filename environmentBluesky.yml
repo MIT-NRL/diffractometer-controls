@@ -1,6 +1,7 @@
 name: bluesky-server
 channels:
   - conda-forge
+  - seanfayfar
 dependencies:
   - python
   - pip
@@ -19,5 +20,6 @@ dependencies:
   - p4p
   - bluesky-widgets
   - opencv
+  - neutron-imaging-tools
   # Pip-only beamline packages are installed with --no-deps by the
   # environment updater; see requirementsBlueskyPip.txt.

@@ -1840,7 +1840,8 @@ class MITRMainWindow(PyDMMainWindow):
         if not self._require_local_maintenance("The Bluesky environment updater"):
             return
         dialog = self._bluesky_environment_update_dialog
-        if dialog is not None and dialog.isVisible():
+        if dialog is not None:
+            dialog.show()
             dialog.raise_()
             dialog.activateWindow()
             return

@@ -13,8 +13,10 @@ import hashlib
 import json
 import os
 import re
+import selectors
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -44,7 +46,6 @@ except ImportError:
 
 ENVIRONMENT_NAME = "bluesky-server"
 DEFAULT_MAMBA = Path("/home/mitr_4dh4/mambaforge/bin/mamba")
-DEFAULT_CONDA = Path("/home/mitr_4dh4/mambaforge/bin/conda")
 DEFAULT_ENV_PREFIX = Path("/home/mitr_4dh4/mambaforge/envs/bluesky-server")
 DEFAULT_TILED_ENV = Path("/home/mitr_4dh4/.config/tiled/tiled-server.env")
 DEFAULT_CONTROL_ENV = Path("/home/mitr_4dh4/.config/diffractometer-controls/control.env")
@@ -52,6 +53,10 @@ DEFAULT_QSERVER_CLIENT_ENV = Path(
     "/home/mitr_4dh4/.config/bluesky-queueserver/client-zmq.env"
 )
 SERVICE_NAMES = ("queue-server", "tiled-server", "bluesky-proxy")
+PLAN_TIMEOUT = 30 * 60
+PACKAGE_TIMEOUT = 60 * 60
+DATABASE_TIMEOUT = 30 * 60
+HEARTBEAT_INTERVAL = 10.0
 
 
 def utc_now() -> str:
@@ -99,13 +104,262 @@ def extract_json_document(text: str) -> dict:
     return extract_json_value(text, dict)
 
 
-def summarize_mamba_plan(payload: dict) -> tuple[list[str], bool]:
-    """Return readable transaction lines and whether Conda would change."""
+def normalize_package_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", str(name)).lower()
+
+
+def explicit_snapshot_urls(path: Path) -> list[str]:
+    """Return package URLs from Conda or Mamba explicit-list output."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as ex:
+        raise UpdateFailure(f"Could not read the Conda restore snapshot: {path}") from ex
+    stripped = [line.strip() for line in lines if line.strip()]
+    has_conda_marker = "@EXPLICIT" in stripped
+    has_mamba_header = bool(
+        stripped and stripped[0].startswith("List of packages in environment:")
+    )
+    urls = [line for line in stripped if line.startswith(("https://", "http://"))]
+    allowed = {
+        line
+        for line in stripped
+        if line.startswith(("#", "@EXPLICIT", "List of packages in environment:"))
+        or line.startswith(("https://", "http://"))
+    }
+    if not (has_conda_marker or has_mamba_header) or len(allowed) != len(stripped):
+        raise UpdateFailure(f"The Conda restore snapshot is not an explicit file: {path}")
+    if not urls:
+        raise UpdateFailure(f"The Conda restore snapshot contains no packages: {path}")
+    return urls
+
+
+def explicit_snapshot_artifacts(path: Path) -> set[str]:
+    """Return decoded artifact filenames from a Conda explicit snapshot."""
+    artifacts = {
+        urllib.parse.unquote(urllib.parse.urlparse(line).path.rsplit("/", 1)[-1])
+        for line in explicit_snapshot_urls(path)
+    }
+    return artifacts
+
+
+def installed_conda_artifacts(prefix: Path) -> set[str]:
+    """Return artifact filenames recorded in an installed Conda prefix."""
+    artifacts: set[str] = set()
+    for record_path in (prefix / "conda-meta").glob("*.json"):
+        try:
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as ex:
+            raise UpdateFailure(f"Could not read Conda package record: {record_path}") from ex
+        artifact = record.get("fn")
+        if not artifact and record.get("url"):
+            artifact = urllib.parse.unquote(
+                urllib.parse.urlparse(str(record["url"])).path.rsplit("/", 1)[-1]
+            )
+        if not artifact:
+            raise UpdateFailure(f"Conda package record has no artifact name: {record_path}")
+        artifacts.add(str(artifact))
+    return artifacts
+
+
+def _read_distribution_identity(metadata_path: Path) -> tuple[str, str] | None:
+    try:
+        lines = metadata_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    values: dict[str, str] = {}
+    for line in lines:
+        if not line:
+            break
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        if key in {"Name", "Version"}:
+            values[key] = value.strip()
+    if not values.get("Name") or not values.get("Version"):
+        return None
+    return values["Name"], values["Version"]
+
+
+def find_duplicate_distribution_metadata(env_prefix: Path) -> tuple[list[dict], list[dict]]:
+    """Find safely repairable and ambiguous duplicate ``.dist-info`` records."""
+    prefix = env_prefix.resolve()
+    conda_versions: dict[str, set[str]] = {}
+    for record_path in (prefix / "conda-meta").glob("*.json"):
+        try:
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        name = normalize_package_name(record.get("name", ""))
+        version = str(record.get("version", ""))
+        if name and version:
+            conda_versions.setdefault(name, set()).add(version)
+
+    python_name = (prefix / "bin" / "python").resolve().name
+    active_site_packages = prefix / "lib" / python_name / "site-packages"
+    if active_site_packages.is_dir():
+        metadata_files = active_site_packages.glob("*.dist-info/METADATA")
+    else:
+        metadata_files = prefix.glob("lib/python*/site-packages/*.dist-info/METADATA")
+    distributions: dict[str, list[dict]] = {}
+    for metadata_file in metadata_files:
+        identity = _read_distribution_identity(metadata_file)
+        if identity is None:
+            continue
+        display_name, version = identity
+        metadata_dir = metadata_file.parent.resolve()
+        try:
+            metadata_dir.relative_to(prefix)
+        except ValueError:
+            continue
+        distributions.setdefault(normalize_package_name(display_name), []).append(
+            {"name": display_name, "version": version, "path": str(metadata_dir)}
+        )
+
+    repairs: list[dict] = []
+    ambiguous: list[dict] = []
+    for normalized_name, entries in sorted(distributions.items()):
+        if len(entries) < 2:
+            continue
+        expected_versions = conda_versions.get(normalized_name, set())
+        keep = [entry for entry in entries if entry["version"] in expected_versions]
+        if len(keep) == 1:
+            for entry in entries:
+                if entry is keep[0]:
+                    continue
+                repairs.append(
+                    {
+                        "name": keep[0]["name"],
+                        "keep_version": keep[0]["version"],
+                        "remove_version": entry["version"],
+                        "path": entry["path"],
+                    }
+                )
+        else:
+            ambiguous.append(
+                {
+                    "name": entries[0]["name"],
+                    "versions": sorted(entry["version"] for entry in entries),
+                    "conda_versions": sorted(expected_versions),
+                }
+            )
+    return repairs, ambiguous
+
+
+def _package_artifact(item: dict | None) -> tuple | None:
+    if item is None:
+        return None
+    return tuple(
+        str(item.get(field) or "")
+        for field in ("name", "version", "build_string", "build", "sha256", "md5", "fn")
+    )
+
+
+def mamba_plan_signature(payload: dict) -> tuple:
+    """Return the meaningful package operations from a Mamba JSON plan."""
     actions = payload.get("actions") or {}
     links = {str(item.get("name")): item for item in actions.get("LINK", [])}
     unlinks = {str(item.get("name")): item for item in actions.get("UNLINK", [])}
-    names = sorted(set(links) | set(unlinks), key=str.casefold)
-    lines: list[str] = []
+    operations = []
+    for name in sorted(set(links) | set(unlinks), key=str.casefold):
+        old = _package_artifact(unlinks.get(name))
+        new = _package_artifact(links.get(name))
+        if old == new:
+            continue
+        operations.append((name, old, new))
+    return tuple(operations)
+
+
+def combined_plan_digest(environment_payload: dict, update_payload: dict) -> str:
+    signature = {
+        "project_environment": mamba_plan_signature(environment_payload),
+        "update_all": mamba_plan_signature(update_payload),
+    }
+    encoded = json.dumps(signature, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _clean_terminal_line(text: str) -> str:
+    """Collapse terminal control sequences so progress spinners do not flood the log."""
+    text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
+    if "\r" in text:
+        text = text.rsplit("\r", 1)[-1]
+    cleaned: list[str] = []
+    for character in text:
+        if character == "\b":
+            if cleaned:
+                cleaned.pop()
+        elif character >= " " or character == "\t":
+            cleaned.append(character)
+    result = "".join(cleaned).rstrip()
+    if len(result) > 4000:
+        result = result[:4000] + " … [line truncated]"
+    return result
+
+
+def _version_order_key(version: str) -> tuple:
+    """Return a practical ordering key for the version forms used by Conda packages."""
+    text = str(version).strip().lower()
+    release_match = re.match(r"^(?:(\d+)!)?([0-9]+(?:[._-][0-9]+)*)", text)
+    if release_match is None:
+        return (0, (), 0, 0, text)
+    epoch = int(release_match.group(1) or 0)
+    release = tuple(int(part) for part in re.split(r"[._-]", release_match.group(2)))
+    release = release + (0,) * (8 - len(release))
+    suffix = text[release_match.end() :].lstrip("._-+")
+    qualifier_match = re.match(
+        r"(?:(dev|a|alpha|b|beta|pre|preview|rc|post|rev|r)(\d*)|(.*))$",
+        suffix,
+    )
+    qualifier = qualifier_match.group(1) if qualifier_match else None
+    qualifier_number = int((qualifier_match.group(2) if qualifier_match else "") or 0)
+    qualifier_rank = {
+        "dev": -4,
+        "a": -3,
+        "alpha": -3,
+        "b": -2,
+        "beta": -2,
+        "pre": -1,
+        "preview": -1,
+        "rc": -1,
+        None: 0,
+        "post": 1,
+        "rev": 1,
+        "r": 1,
+    }.get(qualifier, 0)
+    return (epoch, release, qualifier_rank, qualifier_number, suffix)
+
+
+def _append_plan_section(lines: list[str], title: str, entries: list[str]) -> None:
+    if not entries:
+        return
+    if lines:
+        lines.append("")
+    lines.append(f"{title} ({len(entries)}):")
+    lines.extend(f"  {entry}" for entry in entries)
+
+
+def summarize_mamba_plan(payload: dict) -> tuple[list[str], bool]:
+    """Return a grouped, readable transaction and whether Conda would change."""
+    actions = payload.get("actions") or {}
+    links = {str(item.get("name")): item for item in actions.get("LINK", [])}
+    unlinks = {str(item.get("name")): item for item in actions.get("UNLINK", [])}
+    names = []
+    for name in sorted(set(links) | set(unlinks), key=str.casefold):
+        old = unlinks.get(name)
+        new = links.get(name)
+        # Libmamba may include identical unlink/link pairs in an update plan.
+        # They are transaction noise, not a package change worth presenting.
+        if old and new and all(
+            old.get(field) == new.get(field)
+            for field in ("version", "build_string", "build", "sha256", "md5")
+        ):
+            continue
+        names.append(name)
+    installs: list[str] = []
+    upgrades: list[str] = []
+    downgrades: list[str] = []
+    rebuilds: list[str] = []
+    removals: list[str] = []
     for name in names:
         old = unlinks.get(name)
         new = links.get(name)
@@ -114,14 +368,27 @@ def summarize_mamba_plan(payload: dict) -> tuple[list[str], bool]:
             new_version = str(new.get("version", "?"))
             old_build = str(old.get("build_string") or old.get("build") or "")
             new_build = str(new.get("build_string") or new.get("build") or "")
-            if old_version == new_version and old_build != new_build:
-                lines.append(f"Rebuild {name}: {old_version} ({old_build} -> {new_build})")
+            if old_version == new_version:
+                build_change = (
+                    f" ({old_build} -> {new_build})"
+                    if old_build != new_build
+                    else " (package relink)"
+                )
+                rebuilds.append(f"{name} {old_version}{build_change}")
+            elif _version_order_key(new_version) < _version_order_key(old_version):
+                downgrades.append(f"{name} {old_version} -> {new_version}")
             else:
-                lines.append(f"Update {name}: {old_version} -> {new_version}")
+                upgrades.append(f"{name} {old_version} -> {new_version}")
         elif new:
-            lines.append(f"Install {name}: {new.get('version', '?')}")
+            installs.append(f"{name} {new.get('version', '?')}")
         elif old:
-            lines.append(f"Remove {name}: {old.get('version', '?')}")
+            removals.append(f"{name} {old.get('version', '?')}")
+    lines: list[str] = []
+    _append_plan_section(lines, "New packages", installs)
+    _append_plan_section(lines, "Upgrades", upgrades)
+    _append_plan_section(lines, "Downgrades", downgrades)
+    _append_plan_section(lines, "Rebuilds / unchanged version", rebuilds)
+    _append_plan_section(lines, "Removals", removals)
     if not lines:
         lines.append("No Conda package changes are currently proposed.")
     return lines, bool(names)
@@ -172,6 +439,51 @@ def parse_pip_check_issues(output: str) -> list[str]:
     return issues
 
 
+def pip_check_issue_key(issue: str) -> str:
+    """Identify a pip-check issue independently of the requiring package version."""
+    match = re.fullmatch(
+        r"(?P<package>\S+)\s+\S+\s+has requirement\s+(?P<problem>.+)",
+        issue.strip(),
+    )
+    if match is None:
+        return issue.strip()
+    return f"{match.group('package').lower()} has requirement {match.group('problem')}"
+
+
+def pip_check_issue_packages(issue: str) -> tuple[str, str] | None:
+    """Return the requiring and required distribution names from a pip-check issue."""
+    match = re.fullmatch(
+        r"(?P<package>\S+)\s+\S+\s+has requirement\s+"
+        r"(?P<dependency>[A-Za-z0-9_.-]+).+",
+        issue.strip(),
+    )
+    if match is None:
+        return None
+    return (
+        normalize_package_name(match.group("package")),
+        normalize_package_name(match.group("dependency")),
+    )
+
+
+def installed_conda_package_names(prefix: Path) -> set[str]:
+    """Return normalized package names owned by Conda in a prefix."""
+    names: set[str] = set()
+    for record_path in (prefix / "conda-meta").glob("*.json"):
+        try:
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as ex:
+            raise UpdateFailure(f"Could not read Conda package record: {record_path}") from ex
+        if record.get("name"):
+            names.add(normalize_package_name(str(record["name"])))
+    return names
+
+
+def is_conda_managed_pip_issue(issue: str, conda_names: set[str]) -> bool:
+    """Whether pip is reporting metadata solely between Conda-owned packages."""
+    packages = pip_check_issue_packages(issue)
+    return packages is not None and all(name in conda_names for name in packages)
+
+
 def redact_command(command: list[str]) -> str:
     redacted: list[str] = []
     for value in command:
@@ -212,6 +524,8 @@ class UpdateContext:
         self.tiled = self.env_prefix / "bin" / "tiled"
         self._log_handle = self.log_path.open("a", encoding="utf-8", buffering=1)
         self._manifest: dict = {}
+        self._state_payload: dict = {}
+        self._state_message = ""
 
     def close(self) -> None:
         self._log_handle.close()
@@ -242,6 +556,36 @@ class UpdateContext:
             "updated_at": utc_now(),
             **extra,
         }
+        self._state_payload = payload
+        self._state_message = message
+        self.write_json_atomic(self.state_path, payload)
+
+    def _command_heartbeat(self, elapsed: float) -> None:
+        if not self._state_payload:
+            return
+        seconds = max(0, int(elapsed))
+        minutes, remainder = divmod(seconds, 60)
+        shown = f"{minutes}m {remainder:02d}s" if minutes else f"{remainder}s"
+        payload = {
+            **self._state_payload,
+            "message": f"{self._state_message} — still running ({shown})",
+            "updated_at": utc_now(),
+            "command_elapsed_seconds": seconds,
+        }
+        self._state_payload = payload
+        self.write_json_atomic(self.state_path, payload)
+
+    def _finish_command_heartbeat(self) -> None:
+        if not self._state_payload or "command_elapsed_seconds" not in self._state_payload:
+            return
+        payload = {
+            key: value
+            for key, value in self._state_payload.items()
+            if key != "command_elapsed_seconds"
+        }
+        payload["message"] = self._state_message
+        payload["updated_at"] = utc_now()
+        self._state_payload = payload
         self.write_json_atomic(self.state_path, payload)
 
     def save_manifest(self) -> None:
@@ -259,44 +603,84 @@ class UpdateContext:
         *,
         env: dict[str, str] | None = None,
         capture: bool = False,
-        timeout: float | None = None,
+        timeout: float | None = 10 * 60,
         display_command: str | None = None,
         log_output: bool = True,
         check: bool = True,
     ) -> subprocess.CompletedProcess:
         shown = display_command or redact_command(command)
         self.log(f"$ {shown}")
-        if capture:
-            result = subprocess.run(
-                command,
-                env=env,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                timeout=timeout,
-                check=False,
-            )
-            output = result.stdout or ""
-            if output.strip() and (log_output or result.returncode != 0):
-                for line in output.rstrip().splitlines():
-                    self.log(line)
-        else:
-            process = subprocess.Popen(
-                command,
-                env=env,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                bufsize=1,
-            )
-            output_lines: list[str] = []
-            assert process.stdout is not None
-            for line in process.stdout:
-                clean = line.rstrip("\n")
-                output_lines.append(clean)
-                self.log(clean)
-            returncode = process.wait(timeout=timeout)
-            result = subprocess.CompletedProcess(command, returncode, "\n".join(output_lines), None)
+        process = subprocess.Popen(
+            command,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        assert process.stdout is not None
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ)
+        chunks: list[bytes] = []
+        live_buffer = b""
+        started = time.monotonic()
+        next_heartbeat = started + HEARTBEAT_INTERVAL
+        timed_out = False
+        try:
+            while selector.get_map():
+                now = time.monotonic()
+                if timeout is not None and now - started >= timeout:
+                    timed_out = True
+                    break
+                wait = min(1.0, max(0.0, next_heartbeat - now))
+                if timeout is not None:
+                    wait = min(wait, max(0.0, timeout - (now - started)))
+                events = selector.select(wait)
+                for key, _mask in events:
+                    chunk = os.read(key.fd, 65536)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    chunks.append(chunk)
+                    if not capture:
+                        live_buffer += chunk
+                        complete = live_buffer.split(b"\n")
+                        live_buffer = complete.pop()
+                        for raw_line in complete:
+                            self.log(_clean_terminal_line(raw_line.decode(errors="replace")))
+                now = time.monotonic()
+                if now >= next_heartbeat and process.poll() is None:
+                    elapsed = now - started
+                    self._command_heartbeat(elapsed)
+                    self.log(f"Still running ({int(elapsed)} seconds): {shown}")
+                    next_heartbeat = now + HEARTBEAT_INTERVAL
+        finally:
+            selector.close()
+
+        if timed_out:
+            self.log(f"Command timed out after {int(timeout or 0)} seconds; terminating it.")
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+                process.wait(timeout=5)
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait()
+            process.stdout.close()
+            self._finish_command_heartbeat()
+            raise UpdateFailure(f"Command timed out after {int(timeout or 0)} seconds: {shown}")
+
+        returncode = process.wait()
+        process.stdout.close()
+        if not capture and live_buffer:
+            self.log(_clean_terminal_line(live_buffer.decode(errors="replace")))
+        output = b"".join(chunks).decode(errors="replace")
+        if capture and output.strip() and (log_output or returncode != 0):
+            for line in output.rstrip().splitlines():
+                self.log(_clean_terminal_line(line))
+        self._finish_command_heartbeat()
+        result = subprocess.CompletedProcess(command, returncode, output, None)
         if check and result.returncode != 0:
             raise UpdateFailure(f"Command failed with exit code {result.returncode}: {shown}")
         return result
@@ -339,16 +723,12 @@ class UpdateContext:
             )
         return status
 
-    def check(self) -> None:
-        self.set_state("preflight", "running", "Checking Queue Server state", 5)
-        self.log("Starting Bluesky environment update preview.")
-        self.ensure_no_active_run()
-        if not self.environment_file.exists():
-            raise UpdateFailure(f"Environment file is missing: {self.environment_file}")
-        if not DEFAULT_MAMBA.exists():
-            raise UpdateFailure(f"Mamba executable is missing: {DEFAULT_MAMBA}")
-
-        self.set_state("resolving", "running", "Checking project environment requirements", 20)
+    def _resolve_mamba_plan(
+        self, first_progress: int, second_progress: int
+    ) -> tuple[dict, dict]:
+        self.set_state(
+            "resolving", "running", "Checking project environment requirements", first_progress
+        )
         environment_command = [
             str(DEFAULT_MAMBA),
             "env",
@@ -361,7 +741,10 @@ class UpdateContext:
             "--json",
         ]
         environment_result = self.run(
-            environment_command, capture=True, timeout=None, log_output=False
+            environment_command,
+            capture=True,
+            timeout=PLAN_TIMEOUT,
+            log_output=False,
         )
         environment_payload = extract_json_document(environment_result.stdout or "")
         if environment_payload.get("success") is False:
@@ -372,7 +755,12 @@ class UpdateContext:
                 )
             )
 
-        self.set_state("resolving", "running", "Resolving available Conda updates", 45)
+        self.set_state(
+            "resolving",
+            "running",
+            "Resolving available updates with Mamba",
+            second_progress,
+        )
         update_command = [
             str(DEFAULT_MAMBA),
             "update",
@@ -382,17 +770,89 @@ class UpdateContext:
             "--dry-run",
             "--json",
         ]
-        update_result = self.run(update_command, capture=True, timeout=None, log_output=False)
+        update_result = self.run(
+            update_command,
+            capture=True,
+            timeout=PLAN_TIMEOUT,
+            log_output=False,
+        )
         update_payload = extract_json_document(update_result.stdout or "")
         if update_payload.get("success") is False:
             raise UpdateFailure(
                 str(update_payload.get("error") or "Mamba could not resolve the update.")
             )
+        return environment_payload, update_payload
+
+    def _metadata_repairs(self) -> list[dict]:
+        repairs, ambiguous = find_duplicate_distribution_metadata(self.env_prefix)
+        if ambiguous:
+            details = "; ".join(
+                f"{item['name']}: installed={','.join(item['versions'])}, "
+                f"Conda={','.join(item['conda_versions']) or 'unknown'}"
+                for item in ambiguous
+            )
+            raise UpdateFailure(
+                "Duplicate Python package metadata could not be repaired safely: " + details
+            )
+        return repairs
+
+    @staticmethod
+    def _repair_signature(repairs: list[dict]) -> list[tuple[str, str, str]]:
+        return sorted(
+            (
+                normalize_package_name(item.get("name", "")),
+                str(item.get("keep_version", "")),
+                str(item.get("remove_version", "")),
+            )
+            for item in repairs
+        )
+
+    def _revalidate_approved_plan(self) -> list[dict]:
+        if not self.plan_path.exists():
+            raise UpdateFailure("The approved update plan is missing. Run the preview again.")
+        try:
+            approved = json.loads(self.plan_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as ex:
+            raise UpdateFailure("The approved update plan is unreadable. Run the preview again.") from ex
+        approved_digest = str(approved.get("plan_digest", ""))
+        if not approved_digest:
+            raise UpdateFailure("The approved update plan is outdated. Run the preview again.")
+
+        current_environment, current_update = self._resolve_mamba_plan(5, 8)
+        current_digest = combined_plan_digest(current_environment, current_update)
+        if current_digest != approved_digest:
+            raise UpdateFailure(
+                "Available packages changed after the preview. No changes were made; "
+                "review and approve a new update plan."
+            )
+        current_repairs = self._metadata_repairs()
+        approved_repairs = list(approved.get("metadata_repairs") or [])
+        if self._repair_signature(current_repairs) != self._repair_signature(approved_repairs):
+            raise UpdateFailure(
+                "Installed package metadata changed after the preview. No changes were made; "
+                "review and approve a new update plan."
+            )
+        self.log(f"Approved package plan revalidated ({current_digest[:12]}).")
+        return current_repairs
+
+    def check(self) -> None:
+        self.set_state("preflight", "running", "Checking Queue Server state", 5)
+        self.log("Starting Bluesky environment update preview.")
+        self.ensure_no_active_run()
+        if not self.environment_file.exists():
+            raise UpdateFailure(f"Environment file is missing: {self.environment_file}")
+        if not DEFAULT_MAMBA.exists():
+            raise UpdateFailure(f"Mamba executable is missing: {DEFAULT_MAMBA}")
+        environment_payload, update_payload = self._resolve_mamba_plan(20, 45)
+        metadata_repairs = self._metadata_repairs()
+        plan_digest = combined_plan_digest(environment_payload, update_payload)
         self.write_json_atomic(
             self.plan_path,
             {
                 "project_environment": environment_payload,
                 "update_all": update_payload,
+                "metadata_repairs": metadata_repairs,
+                "plan_digest": plan_digest,
             },
         )
         environment_summary, has_environment_changes = summarize_mamba_plan(
@@ -403,15 +863,27 @@ class UpdateContext:
             "Project environment requirements:",
             *[f"  {line}" for line in environment_summary],
             "",
-            "Available Conda updates:",
+            "Available Mamba package updates:",
             *[f"  {line}" for line in update_summary],
         ]
         has_conda_changes = has_environment_changes or has_update_changes
+        if metadata_repairs:
+            summary.extend(
+                [
+                    "",
+                    f"Safe metadata repairs ({len(metadata_repairs)}):",
+                    *[
+                        f"  Remove stale {item['name']} {item['remove_version']} metadata; "
+                        f"keep Conda version {item['keep_version']}"
+                        for item in metadata_repairs
+                    ],
+                ]
+            )
         if self.pip_requirements.exists():
             summary.extend(
                 [
                     "",
-                    "Pip-only packages will be checked after Conda and installed with --no-deps:",
+                    "Pip-only packages will be checked after Mamba and installed with --no-deps:",
                     *[
                         f"  {line.strip()}"
                         for line in self.pip_requirements.read_text(encoding="utf-8").splitlines()
@@ -428,28 +900,45 @@ class UpdateContext:
             "Update preview is ready for confirmation",
             100,
             has_conda_changes=has_conda_changes,
+            has_metadata_repairs=bool(metadata_repairs),
+            plan_digest=plan_digest,
             summary_file=str(self.summary_path),
         )
 
     def _record_restore_point(self) -> None:
         self.set_state("snapshot", "running", "Recording environment restore point", 12)
         revisions = self.run(
-            [str(DEFAULT_CONDA), "list", "--name", ENVIRONMENT_NAME, "--revisions"],
+            [str(DEFAULT_MAMBA), "list", "--name", ENVIRONMENT_NAME, "--revisions"],
             capture=True,
+            timeout=PLAN_TIMEOUT,
         ).stdout or ""
         (self.run_dir / "conda-revisions.txt").write_text(revisions, encoding="utf-8")
         revision_matches = re.findall(r"\(rev\s+(\d+)\)", revisions)
         revision = int(revision_matches[-1]) if revision_matches else None
 
         explicit = self.run(
-            [str(DEFAULT_CONDA), "list", "--name", ENVIRONMENT_NAME, "--explicit"],
+            [str(DEFAULT_MAMBA), "list", "--name", ENVIRONMENT_NAME, "--explicit"],
             capture=True,
+            timeout=PLAN_TIMEOUT,
             log_output=False,
         ).stdout or ""
-        (self.run_dir / "conda-explicit.txt").write_text(explicit, encoding="utf-8")
+        explicit_urls = [
+            line.strip()
+            for line in explicit.splitlines()
+            if line.strip().startswith(("https://", "http://"))
+        ]
+        if not explicit_urls:
+            raise UpdateFailure("Mamba did not return an explicit environment snapshot.")
+        (self.run_dir / "conda-explicit.txt").write_text(
+            "# Generated by the Bluesky environment updater\n@EXPLICIT\n"
+            + "\n".join(explicit_urls)
+            + "\n",
+            encoding="utf-8",
+        )
         conda_packages_text = self.run(
-            [str(DEFAULT_CONDA), "list", "--name", ENVIRONMENT_NAME, "--json"],
+            [str(DEFAULT_MAMBA), "list", "--name", ENVIRONMENT_NAME, "--json"],
             capture=True,
+            timeout=PLAN_TIMEOUT,
             log_output=False,
         ).stdout or "[]"
         conda_packages = extract_json_value(conda_packages_text, list)
@@ -461,6 +950,7 @@ class UpdateContext:
         pip_freeze_all = self.run(
             [str(self.env_python), "-m", "pip", "freeze", "--all"],
             capture=True,
+            timeout=PLAN_TIMEOUT,
             log_output=False,
         ).stdout or ""
         pip_freeze = filter_pip_freeze(pip_freeze_all, pip_package_names)
@@ -470,6 +960,7 @@ class UpdateContext:
         pip_check = self.run(
             [str(self.env_python), "-m", "pip", "check"],
             capture=True,
+            timeout=PLAN_TIMEOUT,
             check=False,
         )
         pip_check_issues = parse_pip_check_issues(pip_check.stdout or "")
@@ -482,11 +973,57 @@ class UpdateContext:
                 "pip_freeze": str(self.run_dir / "pip-freeze.txt"),
                 "pip_check_issues": pip_check_issues,
                 "database_backups": {},
+                "metadata_backups": [],
                 "migrated_databases": [],
                 "databases_requiring_restore": [],
             }
         )
         self.save_manifest()
+
+    def _repair_duplicate_metadata(self, repairs: list[dict]) -> None:
+        if not repairs:
+            self.log("No duplicate Python distribution metadata requires repair.")
+            return
+        self.set_state("repair", "running", "Repairing duplicate package metadata", 35)
+        backup_root = self.run_dir / "metadata-backups"
+        backup_root.mkdir(parents=True, exist_ok=True)
+        prefix = self.env_prefix.resolve()
+        for index, repair in enumerate(repairs, start=1):
+            metadata_dir = Path(str(repair.get("path", ""))).resolve()
+            try:
+                metadata_dir.relative_to(prefix)
+            except ValueError as ex:
+                raise UpdateFailure(
+                    f"Refusing metadata repair outside the environment: {metadata_dir}"
+                ) from ex
+            if (
+                metadata_dir.suffix != ".dist-info"
+                or metadata_dir.is_symlink()
+                or not metadata_dir.is_dir()
+            ):
+                raise UpdateFailure(f"Unsafe or missing metadata repair target: {metadata_dir}")
+            identity = _read_distribution_identity(metadata_dir / "METADATA")
+            expected_name = normalize_package_name(repair.get("name", ""))
+            expected_version = str(repair.get("remove_version"))
+            if (
+                identity is None
+                or normalize_package_name(identity[0]) != expected_name
+                or identity[1] != expected_version
+            ):
+                raise UpdateFailure(
+                    f"Metadata changed before repair: expected {repair['name']} "
+                    f"{expected_version}, found {identity}."
+                )
+            backup = backup_root / f"{index:02d}-{metadata_dir.name}"
+            shutil.copytree(metadata_dir, backup)
+            shutil.rmtree(metadata_dir)
+            record = {**repair, "backup": str(backup), "removed_at": utc_now()}
+            self._manifest.setdefault("metadata_backups", []).append(record)
+            self.save_manifest()
+            self.log(
+                f"Removed stale {repair['name']} {repair['remove_version']} metadata; "
+                f"kept {repair['keep_version']} (backup: {backup})."
+            )
 
     def _verify_pip_consistency(self) -> None:
         result = self.run(
@@ -494,9 +1031,22 @@ class UpdateContext:
             capture=True,
             check=False,
         )
-        current = parse_pip_check_issues(result.stdout or "")
-        baseline = set(self._manifest.get("pip_check_issues") or [])
-        new_issues = [issue for issue in current if issue not in baseline]
+        all_current = parse_pip_check_issues(result.stdout or "")
+        conda_names = installed_conda_package_names(self.env_prefix)
+        conda_managed = [
+            issue
+            for issue in all_current
+            if is_conda_managed_pip_issue(issue, conda_names)
+        ]
+        current = [issue for issue in all_current if issue not in conda_managed]
+        baseline = {
+            pip_check_issue_key(issue)
+            for issue in (self._manifest.get("pip_check_issues") or [])
+            if not is_conda_managed_pip_issue(issue, conda_names)
+        }
+        new_issues = [
+            issue for issue in current if pip_check_issue_key(issue) not in baseline
+        ]
         if new_issues:
             raise UpdateFailure(
                 "The update introduced package dependency problems: " + "; ".join(new_issues)
@@ -506,7 +1056,14 @@ class UpdateContext:
             for issue in current:
                 self.log(f"  {issue}")
         else:
-            self.log("Pip dependency check passed.")
+            self.log("Pip-owned package dependency check passed.")
+        if conda_managed:
+            self.log(
+                "Ignoring pip metadata warning(s) between Conda-managed packages; "
+                "Mamba resolved their Conda dependencies:"
+            )
+            for issue in conda_managed:
+                self.log(f"  {issue}")
 
     def _postgres_env(self) -> dict[str, str]:
         env = self.command_env(DEFAULT_TILED_ENV)
@@ -560,7 +1117,12 @@ class UpdateContext:
                 ],
                 env=env,
             )
-            self.run([pg_restore, "--list", str(destination)], capture=True)
+            self.run(
+                [pg_restore, "--list", str(destination)],
+                capture=True,
+                timeout=DATABASE_TIMEOUT,
+                log_output=False,
+            )
             digest = hashlib.sha256(destination.read_bytes()).hexdigest()
             self.log(f"Verified {database}: {destination.stat().st_size} bytes, sha256={digest}")
             self._manifest["database_backups"][database] = {
@@ -621,7 +1183,7 @@ class UpdateContext:
         self.save_manifest()
 
     def _update_environment(self) -> None:
-        self.set_state("conda", "running", "Applying project environment requirements", 38)
+        self.set_state("mamba", "running", "Applying project requirements with Mamba", 38)
         self.run(
             [
                 str(DEFAULT_MAMBA),
@@ -632,9 +1194,10 @@ class UpdateContext:
                 "--file",
                 str(self.environment_file),
                 "--yes",
-            ]
+            ],
+            timeout=PACKAGE_TIMEOUT,
         )
-        self.set_state("conda", "running", "Updating Conda environment", 46)
+        self.set_state("mamba", "running", "Updating environment with Mamba", 46)
         self.run(
             [
                 str(DEFAULT_MAMBA),
@@ -643,7 +1206,8 @@ class UpdateContext:
                 ENVIRONMENT_NAME,
                 "--all",
                 "--yes",
-            ]
+            ],
+            timeout=PACKAGE_TIMEOUT,
         )
         if self.pip_requirements.exists():
             self.set_state(
@@ -659,7 +1223,8 @@ class UpdateContext:
                     "--no-deps",
                     "--requirement",
                     str(self.pip_requirements),
-                ]
+                ],
+                timeout=PACKAGE_TIMEOUT,
             )
         self._verify_pip_consistency()
 
@@ -762,6 +1327,7 @@ class UpdateContext:
                 line.strip() for line in (result.stdout or "").splitlines() if line.strip()
             ]
             if output_lines and output_lines[-1] == "active":
+                self.log(f"{service}.service is active.")
                 return
             time.sleep(1)
         raise UpdateFailure(f"Service did not become active: {service}")
@@ -843,33 +1409,85 @@ class UpdateContext:
         if not self.gui_script.exists():
             self.log(f"GUI restart script is missing: {self.gui_script}")
             return
-        self.run(["/usr/bin/perl", str(self.gui_script), "restart"], timeout=60)
+        # The updater itself runs in a transient systemd service.  A detached
+        # screen process started directly here would remain in that service's
+        # cgroup and be killed when the updater exits.  Give the GUI its own
+        # scope so that its lifetime is independent of the update job.
+        self.run(
+            [
+                "/usr/bin/systemd-run",
+                "--user",
+                "--scope",
+                "--quiet",
+                "/usr/bin/perl",
+                str(self.gui_script),
+                "restart",
+            ],
+            timeout=60,
+        )
 
     def apply(self) -> None:
         self.log("Starting confirmed Bluesky environment update.")
         self.set_state("preflight", "running", "Running final safety checks", 3)
         self.ensure_no_active_run()
+        metadata_repairs = self._revalidate_approved_plan()
         self._record_restore_point()
         self._backup_databases()
+        self._manifest["services_stop_started"] = True
+        self.save_manifest()
         self._close_worker()
         self._stop_services()
+        self._repair_duplicate_metadata(metadata_repairs)
+        self._manifest["environment_update_started"] = True
+        self.save_manifest()
         self._update_environment()
         self._smoke_test_environment()
         self._migrate_databases()
         self._start_services()
         self._open_worker()
+        self.log("All Bluesky services restarted successfully; the worker is healthy.")
+        self._manifest["deployment_healthy"] = True
         self._manifest["completed_at"] = utc_now()
         self._manifest["success"] = True
         self.save_manifest()
-        self.set_state("gui", "running", "Restarting the control GUI", 98)
-        self._restart_gui()
         self.set_state(
             "complete",
             "success",
-            "Environment update completed successfully",
+            "Environment update and service restart completed. Review the log, then restart the GUI.",
             100,
             restore_manifest=str(self.manifest_path),
+            gui_restart_required=True,
         )
+
+    def recover_failed_apply(self) -> str:
+        """Best-effort rollback/restart after a confirmed update fails."""
+        if not self.manifest_path.exists():
+            return "not-required"
+        self._load_restore_manifest()
+        stop_started = bool(self._manifest.get("services_stop_started"))
+        update_started = bool(self._manifest.get("environment_update_started"))
+        database_changed = bool(self._manifest.get("databases_requiring_restore"))
+        deployment_healthy = bool(self._manifest.get("deployment_healthy"))
+        if not stop_started and not update_started and not database_changed:
+            return "not-required"
+
+        self.log("Starting automatic recovery after the failed update.")
+        self.set_state("recovery", "running", "Automatically recovering the previous environment", 5)
+        if (update_started or database_changed) and not deployment_healthy:
+            self._stop_services()
+            self._restore_environment()
+            self._restore_databases()
+            self._smoke_test_environment()
+        self._start_services()
+        self._open_worker()
+        self._manifest["automatic_recovery_at"] = utc_now()
+        self._manifest["automatic_recovery_success"] = True
+        self.save_manifest()
+        self.log(
+            "Automatic recovery completed; services and the worker are healthy. "
+            "The GUI was left running for review."
+        )
+        return "success"
 
     def _load_restore_manifest(self) -> None:
         if not self.manifest_path.exists():
@@ -880,23 +1498,104 @@ class UpdateContext:
         self._manifest = payload
 
     def _restore_environment(self) -> None:
-        revision = self._manifest.get("conda_revision")
-        if revision is None:
-            raise UpdateFailure("The restore point does not contain a Conda revision.")
-        self.set_state("restore", "running", f"Restoring Conda revision {revision}", 30)
-        self.run(
-            [
-                str(DEFAULT_CONDA),
-                "install",
-                "--name",
-                ENVIRONMENT_NAME,
-                "--revision",
-                str(revision),
-                "--yes",
-            ]
+        explicit_path = Path(str(self._manifest.get("conda_explicit", "")))
+        explicit_urls = explicit_snapshot_urls(explicit_path)
+        expected_artifacts = {
+            urllib.parse.unquote(urllib.parse.urlparse(url).path.rsplit("/", 1)[-1])
+            for url in explicit_urls
+        }
+        restore_explicit_path = self.run_dir / "conda-restore-explicit.txt"
+        restore_explicit_path.write_text(
+            "# Normalized restore snapshot\n@EXPLICIT\n"
+            + "\n".join(explicit_urls)
+            + "\n",
+            encoding="utf-8",
         )
-        pip_restore = Path(str(self._manifest.get("pip_freeze", "")))
-        if pip_restore.exists() and pip_restore.stat().st_size:
+        backup_prefix = Path(
+            str(
+                self._manifest.get("environment_backup_prefix")
+                or self.run_dir / "environment-before-restore"
+            )
+        )
+        failed_prefix = self.run_dir / "environment-from-failed-restore"
+
+        installed_artifacts = installed_conda_artifacts(self.env_prefix)
+        if installed_artifacts != expected_artifacts:
+            if backup_prefix.exists():
+                # A previous attempt was interrupted after preserving the source
+                # environment. Preserve any partial recreation before retrying.
+                if self.env_prefix.exists():
+                    if failed_prefix.exists():
+                        raise UpdateFailure(
+                            "Both a restore backup and a failed restore prefix already exist; "
+                            "refusing to overwrite either one."
+                        )
+                    self.env_prefix.rename(failed_prefix)
+            else:
+                if not self.env_prefix.exists():
+                    raise UpdateFailure(
+                        f"The environment to restore is missing: {self.env_prefix}"
+                    )
+                if self.env_prefix.stat().st_dev != self.run_dir.stat().st_dev:
+                    raise UpdateFailure(
+                        "The environment and restore directory are on different filesystems; "
+                        "a fast, atomic backup is not possible."
+                    )
+                self.env_prefix.rename(backup_prefix)
+                self._manifest["environment_backup_prefix"] = str(backup_prefix)
+                self._manifest["environment_backup_created_at"] = utc_now()
+                self.save_manifest()
+
+            self.set_state(
+                "restore",
+                "running",
+                f"Recreating {ENVIRONMENT_NAME} from the exact Mamba snapshot",
+                30,
+            )
+            try:
+                self.run(
+                    [
+                        str(DEFAULT_MAMBA),
+                        "create",
+                        "--prefix",
+                        str(self.env_prefix),
+                        "--file",
+                        str(restore_explicit_path),
+                        "--yes",
+                    ],
+                    timeout=PACKAGE_TIMEOUT,
+                )
+                installed_artifacts = installed_conda_artifacts(self.env_prefix)
+                missing = expected_artifacts - installed_artifacts
+                unexpected = installed_artifacts - expected_artifacts
+                if missing or unexpected:
+                    raise UpdateFailure(
+                        "The recreated environment does not exactly match its snapshot "
+                        f"({len(missing)} missing, {len(unexpected)} unexpected artifacts)."
+                    )
+            except Exception:
+                # Creation did not produce a verified environment. Keep the
+                # partial result for diagnosis and put the original prefix back.
+                if self.env_prefix.exists() and not failed_prefix.exists():
+                    self.env_prefix.rename(failed_prefix)
+                if backup_prefix.exists() and not self.env_prefix.exists():
+                    backup_prefix.rename(self.env_prefix)
+                    self._manifest["environment_backup_rolled_back_at"] = utc_now()
+                    self.save_manifest()
+                raise
+
+            self._manifest["environment_snapshot_restored_at"] = utc_now()
+            self._manifest["environment_snapshot_package_count"] = len(expected_artifacts)
+            self.save_manifest()
+        else:
+            self.log(
+                f"The Conda environment already exactly matches all "
+                f"{len(expected_artifacts)} snapshot artifacts."
+            )
+
+        pip_restore_value = self._manifest.get("pip_freeze")
+        pip_restore = Path(str(pip_restore_value)) if pip_restore_value else None
+        if pip_restore is not None and pip_restore.exists() and pip_restore.stat().st_size:
             self.set_state("restore", "running", "Restoring pip-only packages", 48)
             self.run(
                 [
@@ -908,7 +1607,8 @@ class UpdateContext:
                     "--no-deps",
                     "--requirement",
                     str(pip_restore),
-                ]
+                ],
+                timeout=PACKAGE_TIMEOUT,
             )
         self._verify_pip_consistency()
 
@@ -947,6 +1647,7 @@ class UpdateContext:
                     str(backup_path),
                 ],
                 env=env,
+                timeout=DATABASE_TIMEOUT,
             )
 
     def restore(self) -> None:
@@ -962,14 +1663,31 @@ class UpdateContext:
         self._manifest["restored_at"] = utc_now()
         self._manifest["restore_success"] = True
         self.save_manifest()
-        self.set_state("gui", "running", "Restarting the control GUI", 98)
-        self._restart_gui()
         self.set_state(
             "complete",
             "success",
-            "Previous environment restored successfully",
+            "Previous environment and services restored. Review the log, then restart the GUI.",
             100,
             restore_manifest=str(self.manifest_path),
+            gui_restart_required=True,
+        )
+
+    def restart_gui(self) -> None:
+        """Restart the GUI only after the operator accepts the completed update."""
+        self.set_state("gui", "running", "Restarting the control GUI", 100)
+        self._restart_gui()
+        if self.manifest_path.exists():
+            self._load_restore_manifest()
+            self._manifest["gui_restarted_at"] = utc_now()
+            self.save_manifest()
+        self.log("GUI restart completed successfully.")
+        self.set_state(
+            "complete",
+            "success",
+            "Environment update complete; GUI restarted successfully.",
+            100,
+            restore_manifest=str(self.manifest_path),
+            gui_restart_required=False,
         )
 
 
@@ -990,7 +1708,7 @@ def acquire_update_lock(run_dir: Path):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("check", "apply", "restore"))
+    parser.add_argument("mode", choices=("check", "apply", "restore", "restart-gui"))
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument(
         "--repo-root",
@@ -1012,21 +1730,45 @@ def main(argv: list[str] | None = None) -> int:
             context.check()
         elif args.mode == "apply":
             context.apply()
-        else:
+        elif args.mode == "restore":
             context.restore()
+        else:
+            context.restart_gui()
         return 0
     except Exception as ex:
         context.log(f"ERROR: {ex}")
-        for line in traceback.format_exc().rstrip().splitlines():
+        original_traceback = traceback.format_exc()
+        for line in original_traceback.rstrip().splitlines():
             context.log(line)
-        restore_available = context.manifest_path.exists()
+        recovery_status = "not-attempted"
+        recovery_error = ""
+        if args.mode == "apply" and context.manifest_path.exists():
+            try:
+                recovery_status = context.recover_failed_apply()
+            except Exception as recovery_ex:
+                recovery_status = "failed"
+                recovery_error = str(recovery_ex)
+                context.log(f"AUTOMATIC RECOVERY ERROR: {recovery_ex}")
+                for line in traceback.format_exc().rstrip().splitlines():
+                    context.log(line)
+        restore_available = context.manifest_path.exists() and recovery_status not in {
+            "success",
+            "not-required",
+        }
+        message = str(ex)
+        if recovery_status == "success":
+            message += " Automatic recovery restored the previous environment and services."
+        elif recovery_status == "failed":
+            message += f" Automatic recovery also failed: {recovery_error}"
         context.set_state(
             "failed",
             "failed",
-            str(ex),
+            message,
             100,
             restore_available=restore_available,
             restore_manifest=str(context.manifest_path) if restore_available else "",
+            automatic_recovery=recovery_status,
+            gui_restart_required=(recovery_status == "success"),
         )
         return 1
     finally:

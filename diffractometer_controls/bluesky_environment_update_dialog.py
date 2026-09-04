@@ -11,6 +11,100 @@ from pathlib import Path
 from qtpy import QtCore, QtGui, QtWidgets
 
 
+class PlanSyntaxHighlighter(QtGui.QSyntaxHighlighter):
+    """Color transaction sections while keeping the saved summary plain text."""
+
+    SECTION_STYLES = {
+        "New packages": (1, "green"),
+        "Upgrades": (2, "green"),
+        "Downgrades": (3, "red"),
+        "Rebuilds / unchanged version": (4, "amber"),
+        "Removals": (5, "red"),
+        "Safe metadata repairs": (6, "amber"),
+    }
+
+    def __init__(self, document):
+        super().__init__(document)
+        palette = QtWidgets.QApplication.palette()
+        dark = palette.color(QtGui.QPalette.Base).lightness() < 128
+        colors = {
+            "green": "#66d17a" if dark else "#187a35",
+            "red": "#ff7070" if dark else "#b3261e",
+            "amber": "#e6b94a" if dark else "#8a6100",
+        }
+        self._formats = {}
+        for state, color_name in self.SECTION_STYLES.values():
+            text_format = QtGui.QTextCharFormat()
+            text_format.setForeground(QtGui.QColor(colors[color_name]))
+            self._formats[state] = text_format
+        self._heading_formats = {}
+        for state, text_format in self._formats.items():
+            heading_format = QtGui.QTextCharFormat(text_format)
+            heading_format.setFontWeight(QtGui.QFont.Bold)
+            self._heading_formats[state] = heading_format
+
+    def highlightBlock(self, text):
+        stripped = text.strip()
+        for heading, (state, _color_name) in self.SECTION_STYLES.items():
+            if stripped.startswith(heading + " (") and stripped.endswith("):"):
+                self.setCurrentBlockState(state)
+                self.setFormat(0, len(text), self._heading_formats[state])
+                return
+        state = self.previousBlockState()
+        if state in self._formats and (not stripped or text[:1].isspace()):
+            self.setCurrentBlockState(state)
+            self.setFormat(0, len(text), self._formats[state])
+            return
+        self.setCurrentBlockState(0)
+
+
+def configure_plan_text(widget):
+    widget.setReadOnly(True)
+    widget.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap)
+    widget.setFont(QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont))
+    widget._plan_highlighter = PlanSyntaxHighlighter(widget.document())
+
+
+class UpdateConfirmationDialog(QtWidgets.QDialog):
+    """Confirmation prompt with a bounded, scrollable transaction preview."""
+
+    def __init__(self, summary, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Confirm Bluesky Environment Update")
+        self.setWindowModality(QtCore.Qt.WindowModal)
+        self.resize(760, 520)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        intro = QtWidgets.QLabel(
+            "The Queue Server worker and Bluesky services will be stopped. Verified "
+            "database backups and an environment restore point will be created first. "
+            "This GUI will remain open through the service restart; after the health "
+            "checks pass, click Restart GUI to Finish."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        changes_label = QtWidgets.QLabel("Proposed changes:")
+        layout.addWidget(changes_label)
+        self.changes_text = QtWidgets.QPlainTextEdit()
+        configure_plan_text(self.changes_text)
+        self.changes_text.setPlainText(summary)
+        self.changes_text.setMinimumHeight(240)
+        layout.addWidget(self.changes_text, 1)
+
+        prompt = QtWidgets.QLabel("Proceed with the update?")
+        layout.addWidget(prompt)
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Yes | QtWidgets.QDialogButtonBox.No
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        no_button = buttons.button(QtWidgets.QDialogButtonBox.No)
+        no_button.setDefault(True)
+        no_button.setFocus()
+        layout.addWidget(buttons)
+
+
 class BlueskyEnvironmentUpdateDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -41,8 +135,9 @@ class BlueskyEnvironmentUpdateDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
         warning = QtWidgets.QLabel(
             "This procedure updates the bluesky-server environment, backs up and "
-            "conditionally migrates Tiled databases, and restarts Bluesky services "
-            "and this GUI. No plan may be running."
+            "conditionally migrates Tiled databases, and restarts all Bluesky services. "
+            "This GUI remains open so you can monitor the service restart. When the "
+            "update is complete, use the Restart GUI button. No plan may be running."
         )
         warning.setWordWrap(True)
         warning.setStyleSheet("font-weight: 600;")
@@ -61,7 +156,7 @@ class BlueskyEnvironmentUpdateDialog(QtWidgets.QDialog):
         plan_group = QtWidgets.QGroupBox("Proposed changes")
         plan_layout = QtWidgets.QVBoxLayout(plan_group)
         self.plan_text = QtWidgets.QPlainTextEdit()
-        self.plan_text.setReadOnly(True)
+        configure_plan_text(self.plan_text)
         self.plan_text.setPlaceholderText("Mamba is resolving the environment…")
         plan_layout.addWidget(self.plan_text)
         splitter.addWidget(plan_group)
@@ -93,6 +188,10 @@ class BlueskyEnvironmentUpdateDialog(QtWidgets.QDialog):
         self.restore_button.setVisible(False)
         self.restore_button.clicked.connect(self._confirm_and_restore)
         button_row.addWidget(self.restore_button)
+        self.restart_gui_button = QtWidgets.QPushButton("Restart GUI to Finish")
+        self.restart_gui_button.setVisible(False)
+        self.restart_gui_button.clicked.connect(self._restart_gui_to_finish)
+        button_row.addWidget(self.restart_gui_button)
         self.close_button = QtWidgets.QPushButton("Cancel")
         self.close_button.clicked.connect(self.close)
         button_row.addWidget(self.close_button)
@@ -151,19 +250,8 @@ class BlueskyEnvironmentUpdateDialog(QtWidgets.QDialog):
 
     def _confirm_and_apply(self):
         summary = self.plan_text.toPlainText().strip()
-        preview = summary[:3500]
-        if len(summary) > len(preview):
-            preview += "\n…"
-        response = QtWidgets.QMessageBox.warning(
-            self,
-            "Confirm Bluesky Environment Update",
-            "The Queue Server worker and Bluesky services will be stopped. Verified "
-            "database backups and an environment restore point will be created first.\n\n"
-            f"{preview}\n\nProceed with the update?",
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-            QtWidgets.QMessageBox.No,
-        )
-        if response != QtWidgets.QMessageBox.Yes:
+        confirmation = UpdateConfirmationDialog(summary, self)
+        if confirmation.exec_() != QtWidgets.QDialog.Accepted:
             return
 
         self._launch_detached_helper("apply")
@@ -180,6 +268,11 @@ class BlueskyEnvironmentUpdateDialog(QtWidgets.QDialog):
         if response != QtWidgets.QMessageBox.Yes:
             return
         self._launch_detached_helper("restore")
+
+    def _restart_gui_to_finish(self):
+        self.restart_gui_button.setEnabled(False)
+        if not self._launch_detached_helper("restart-gui"):
+            self.restart_gui_button.setEnabled(True)
 
     def _launch_detached_helper(self, mode):
         unit = f"bluesky-environment-{mode}-{self.run_dir.name.lower()}"
@@ -211,19 +304,25 @@ class BlueskyEnvironmentUpdateDialog(QtWidgets.QDialog):
             )
         except Exception as ex:
             QtWidgets.QMessageBox.critical(self, "Update Error", str(ex))
-            return
+            return False
         if result.returncode != 0:
             QtWidgets.QMessageBox.critical(
                 self,
                 "Update Error",
                 "Could not launch the detached updater.\n\n" + (result.stdout or ""),
             )
-            return
+            return False
         self._apply_running = True
         self.apply_button.setEnabled(False)
         self.restore_button.setVisible(False)
+        if mode != "restart-gui":
+            self.restart_gui_button.setVisible(False)
         self.close_button.setText("Hide")
-        self.status_label.setText(f"Detached {mode} process started. Waiting for status…")
+        if mode == "restart-gui":
+            self.status_label.setText("Restarting the GUI to finish the update…")
+        else:
+            self.status_label.setText(f"Detached {mode} process started. Waiting for status…")
+        return True
 
     def _poll_files(self):
         self._poll_log()
@@ -278,6 +377,10 @@ class BlueskyEnvironmentUpdateDialog(QtWidgets.QDialog):
             self._apply_running = False
             self.apply_button.setEnabled(False)
             self.close_button.setText("Close")
+            if payload.get("gui_restart_required"):
+                self.restart_gui_button.setEnabled(True)
+                self.restart_gui_button.setVisible(True)
+                self.close_button.setText("Close Without Restarting GUI")
             if payload.get("restore_available"):
                 self.restore_button.setVisible(True)
                 self.status_label.setText(
@@ -287,7 +390,15 @@ class BlueskyEnvironmentUpdateDialog(QtWidgets.QDialog):
         elif status == "success":
             self._apply_running = False
             self.apply_button.setEnabled(False)
-            self.close_button.setText("Close")
+            restart_required = bool(payload.get("gui_restart_required"))
+            self.restart_gui_button.setEnabled(restart_required)
+            self.restart_gui_button.setVisible(restart_required)
+            if restart_required:
+                self.restart_gui_button.setDefault(True)
+                self.restart_gui_button.setFocus()
+                self.close_button.setText("Close Without Restarting GUI")
+            else:
+                self.close_button.setText("Close")
 
     def closeEvent(self, event):
         if self._apply_running:
@@ -301,4 +412,7 @@ class BlueskyEnvironmentUpdateDialog(QtWidgets.QDialog):
             if response != QtWidgets.QMessageBox.Yes:
                 event.ignore()
                 return
+            self.hide()
+            event.ignore()
+            return
         super().closeEvent(event)
