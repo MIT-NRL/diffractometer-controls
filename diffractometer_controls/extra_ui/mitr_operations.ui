@@ -68,7 +68,7 @@ QTabBar::tab:selected
 QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
      </property>
      <property name="currentIndex">
-      <number>1</number>
+      <number>3</number>
      </property>
      <property name="alarmChannels">
       <stringlist>
@@ -951,6 +951,167 @@ QWidget[Fill=&quot;True&quot;] { background: rgba(0,0,0,0); }</string>
           </stringlist>
          </property>
         </widget>
+       </item>
+     </layout>
+     </widget>
+     <widget class="QWidget" name="tab_primary_cooling">
+      <attribute name="title">
+       <string>Primary Cooling</string>
+      </attribute>
+      <layout class="QHBoxLayout" name="horizontalLayout_primary_cooling">
+       <property name="leftMargin"><number>0</number></property>
+       <property name="topMargin"><number>0</number></property>
+       <property name="rightMargin"><number>0</number></property>
+       <property name="bottomMargin"><number>0</number></property>
+       <item>
+        <widget class="PyDMFrame" name="primaryCoolingValuesFrame">
+         <property name="minimumSize"><size><width>210</width><height>0</height></size></property>
+         <property name="maximumSize"><size><width>250</width><height>16777215</height></size></property>
+         <property name="frameShape"><enum>QFrame::Box</enum></property>
+         <property name="lineWidth"><number>2</number></property>
+         <layout class="QVBoxLayout" name="verticalLayout_primary_cooling_values">
+          <property name="leftMargin"><number>10</number></property>
+          <property name="topMargin"><number>10</number></property>
+          <property name="rightMargin"><number>10</number></property>
+          <property name="bottomMargin"><number>10</number></property>
+          <item>
+           <spacer name="primaryCoolingTopSpacer">
+            <property name="orientation"><enum>Qt::Vertical</enum></property>
+            <property name="sizeType"><enum>QSizePolicy::Expanding</enum></property>
+            <property name="sizeHint" stdset="0"><size><width>20</width><height>30</height></size></property>
+           </spacer>
+          </item>
+          <item>
+           <widget class="PyDMLabel" name="primaryInletTitleLabel">
+            <property name="font"><font><pointsize>16</pointsize></font></property>
+            <property name="text"><string>Inlet Temperature</string></property>
+            <property name="alignment"><set>Qt::AlignCenter</set></property>
+           </widget>
+          </item>
+          <item>
+           <widget class="PyDMLabel" name="primaryInletValueLabel">
+            <property name="minimumSize"><size><width>0</width><height>52</height></size></property>
+            <property name="font"><font><pointsize>22</pointsize></font></property>
+            <property name="autoFillBackground"><bool>true</bool></property>
+            <property name="alignment"><set>Qt::AlignCenter</set></property>
+            <property name="showUnits" stdset="0"><bool>true</bool></property>
+            <property name="precisionFromPV" stdset="0"><bool>true</bool></property>
+            <property name="alarmSensitiveContent" stdset="0"><bool>true</bool></property>
+            <property name="alarmSensitiveBorder" stdset="0"><bool>false</bool></property>
+            <property name="channel" stdset="0"><string>ca://mitr:PrimaryInlet</string></property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="primaryCoolingInletOutletSpacer">
+            <property name="orientation"><enum>Qt::Vertical</enum></property>
+            <property name="sizeType"><enum>QSizePolicy::Expanding</enum></property>
+            <property name="sizeHint" stdset="0"><size><width>20</width><height>30</height></size></property>
+           </spacer>
+          </item>
+          <item>
+           <widget class="PyDMLabel" name="primaryOutletTitleLabel">
+            <property name="font"><font><pointsize>16</pointsize></font></property>
+            <property name="text"><string>Outlet Temperature</string></property>
+            <property name="alignment"><set>Qt::AlignCenter</set></property>
+           </widget>
+          </item>
+          <item>
+           <widget class="PyDMLabel" name="primaryOutletValueLabel">
+            <property name="minimumSize"><size><width>0</width><height>52</height></size></property>
+            <property name="font"><font><pointsize>22</pointsize></font></property>
+            <property name="autoFillBackground"><bool>true</bool></property>
+            <property name="alignment"><set>Qt::AlignCenter</set></property>
+            <property name="showUnits" stdset="0"><bool>true</bool></property>
+            <property name="precisionFromPV" stdset="0"><bool>true</bool></property>
+            <property name="alarmSensitiveContent" stdset="0"><bool>true</bool></property>
+            <property name="alarmSensitiveBorder" stdset="0"><bool>false</bool></property>
+            <property name="channel" stdset="0"><string>ca://mitr:PrimaryOutlet</string></property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="primaryCoolingOutletFlowSpacer">
+            <property name="orientation"><enum>Qt::Vertical</enum></property>
+            <property name="sizeType"><enum>QSizePolicy::Expanding</enum></property>
+            <property name="sizeHint" stdset="0"><size><width>20</width><height>30</height></size></property>
+           </spacer>
+          </item>
+          <item>
+           <widget class="PyDMLabel" name="primaryFlowTitleLabel">
+            <property name="font"><font><pointsize>16</pointsize></font></property>
+            <property name="text"><string>Primary Flow</string></property>
+            <property name="alignment"><set>Qt::AlignCenter</set></property>
+           </widget>
+          </item>
+          <item>
+           <widget class="PyDMLabel" name="primaryFlowValueLabel">
+            <property name="minimumSize"><size><width>0</width><height>52</height></size></property>
+            <property name="font"><font><pointsize>22</pointsize></font></property>
+            <property name="autoFillBackground"><bool>true</bool></property>
+            <property name="alignment"><set>Qt::AlignCenter</set></property>
+            <property name="showUnits" stdset="0"><bool>true</bool></property>
+            <property name="precisionFromPV" stdset="0"><bool>true</bool></property>
+            <property name="alarmSensitiveContent" stdset="0"><bool>true</bool></property>
+            <property name="alarmSensitiveBorder" stdset="0"><bool>false</bool></property>
+            <property name="channel" stdset="0"><string>ca://mitr:PrimaryFlow</string></property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="primaryCoolingBottomSpacer">
+            <property name="orientation"><enum>Qt::Vertical</enum></property>
+            <property name="sizeType"><enum>QSizePolicy::Expanding</enum></property>
+            <property name="sizeHint" stdset="0"><size><width>20</width><height>30</height></size></property>
+           </spacer>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <layout class="QVBoxLayout" name="verticalLayout_primary_cooling_plots">
+         <property name="spacing"><number>8</number></property>
+         <property name="leftMargin"><number>0</number></property>
+         <property name="topMargin"><number>0</number></property>
+         <property name="rightMargin"><number>0</number></property>
+         <property name="bottomMargin"><number>0</number></property>
+         <item>
+          <widget class="PyDMArchiverTimePlot" name="primaryCoolingTemperatureArchivePlot">
+           <property name="minimumSize"><size><width>0</width><height>240</height></size></property>
+           <property name="font"><font><pointsize>15</pointsize></font></property>
+           <property name="backgroundColor"><color><red>255</red><green>255</green><blue>255</blue></color></property>
+           <property name="axisColor"><color><red>0</red><green>0</green><blue>0</blue></color></property>
+           <property name="yAxes"><stringlist><string>{&quot;name&quot;: &quot;Temperature&quot;, &quot;orientation&quot;: &quot;left&quot;, &quot;label&quot;: &quot;Temperature (°C)&quot;, &quot;minRange&quot;: 0.0, &quot;maxRange&quot;: 100.0, &quot;autoRange&quot;: true, &quot;logMode&quot;: false}</string></stringlist></property>
+           <property name="xLabels"><stringlist><string>Time</string></stringlist></property>
+           <property name="showLegend"><bool>true</bool></property>
+           <property name="maxRedrawRate" stdset="0"><number>15</number></property>
+           <property name="bufferSize"><number>86400</number></property>
+           <property name="updateMode" stdset="0"><enum>PyDMTimePlot::AtFixedRate</enum></property>
+           <property name="timeSpan"><double>43200.000000000000000</double></property>
+           <property name="updateInterval"><double>0.500000000000000</double></property>
+           <property name="autoRangeY"><bool>true</bool></property>
+           <property name="curves"><stringlist>
+            <string>{&quot;useArchiveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:PrimaryInlet&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Primary Inlet&quot;, &quot;color&quot;: &quot;dodgerblue&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 2, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 3, &quot;yAxisName&quot;: &quot;Temperature&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+            <string>{&quot;useArchiveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:PrimaryOutlet&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Primary Outlet&quot;, &quot;color&quot;: &quot;orangered&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 2, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 3, &quot;yAxisName&quot;: &quot;Temperature&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string>
+           </stringlist></property>
+          </widget>
+         </item>
+         <item>
+          <widget class="PyDMArchiverTimePlot" name="primaryCoolingFlowArchivePlot">
+           <property name="minimumSize"><size><width>0</width><height>240</height></size></property>
+           <property name="font"><font><pointsize>15</pointsize></font></property>
+           <property name="backgroundColor"><color><red>255</red><green>255</green><blue>255</blue></color></property>
+           <property name="axisColor"><color><red>0</red><green>0</green><blue>0</blue></color></property>
+           <property name="yAxes"><stringlist><string>{&quot;name&quot;: &quot;Flow&quot;, &quot;orientation&quot;: &quot;left&quot;, &quot;label&quot;: &quot;Primary Flow&quot;, &quot;minRange&quot;: 0.0, &quot;maxRange&quot;: 4000.0, &quot;autoRange&quot;: true, &quot;logMode&quot;: false}</string></stringlist></property>
+           <property name="xLabels"><stringlist><string>Time</string></stringlist></property>
+           <property name="showLegend"><bool>true</bool></property>
+           <property name="maxRedrawRate" stdset="0"><number>15</number></property>
+           <property name="bufferSize"><number>86400</number></property>
+           <property name="updateMode" stdset="0"><enum>PyDMTimePlot::AtFixedRate</enum></property>
+           <property name="timeSpan"><double>43200.000000000000000</double></property>
+           <property name="updateInterval"><double>0.500000000000000</double></property>
+           <property name="autoRangeY"><bool>true</bool></property>
+           <property name="curves"><stringlist><string>{&quot;useArchiveData&quot;: true, &quot;channel&quot;: &quot;ca://mitr:PrimaryFlow&quot;, &quot;plot_style&quot;: null, &quot;name&quot;: &quot;Primary Flow&quot;, &quot;color&quot;: &quot;forestgreen&quot;, &quot;lineStyle&quot;: 1, &quot;lineWidth&quot;: 2, &quot;symbol&quot;: null, &quot;symbolSize&quot;: 3, &quot;yAxisName&quot;: &quot;Flow&quot;, &quot;barWidth&quot;: null, &quot;upperThreshold&quot;: null, &quot;lowerThreshold&quot;: null, &quot;thresholdColor&quot;: &quot;white&quot;}</string></stringlist></property>
+          </widget>
+         </item>
+        </layout>
        </item>
       </layout>
      </widget>
