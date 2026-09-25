@@ -1,4 +1,5 @@
 # import bluesky.plans
+import os
 import bluesky.plans as bp
 from bluesky.plans import scan, count, grid_scan, rel_scan, rel_grid_scan
 from bluesky.protocols import Readable, Movable
@@ -51,6 +52,12 @@ except ModuleNotFoundError:
     )
 
 transfer_time_per_bytes = 4.1203007518796994e-08 # transfer speed in seconds per byte testing on the ASI294MM Pro
+
+
+def _ignore_demo_file_parameters(file_name, file_dir):
+    if os.environ.get("MITR_DEMO_ACTIVE") == "1":
+        print("Demo mode: file_name and file_dir are accepted for compatibility but no image files are written.")
+    return file_name, file_dir
 
 
 def _plan_estimation_context():
@@ -395,6 +402,7 @@ def tomo_scan(file_name:str,
     """
     file_name = str(file_name).strip().replace(" ","_").replace("__","_")
     file_dir = str(file_dir).strip().replace(" ","_").replace("__","_")
+    file_name, file_dir = _ignore_demo_file_parameters(file_name, file_dir)
 
     # Resolve and validate the complete trajectory before changing detector or
     # motor state.
@@ -620,6 +628,7 @@ def imaging(
 
     file_name = str(file_name).strip().replace(" ","_").replace("__","_")
     file_dir = str(file_dir).strip().replace(" ","_").replace("__","_")
+    file_name, file_dir = _ignore_demo_file_parameters(file_name, file_dir)
 
     detector = [detector]
 
@@ -854,6 +863,7 @@ def _run_imaging_scan_impl(
 
     file_name = str(file_name).strip().replace(" ","_").replace("__","_")
     file_dir = str(file_dir).strip().replace(" ","_").replace("__","_")
+    file_name, file_dir = _ignore_demo_file_parameters(file_name, file_dir)
 
     detector = [detector]
     original_pos = _scan_axis_position(motor)

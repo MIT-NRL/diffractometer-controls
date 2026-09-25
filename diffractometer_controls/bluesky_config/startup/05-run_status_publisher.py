@@ -1,11 +1,12 @@
 import atexit
+import os
 import signal
 import time
 
 from epics import caput
 
 
-STATUS_PV_PREFIX = "4dh4:Bluesky:Run:"
+STATUS_PV_PREFIX = os.environ.get("MITR_RUN_STATUS_PV_PREFIX", "4dh4:Bluesky:Run:")
 
 
 def _safe_caput(suffix, value):

@@ -15,6 +15,12 @@ class MITRDisplay(Display):
         super().__init__(parent=parent, args=args, macros=macros, ui_filename=ui_filename, **kwargs)
         self._pending_embedded_reload = set()
         self.customize_ui()
+        app = QtWidgets.QApplication.instance()
+        if bool(getattr(app, "demo_mode", False)):
+            for embedded in self.findChildren(PyDMEmbeddedDisplay):
+                filename = Path(str(getattr(embedded, "filename", "") or "")).name.lower()
+                if filename in {"reactor_power.py", "mitr_operations.ui", "reolink_cameras.py"}:
+                    embedded.setVisible(False)
         self._navigation_active = True
 
     def customize_ui(self):

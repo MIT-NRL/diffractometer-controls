@@ -1,0 +1,15 @@
+network:
+  zmq_control_addr: ${MITR_QSERVER_CONTROL_ADDR}
+  zmq_info_addr: ${MITR_QSERVER_INFO_ADDR}
+  zmq_publish_console: true
+  redis_addr: ${MITR_REDIS_ADDR}
+startup:
+  startup_dir: ${MITR_DEMO_STARTUP_DIR}
+  user_group_permissions_path: ${MITR_DEMO_PERMISSIONS}
+operation:
+  print_console_output: false
+  console_logging_level: NORMAL
+  update_existing_plans_and_devices: NEVER
+  user_group_permissions_reload: ON_REQUEST
+worker:
+  use_ipython_kernel: false

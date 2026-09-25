@@ -50,7 +50,8 @@ except ImportError:
     from toolz import partition
 
 
-frame_type_sig = EpicsSignal("4dh4:TS:FrameType", name="frame_type_sig")
+_epics_prefix = os.environ.get("MITR_EPICS_PREFIX", "4dh4:")
+frame_type_sig = EpicsSignal(f"{_epics_prefix}TS:FrameType", name="frame_type_sig")
 
 # monitor_and_count = bpp.monitor_during_decorator([he3psd0.counts])(bp.count)
 

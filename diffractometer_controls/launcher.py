@@ -1,10 +1,12 @@
 import argparse
+import atexit
 import cProfile
 import inspect
 import logging
 import os
 import platform
 import pstats
+import signal
 import sys
 import threading
 import time
@@ -111,6 +113,29 @@ def _patch_bluesky_status_reload_shutdown(cls):
     cls._dc_status_reload_shutdown_patch_applied = True
 
 
+def _shutdown_epics_client(epics_ca):
+    """Silence CA and safely handle process-exit cleanup.
+
+    PyDM's pyepics plugin can still have executor threads inside ``ca_pend_io``
+    while Qt is tearing down its widgets. Destroying the shared libca context
+    at that point is unsafe and has been observed to segfault on macOS. This
+    applies to both normal and demo launches. At process exit, leave context
+    cleanup to the operating system; this is not a mid-session disconnect.
+    """
+    if epics_ca is None:
+        return
+
+    # A pending connection task can initialize libca during shutdown. Prevent
+    # it from registering a new finalizer after we remove the existing one.
+    epics_ca.AUTO_CLEANUP = False
+    atexit.unregister(epics_ca.finalize_libca)
+
+    try:
+        epics_ca.disable_ca_messages()
+    except Exception:
+        pass
+
+
 def main():
     logger = logging.getLogger("")
     handler = logging.StreamHandler()
@@ -124,6 +149,16 @@ def main():
     _load_simple_env_file("~/.config/diffractometer-controls/control.env")
     _load_simple_env_file("~/.config/epics/network.env")
     _load_simple_env_file("~/.config/bluesky-queueserver/client-zmq.env")
+
+    # Configure Channel Access before importing PyDM/pyepics.  Child windows
+    # inherit this environment but do not receive --demo, so they attach to
+    # the already-owned stack instead of recursively starting another one.
+    demo_requested = "--demo" in sys.argv[1:]
+    demo_active = demo_requested or os.environ.get("MITR_DEMO_ACTIVE") == "1"
+    if demo_active:
+        from demo_runtime import demo_environment
+
+        os.environ.update(demo_environment())
 
     from pydm import config
 
@@ -224,6 +259,11 @@ def main():
         help="Specify the IP Address of the RE Manager to connect to.",
         default="localhost"
     )
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Run the disconnected local demonstration stack.",
+    )
     # parser.add_argument(
     #     "displayfile",
     #     help="A PyDM file to display." + "    Can be either a Qt .ui file, or a Python file.",
@@ -290,6 +330,16 @@ def main():
     )
 
     pydm_args = parser.parse_args()
+    demo_runtime = None
+    if pydm_args.demo:
+        try:
+            from demo_runtime import DemoRuntime
+
+            demo_runtime = DemoRuntime().start()
+        except Exception as exc:
+            logger.error("Unable to start disconnected demo mode: %s", exc)
+            raise SystemExit(2) from exc
+    demo_active = pydm_args.demo or os.environ.get("MITR_DEMO_ACTIVE") == "1"
     if not (os.environ.get("TILED_URI") or os.environ.get("MITR_TILED_URI")):
         os.environ["MITR_CONTROL_HOST"] = str(pydm_args.ip_addr)
 
@@ -310,11 +360,16 @@ def main():
 
     # Set default macros to connect to the 4dh4 IOC
     if macros is None:
-        macros = dict(P='4dh4:',ioc='4dh4')
+        if demo_active:
+            macros = dict(P="demo4dh4:", ioc="demo4dh4")
+        else:
+            macros = dict(P='4dh4:',ioc='4dh4')
+    print("macros",macros)
 
     # Use ordinary LAN discovery for demo IOCs and private configuration for
     # production endpoints that do not listen on standard discovery ports.
-    _configure_epics_search_addresses(pydm_args.ip_addr)
+    if not demo_active:
+        _configure_epics_search_addresses(pydm_args.ip_addr)
 
     # ic(macros)
 
@@ -330,6 +385,10 @@ def main():
         read_only=pydm_args.read_only,
         macros=macros,
         stylesheet_path=pydm_args.stylesheet,
+        qserver_control_addr=os.environ.get("MITR_QSERVER_CONTROL_ADDR"),
+        qserver_info_addr=os.environ.get("MITR_QSERVER_INFO_ADDR"),
+        document_addr=os.environ.get("MITR_DOCUMENT_ADDR"),
+        demo_mode=demo_active,
         # home_file=pydm_args.homefile,
     )
 
@@ -409,15 +468,7 @@ def main():
             return
         _shutdown_started = True
 
-        try:
-            import epics.ca as epics_ca
-        except Exception:
-            epics_ca = None
-        if epics_ca is not None:
-            try:
-                epics_ca.disable_ca_messages()
-            except Exception:
-                pass
+        _shutdown_epics_client(sys.modules.get("epics.ca"))
 
         main_window = getattr(app, "main_window", None)
         cleanup = getattr(main_window, "cleanup_before_close", None)
@@ -448,24 +499,27 @@ def main():
         if (not workers_done) or elapsed_ms > 900:
             print(f"Worker shutdown exceeded target timeout ({elapsed_ms:.0f} ms).")
 
+        # Keep the local IOC and Queue Server available until GUI polling and
+        # document workers have stopped. Cutting off the IOC first can leave
+        # pyepics setup tasks blocked in Channel Access during process exit.
+        if demo_runtime is not None:
+            demo_runtime.stop()
+
     app.aboutToQuit.connect(_on_about_to_quit)
+
+    if demo_runtime is not None:
+        def _quit_demo_from_signal(_signum, _frame):
+            app.quit()
+
+        signal.signal(signal.SIGINT, _quit_demo_from_signal)
+        signal.signal(signal.SIGTERM, _quit_demo_from_signal)
 
     exit_code = app.exec_()
 
-    try:
-        import epics.ca as epics_ca
-    except Exception:
-        epics_ca = None
+    if demo_runtime is not None:
+        demo_runtime.stop()
 
-    if epics_ca is not None:
-        try:
-            epics_ca.disable_ca_messages()
-        except Exception:
-            pass
-        try:
-            epics_ca.finalize_libca(maxtime=1.0)
-        except Exception:
-            pass
+    _shutdown_epics_client(sys.modules.get("epics.ca"))
 
     if pydm_args.profile:
         profile.disable()

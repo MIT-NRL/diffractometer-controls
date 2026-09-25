@@ -122,6 +122,8 @@ class MITRMainWindow(PyDMMainWindow):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        app_instance = QApplication.instance()
+        self.demo_mode = bool(getattr(app_instance, "demo_mode", False))
         self.macros = kwargs.get('macros', {})
         self.macros_str = ','.join(['='.join(items) for items in self.macros.items()])
         self._run_state = "IDLE"
@@ -145,8 +147,12 @@ class MITRMainWindow(PyDMMainWindow):
         self._themed_icon_targets = []
         self._bluesky_mode_actions = {}
         self._bluesky_mode_label = None
-        self._bluesky_mode_requested = get_bluesky_mode()
-        self._bluesky_mode_active = get_bluesky_active_mode()
+        if self.demo_mode:
+            self._bluesky_mode_requested = BLUESKY_MODE_PRODUCTION
+            self._bluesky_mode_active = BLUESKY_MODE_PRODUCTION
+        else:
+            self._bluesky_mode_requested = get_bluesky_mode()
+            self._bluesky_mode_active = get_bluesky_active_mode()
         self._bluesky_mode_channels = []
         self._focus_online_proc = None
         self._focus_online_session_id = None
@@ -165,12 +171,15 @@ class MITRMainWindow(PyDMMainWindow):
         from application import MITRApplication
         app = MITRApplication.instance()
         self.re_manager_api = app.re_manager_api
+        self._focus_qs_control_addr = getattr(app, "qserver_control_addr", self._focus_qs_control_addr)
+        self._focus_qs_info_addr = getattr(app, "qserver_info_addr", self._focus_qs_info_addr)
         self.adaptive_focus_plan_started.connect(
             self._on_adaptive_focus_plan_started,
             QtCore.Qt.QueuedConnection,
         )
         self.customize_ui()
-        self._start_adaptive_focus_listener()
+        if not self.demo_mode:
+            self._start_adaptive_focus_listener()
 
 
     def customize_ui(self):
@@ -180,14 +189,28 @@ class MITRMainWindow(PyDMMainWindow):
         self.setWindowIcon(QtGui.QIcon(icon_path))
         re_manager_api = self.re_manager_api
 
+        if self.demo_mode:
+            demo_banner = QLabel("  DEMO — NO HARDWARE  ", self)
+            demo_banner.setObjectName("demoModeBanner")
+            demo_banner.setAlignment(Qt.AlignCenter)
+            demo_banner.setStyleSheet(
+                "QLabel { background: #9b1c1c; color: white; font-weight: bold; "
+                "padding: 7px 14px; border-radius: 3px; }"
+            )
+            demo_banner.setToolTip("Disconnected analytic simulation; no beamline hardware is reachable.")
+            self.ui.navbar.addWidget(demo_banner)
+            self._demo_banner = demo_banner
+
         if self._should_show_heartbeat_indicator():
             bar = self.statusBar()
             heartbeat_indicator = PyDMByteIndicator(init_channel=f"ca://{self.macros['P']}HEARTBEAT")
             heartbeat_indicator.labels = ['IOC Heartbeat']
             heartbeat_indicator.labelPosition = 2
-            self._setup_bluesky_mode_indicator(bar)
+            if not self.demo_mode:
+                self._setup_bluesky_mode_indicator(bar)
             bar.addPermanentWidget(heartbeat_indicator)
-            self._setup_bluesky_mode_channels()
+            if not self.demo_mode:
+                self._setup_bluesky_mode_channels()
 
         gear_icon = self._make_themed_icon('fa6s.gear')
         # controls = PyDMRelatedDisplayButton(filename="/home/mitr_4dh4/EPICS/IOCs/4dh4/4dh4App/op/adl/ioc_motors.adl")
@@ -233,9 +256,10 @@ class MITRMainWindow(PyDMMainWindow):
         self._register_themed_icon(ioc_button, 'fa6s.server')
 
         # Add the button to the navbar
-        self.ui.navbar.addWidget(controlsAll)
-        self.ui.navbar.addWidget(camera_button)
-        self.ui.navbar.addWidget(ioc_button)
+        if not self.demo_mode:
+            self.ui.navbar.addWidget(controlsAll)
+            self.ui.navbar.addWidget(camera_button)
+            self.ui.navbar.addWidget(ioc_button)
         self._setup_run_status_widget(self.ui.navbar)
 
         # controlsAll = CustomRelatedDisplayButtonWrapper(
@@ -484,6 +508,9 @@ class MITRMainWindow(PyDMMainWindow):
         launch_neutron_imaging_action.triggered.connect(
             self.launch_neutron_imaging_gui
         )
+        if self.demo_mode:
+            launch_focus_program_action.setVisible(False)
+            launch_neutron_imaging_action.setVisible(False)
 
         # Add a "Bluesky Controls" submenu
         bluesky_menu = control_system_menu.addMenu("Bluesky Controls")
@@ -609,6 +636,8 @@ class MITRMainWindow(PyDMMainWindow):
         ))
         self._register_themed_icon(controls_action, 'fa6s.gear')
         control_system_menu.addAction(controls_action)
+        if self.demo_mode:
+            control_system_menu.menuAction().setVisible(False)
 
     def _should_show_heartbeat_indicator(self):
         app = QApplication.instance()
@@ -828,7 +857,9 @@ class MITRMainWindow(PyDMMainWindow):
             pass
 
     def _sync_bluesky_mode_actions(self):
-        current_mode = getattr(self, "_bluesky_mode_requested", get_bluesky_mode())
+        current_mode = getattr(self, "_bluesky_mode_requested", None)
+        if current_mode is None:
+            current_mode = get_bluesky_mode()
         for mode, action in getattr(self, "_bluesky_mode_actions", {}).items():
             was_blocked = action.blockSignals(True)
             action.setChecked(mode == current_mode)

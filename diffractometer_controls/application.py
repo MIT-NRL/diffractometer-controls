@@ -310,19 +310,40 @@ class MITRApplication(PyDMApplication):
         console_cls._dc_apply_console_palette = _apply_console_palette
         console_cls._dc_theme_refresh_patch_applied = True
 
-    def __init__(self, ipaddress: str = 'localhost', ui_file: str = "main_screen.ui", use_main_window=False, *args, **kwargs):
+    def __init__(
+        self,
+        ipaddress: str = "localhost",
+        ui_file: str = "main_screen.ui",
+        use_main_window=False,
+        *args,
+        qserver_control_addr=None,
+        qserver_info_addr=None,
+        document_addr=None,
+        demo_mode=False,
+        **kwargs,
+    ):
         # Instantiate the parent class
         # (*ui_file* and *use_main_window* let us render the window here instead)
 
         # Create the RunEngineClient as part of the application attributes
         # These attributes need to be defined before the super().__init__ call so that the main window can access them
         zmq_public_key = os.environ.get("QSERVER_ZMQ_PUBLIC_KEY") or None
-        self.re_client = RunEngineClient(zmq_control_addr=f'tcp://{ipaddress}:60615', zmq_info_addr=f'tcp://{ipaddress}:60625')
-        self.re_dispatcher = RemoteDispatcher(f'{ipaddress}:5568')
+        qserver_control_addr = qserver_control_addr or f"tcp://{ipaddress}:60615"
+        qserver_info_addr = qserver_info_addr or f"tcp://{ipaddress}:60625"
+        document_addr = document_addr or f"tcp://{ipaddress}:5568"
+        self.demo_mode = bool(demo_mode)
+        self.qserver_control_addr = str(qserver_control_addr)
+        self.qserver_info_addr = str(qserver_info_addr)
+        self.document_addr = str(document_addr)
+        self.re_client = RunEngineClient(
+            zmq_control_addr=self.qserver_control_addr,
+            zmq_info_addr=self.qserver_info_addr,
+        )
+        self.re_dispatcher = RemoteDispatcher(self.document_addr.removeprefix("tcp://"))
         self.document_dispatcher = DocumentDispatcherService(self.re_dispatcher)
         self.re_manager_api = REManagerAPI(
-            zmq_control_addr=f'tcp://{ipaddress}:60615',
-            zmq_info_addr=f'tcp://{ipaddress}:60625',
+            zmq_control_addr=self.qserver_control_addr,
+            zmq_info_addr=self.qserver_info_addr,
             zmq_public_key=zmq_public_key,
         )
         self._ipaddress = str(ipaddress)
@@ -435,7 +456,10 @@ class MITRApplication(PyDMApplication):
             args.append("--")
             args.extend(extra_args)
 
-        subprocess.Popen(args, shell=False, cwd=str(ui_dir))
+        child_env = dict(os.environ)
+        if self.demo_mode:
+            child_env["MITR_DEMO_STACK_OWNER"] = "0"
+        subprocess.Popen(args, shell=False, cwd=str(ui_dir), env=child_env)
 
 
     # Redefine the make_main_window method to use the MITRMainWindow class
