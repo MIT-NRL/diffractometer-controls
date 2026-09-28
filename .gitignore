@@ -157,3 +157,6 @@ diffractometer_controls/bluesky_config/startup/existing_plans_and_devices.yaml
 
 # Local editor settings
 .vscode/settings.json
+
+# Local development artifacts
+/artifacts/
