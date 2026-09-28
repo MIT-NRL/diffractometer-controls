@@ -68,6 +68,102 @@ def _format_display_value(value, *, compact=False):
     return str(value)
 
 
+def _humanize_choice_label(value):
+    return str(value or "").replace("_", " ").strip()
+
+
+def _is_generic_device_group(group_name):
+    """Return whether a QueueServer type is only a broad validation bucket."""
+    normalized = str(group_name or "").strip().lower().replace(" ", "_")
+    return normalized.endswith(("motors", "devices", "detectors", "readables", "signals"))
+
+
+def _insert_choice_group(tree, path, entry):
+    node = tree
+    for segment in path[:-1]:
+        child = node.setdefault(str(segment), {})
+        if not isinstance(child, dict):
+            return
+        node = child
+    leaves = node.setdefault(str(path[-1]), [])
+    if isinstance(leaves, list) and entry not in leaves:
+        leaves.append(entry)
+
+
+def _organize_device_choice_groups(choice_groups):
+    """Build parent-device menus while leaving standalone choices at root.
+
+    Dotted QueueServer names are grouped by their component path. Camera-axis
+    aliases are displayed beneath their owning camera, and explicit family
+    types such as ``HE3_PSD`` become device-family menus.
+    """
+    root_choices = []
+    grouped_choices = {}
+    display_names = {}
+
+    for raw_group_name, raw_values in dict(choice_groups or {}).items():
+        group_name = str(raw_group_name)
+        is_camera_group = group_name.lower().replace(" ", "_") == "cam_advanced"
+        explicit_family = not _is_generic_device_group(group_name) and not is_camera_group
+        for raw_value in list(raw_values or []):
+            value = str(raw_value)
+            detector = RePlanEditorTable._camera_axis_detector(value)
+            suffix = RePlanEditorTable._camera_axis_suffix(value)
+            if detector and suffix and (is_camera_group or "cam" in detector.lower()):
+                display_name = RePlanEditorTable._camera_axis_display_name(value)
+                display_names[value] = display_name
+                _insert_choice_group(
+                    grouped_choices,
+                    [detector, "adv"],
+                    (_humanize_choice_label(suffix), value, display_name),
+                )
+                continue
+
+            if "." in value:
+                components = [component for component in value.split(".") if component]
+                if len(components) > 1:
+                    display_names[value] = value
+                    _insert_choice_group(
+                        grouped_choices,
+                        components[:-1],
+                        (_humanize_choice_label(components[-1]), value, value),
+                    )
+                    continue
+
+            if explicit_family:
+                display_names[value] = value
+                _insert_choice_group(
+                    grouped_choices,
+                    [_humanize_choice_label(group_name)],
+                    (value, value, value),
+                )
+                continue
+
+            if value not in root_choices:
+                root_choices.append(value)
+            display_names[value] = value
+
+    return root_choices, grouped_choices, display_names
+
+
+def _normalize_choice_tree(entries):
+    if isinstance(entries, dict):
+        return {
+            str(name): _normalize_choice_tree(values)
+            for name, values in entries.items()
+            if values
+        }
+    normalized = []
+    for entry in entries or []:
+        if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+            label, value = entry[:2]
+            display_text = entry[2] if len(entry) >= 3 else label
+        else:
+            label = value = display_text = entry
+        normalized.append((str(label), str(value), str(display_text)))
+    return normalized
+
+
 class _DynamicChoicesComboBox(QComboBox):
     """ComboBox that emits a signal before opening the popup list."""
 
@@ -88,23 +184,7 @@ class _GroupedChoicesComboBox(_DynamicChoicesComboBox):
         self._choice_groups = {}
 
     def set_choice_groups(self, groups):
-        def _normalize(entries):
-            if isinstance(entries, dict):
-                return {
-                    str(name): _normalize(values)
-                    for name, values in entries.items()
-                    if values
-                }
-            normalized = []
-            for entry in entries or []:
-                if isinstance(entry, (list, tuple)) and len(entry) == 2:
-                    label, value = entry
-                else:
-                    label = value = entry
-                normalized.append((str(label), str(value)))
-            return normalized
-
-        self._choice_groups = _normalize(groups or {})
+        self._choice_groups = _normalize_choice_tree(groups or {})
 
     def _select_value(self, value, *, display_text=None):
         value = str(value)
@@ -148,18 +228,30 @@ class _GroupedChoicesComboBox(_DynamicChoicesComboBox):
                 if isinstance(group_entries, dict):
                     _add_submenus(sub_menu, group_entries)
                     continue
-                for label, value in group_entries:
+                for label, value, display_text in group_entries:
                     action = sub_menu.addAction(label)
                     action.setData(value)
                     action.triggered.connect(
-                        lambda _checked=False, v=value, label=label: self._select_value(
-                            v, display_text=label
+                        lambda _checked=False, v=value, display=display_text: self._select_value(
+                            v, display_text=display
                         )
                     )
 
         _add_submenus(menu, self._choice_groups)
         execute_menu = getattr(menu, "exec_", None) or menu.exec
         execute_menu(self.mapToGlobal(self.rect().bottomLeft()))
+
+
+class _PersistentCheckableMenu(QMenu):
+    """QMenu that keeps a checkable leaf menu open while values are toggled."""
+
+    def mouseReleaseEvent(self, event):
+        action = self.actionAt(event.pos())
+        if action is not None and action.isCheckable() and action.menu() is None:
+            action.toggle()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 class _CheckableChoicesComboBox(_DynamicChoicesComboBox):
@@ -174,6 +266,8 @@ class _CheckableChoicesComboBox(_DynamicChoicesComboBox):
         if line_edit is not None:
             line_edit.setReadOnly(True)
         self._block_popup_hide = False
+        self._choice_groups = {}
+        self._root_choices = []
         self.view().viewport().installEventFilter(self)
         self._refresh_display_text()
 
@@ -228,6 +322,58 @@ class _CheckableChoicesComboBox(_DynamicChoicesComboBox):
         finally:
             del blocker
         self.set_checked_items(current, emit_signal=False)
+
+    def set_choice_groups(self, groups, *, root_choices=None):
+        self._choice_groups = _normalize_choice_tree(groups or {})
+        self._root_choices = [str(value) for value in list(root_choices or [])]
+
+    def _set_value_checked(self, value, checked):
+        value = str(value)
+        for row in range(self.model().rowCount()):
+            item = self.model().item(row)
+            if item is not None and str(item.text()) == value:
+                item.setCheckState(QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked)
+                break
+        self._refresh_display_text()
+        self.signal_selection_changed.emit()
+
+    def showPopup(self):
+        self.signal_popup_about_to_show.emit()
+        if not self._choice_groups:
+            return QComboBox.showPopup(self)
+
+        selected = set(self.checked_items())
+        menu = _PersistentCheckableMenu(self)
+
+        def _add_checkable_action(parent_menu, label, value):
+            action = parent_menu.addAction(str(label))
+            action.setData(str(value))
+            action.setCheckable(True)
+            action.setChecked(str(value) in selected)
+            action.toggled.connect(
+                lambda checked, selected_value=str(value): self._set_value_checked(
+                    selected_value, checked
+                )
+            )
+
+        for value in self._root_choices:
+            _add_checkable_action(menu, value, value)
+        if self._root_choices and self._choice_groups:
+            menu.addSeparator()
+
+        def _add_submenus(parent_menu, entries):
+            for group_name, group_entries in entries.items():
+                sub_menu = _PersistentCheckableMenu(str(group_name), parent_menu)
+                parent_menu.addMenu(sub_menu)
+                if isinstance(group_entries, dict):
+                    _add_submenus(sub_menu, group_entries)
+                    continue
+                for label, value, _display_text in group_entries:
+                    _add_checkable_action(sub_menu, label, value)
+
+        _add_submenus(menu, self._choice_groups)
+        execute_menu = getattr(menu, "exec_", None) or menu.exec
+        execute_menu(self.mapToGlobal(self.rect().bottomLeft()))
 
     def set_checked_items(self, values, *, emit_signal=True):
         selected = {str(v) for v in list(values or [])}
@@ -441,7 +587,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         detector_name = cls._camera_axis_detector(value)
         axis_name = cls._camera_axis_suffix(value)
         if detector_name and axis_name:
-            return f"{detector_name}.cam.{axis_name}"
+            return f"{detector_name}.adv.{axis_name}"
         return str(value or "")
 
     def _select_detector_for_camera_axis(self, axis, advanced_axis_values):
@@ -1230,7 +1376,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         self.setItem(row, 1, check_item)
 
         # Determine choices from parameter metadata. Only create dropdowns when
-        # the plan/decorator provides an explicit 'devices' or 'values' list for
+        # the plan/decorator provides explicit 'devices', 'values', or enum choices for
         # this parameter. Prefer metadata from the decorator (`meta`) and then
         # fall back to the model-provided allowed-plan parameters.
         meta = self._get_param_meta(p_name) or {}
@@ -1271,6 +1417,10 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         if values_field is None:
             # Check under 'annotation' in item parameter metadata
             values_field = (pmeta.get("annotation") or {}).get("values") if isinstance(pmeta, dict) else None
+
+        enums_field = meta.get("enums") if isinstance(meta, dict) else None
+        if enums_field is None and isinstance(pmeta, dict):
+            enums_field = pmeta.get("enums") or (pmeta.get("annotation") or {}).get("enums")
 
         devices_field = None
         if isinstance(meta, dict):
@@ -1417,11 +1567,23 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                 )
             )
 
-        # Build choices preferentially from explicit 'values', then from any
-        # declared devices. Preserve named device groups so the GUI can render
-        # a side menu instead of flattening advanced camera controls.
+        # Build choices preferentially from explicit 'values', then enum values,
+        # then declared devices. Preserve named device groups so the GUI can
+        # render a side menu instead of flattening advanced camera controls.
         if has_values_meta:
             choices = [str(x) for x in values_field]
+        elif isinstance(enums_field, dict) and enums_field:
+            choices = list(
+                dict.fromkeys(
+                    str(choice)
+                    for enum_values in enums_field.values()
+                    for choice in (
+                        enum_values
+                        if isinstance(enum_values, (list, tuple))
+                        else [enum_values]
+                    )
+                )
+            )
         else:
             group_source = (
                 devices_field
@@ -1446,6 +1608,16 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                     + _extract_devices_field(pmeta_devices_field)
                 )
             choices = list(dict.fromkeys(choices)) or None
+
+        root_device_choices = list(choices or [])
+        organized_choice_groups = {}
+        grouped_display_names = {}
+        if choice_groups:
+            (
+                root_device_choices,
+                organized_choice_groups,
+                grouped_display_names,
+            ) = _organize_device_choice_groups(choice_groups)
 
         if self._is_file_dir_param(p_name):
             combo = _DynamicChoicesComboBox()
@@ -1580,6 +1752,10 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         elif choices and _is_multi_select_param():
             combo = _CheckableChoicesComboBox()
             combo.set_choices(choices)
+            combo.set_choice_groups(
+                organized_choice_groups,
+                root_choices=root_device_choices,
+            )
             combo.setEnabled(widget_editable)
             combo.setToolTip(description)
             combo.setProperty("dc_base_tooltip", description)
@@ -1671,20 +1847,11 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             combo.currentIndexChanged.connect(_on_bool_change)
             self.setCellWidget(row, 2, combo)
         elif choices:
-            camera_advanced_choices = {}
             cam_advanced_group = choice_groups.get("Cam_advanced") or choice_groups.get("Cam advanced")
             camera_advanced_values = list(cam_advanced_group or [])
-            if p_name == "motor" and cam_advanced_group:
-                # Camera leaves belong in a side menu; standard motor choices
-                # remain in the normal combobox list.
-                choices = [
-                    value
-                    for group_name, group_values in choice_groups.items()
-                    if group_name not in ("Cam_advanced", "Cam advanced")
-                    for value in group_values
-                ]
-                camera_advanced_choices = {"Cam advanced": cam_advanced_group}
+            if organized_choice_groups:
                 combo = _GroupedChoicesComboBox()
+                combo.set_choice_groups(organized_choice_groups)
             else:
                 combo = _DynamicChoicesComboBox()
             # Keep an explicit empty first option that supports custom typing.
@@ -1692,7 +1859,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             combo.setEditable(allow_custom_entry)
             combo.setInsertPolicy(QComboBox.NoInsert)
             combo.addItem("")
-            combo.addItems(choices)
+            combo.addItems(root_device_choices)
             custom_index = 0
             le = combo.lineEdit()
             if le is not None:
@@ -1707,26 +1874,6 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                 # Start implicit/default values in gray, but switch to normal style
                 # as soon as the user opens the menu.
                 self._set_combo_implicit_style(_combo, False)
-                if camera_advanced_choices and isinstance(_combo, _GroupedChoicesComboBox):
-                    _combo.set_choice_groups(
-                        {
-                            group_name: {
-                                detector_name: [
-                                    (f"{detector_name}.cam.{axis_name}", value)
-                                    for value in group_values
-                                    if self._camera_axis_detector(value) == detector_name
-                                    for axis_name in [self._camera_axis_suffix(value)]
-                                    if axis_name
-                                ]
-                                for detector_name in dict.fromkeys(
-                                    self._camera_axis_detector(value)
-                                    for value in group_values
-                                    if self._camera_axis_detector(value)
-                                )
-                            }
-                            for group_name, group_values in camera_advanced_choices.items()
-                        }
-                    )
 
             cur_text = None
             if is_value_set and (value != inspect.Parameter.empty):
@@ -1734,15 +1881,12 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             elif default_value != inspect.Parameter.empty:
                 cur_text = str(default_value)
             has_cur_text = cur_text is not None and bool(str(cur_text).strip())
-            if has_cur_text and cur_text in choices:
-                combo.setCurrentIndex(choices.index(cur_text) + 1)
-            elif (
-                isinstance(combo, _GroupedChoicesComboBox)
-                and cur_text in camera_advanced_values
-            ):
+            if has_cur_text and cur_text in root_device_choices:
+                combo.setCurrentIndex(root_device_choices.index(cur_text) + 1)
+            elif isinstance(combo, _GroupedChoicesComboBox) and cur_text in grouped_display_names:
                 combo._select_value(
                     cur_text,
-                    display_text=self._camera_axis_display_name(cur_text),
+                    display_text=grouped_display_names[cur_text],
                 )
             else:
                 # Keep the explicit blank first item selected unless the model

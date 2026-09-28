@@ -51,6 +51,23 @@ class SimHE3PSD(Device):
     counts = Cpt(Signal, value=np.zeros(350, dtype=float), kind="hinted")
     total_counts = Cpt(Signal, value=0.0, kind="hinted")
 
+    detector_type = "he3psd"
+    plan_editor_group = "Simulated_HE3_PSD"
+    live_plot_signals = {
+        "counts": {
+            "role": "profile",
+            "label": "PSD Counts",
+            "units": "counts",
+            "transport": "document",
+        },
+        "total_counts": {
+            "role": "summary",
+            "label": "Total Counts",
+            "units": "counts",
+            "transport": "document",
+        },
+    }
+
     def __init__(
         self,
         *args,
@@ -205,6 +222,158 @@ sim_he3psd1 = SimHE3PSD(
 )
 
 
+class SimUSBCTR08Scaler(Device):
+    """In-memory CTR-08 scaler simulator with live accumulated counts.
+
+    Its read keys and component names match :class:`USBCTR08Scaler`. Because
+    these are soft Ophyd Signals rather than EPICS PVs, scalar plans publish
+    their intermediate changes through Bluesky monitor streams.
+    """
+
+    scalar_plan_compatible = True
+    detector_type = "usbctr08"
+    scalar_channels = (
+        "clock_counts",
+        "beam_monitor",
+        "he3_tube",
+        "counter_3",
+        "counter_4",
+        "counter_5",
+        "counter_6",
+        "counter_7",
+    )
+    live_plot_signals = {
+        "clock_counts": {
+            "role": "signal",
+            "label": "CTR0 - Clock",
+            "units": "counts",
+            "transport": "document",
+        },
+        "beam_monitor": {
+            "role": "signal",
+            "label": "CTR1 - Beam Monitor",
+            "units": "counts",
+            "transport": "document",
+        },
+        "he3_tube": {
+            "role": "signal",
+            "label": "CTR2 - He-3 Tube",
+            "units": "counts",
+            "transport": "document",
+        },
+        **{
+            f"counter_{channel}": {
+                "role": "signal",
+                "label": f"CTR{channel}",
+                "units": "counts",
+                "transport": "document",
+            }
+            for channel in range(3, 8)
+        },
+        "time": {
+            "role": "elapsed_time",
+            "label": "Elapsed Time",
+            "units": "s",
+            "transport": "document",
+        },
+    }
+
+    count = Cpt(Signal, value=0, kind="omitted")
+    acquire_time = Cpt(Signal, value=2.0, kind="config")
+    clock_counts = Cpt(Signal, value=0, kind="normal")
+    beam_monitor = Cpt(Signal, value=0, kind="hinted")
+    he3_tube = Cpt(Signal, value=0, kind="hinted")
+    counter_3 = Cpt(Signal, value=0, kind="normal")
+    counter_4 = Cpt(Signal, value=0, kind="normal")
+    counter_5 = Cpt(Signal, value=0, kind="normal")
+    counter_6 = Cpt(Signal, value=0, kind="normal")
+    counter_7 = Cpt(Signal, value=0, kind="normal")
+    time = Cpt(Signal, value=0.0, kind="normal")
+
+    def __init__(
+        self,
+        *args,
+        beam_monitor_rate=2400.0,
+        he3_tube_rate=850.0,
+        update_period=0.1,
+        clock_frequency=10_000_000.0,
+        random_seed=37,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self._beam_monitor_rate = float(beam_monitor_rate)
+        self._he3_tube_rate = float(he3_tube_rate)
+        self._update_period = max(0.02, float(update_period))
+        self._clock_frequency = float(clock_frequency)
+        self._rng = np.random.default_rng(int(random_seed))
+        self._trigger_thread = None
+        self._trigger_status = None
+        self._stop_requested = threading.Event()
+
+    def _reset_counts(self):
+        self.clock_counts.put(0)
+        self.beam_monitor.put(0)
+        self.he3_tube.put(0)
+        for attr in ("counter_3", "counter_4", "counter_5", "counter_6", "counter_7"):
+            getattr(self, attr).put(0)
+        self.time.put(0.0)
+
+    def _acquire_once(self, status):
+        target = max(0.0, float(self.acquire_time.get()))
+        started = time.monotonic()
+        previous_elapsed = 0.0
+        beam_counts = 0
+        tube_counts = 0
+        try:
+            while not self._stop_requested.is_set():
+                elapsed = min(target, max(0.0, time.monotonic() - started))
+                interval = max(0.0, elapsed - previous_elapsed)
+                if interval:
+                    beam_counts += int(self._rng.poisson(self._beam_monitor_rate * interval))
+                    tube_counts += int(self._rng.poisson(self._he3_tube_rate * interval))
+                    self.clock_counts.put(int(round(self._clock_frequency * elapsed)))
+                    self.beam_monitor.put(beam_counts)
+                    self.he3_tube.put(tube_counts)
+                    self.time.put(float(elapsed))
+                    previous_elapsed = elapsed
+                if elapsed >= target:
+                    break
+                time.sleep(min(self._update_period, max(0.0, target - elapsed)))
+        except Exception as ex:
+            self.count.put(0)
+            status.set_exception(ex)
+            return
+
+        self.count.put(0)
+        status.set_finished()
+
+    def trigger(self):
+        if self._trigger_status is not None and not self._trigger_status.done:
+            raise RuntimeError(f"{self.name} is already counting")
+        self._stop_requested.clear()
+        self._reset_counts()
+        self.count.put(1)
+        status = Status()
+        self._trigger_status = status
+        self._trigger_thread = threading.Thread(
+            target=self._acquire_once,
+            args=(status,),
+            name=f"{self.name}-trigger",
+            daemon=True,
+        )
+        self._trigger_thread.start()
+        return status
+
+    def stop(self, *, success=False):
+        self._stop_requested.set()
+        self.count.put(0)
+        return super().stop(success=success)
+
+
+sim_usbctr = SimUSBCTR08Scaler(name="sim_usbctr")
+register_device("sim_usbctr", depth=2)
+
+
 # End-to-end adaptive-focus simulation. These names appear as selectable
 # detector/motor devices in the Queue Server plan editor.
 sim_focus_motor = SimulatedFocusMotor(name="sim_focus_motor", value=0.0)
@@ -220,6 +389,8 @@ for _camera_axis_attr in ("acquire_time",):
     _camera_axis_name = f"sim_focus_cam_{_camera_axis_attr}"
     _camera_axis = getattr(sim_focus_cam.cam, _camera_axis_attr)
     _camera_axis.kind = "hinted"
+    # Available as an imaging scan axis, but not as a scalar detector.
+    _camera_axis.scalar_plan_hidden = True
     globals()[_camera_axis_name] = _camera_axis
     register_device(_camera_axis_name, depth=1)
 sd.baseline.append(sim_focus_motor)

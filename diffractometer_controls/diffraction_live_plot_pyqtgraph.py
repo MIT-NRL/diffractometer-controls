@@ -1,3 +1,10 @@
+"""Primary diffraction plotting backend.
+
+PyQtGraph is used for live detector updates because Matplotlib was too slow for
+the PSD update rate. The Matplotlib widget is retained only as a compatibility
+fallback when PyQtGraph is unavailable.
+"""
+
 import math
 
 import numpy as np
@@ -12,6 +19,21 @@ _PROFILE_COLOR_STOPS = {
     "magma": [(0, 0, 4), (60, 15, 112), (140, 41, 129), (221, 73, 104), (252, 253, 191)],
     "turbo": [(48, 18, 59), (40, 120, 142), (70, 190, 111), (247, 209, 61), (165, 0, 38)],
 }
+
+# Categorical colors for independent detector/scalar series. Continuous maps
+# are reserved for PSD profile history, where color represents scan progress.
+_CATEGORICAL_SERIES_COLORS = (
+    "#1f77b4",
+    "#ff7f0e",
+    "#2ca02c",
+    "#d62728",
+    "#9467bd",
+    "#8c564b",
+    "#e377c2",
+    "#7f7f7f",
+    "#bcbd22",
+    "#17becf",
+)
 
 
 def _coerce_array(value):
@@ -166,24 +188,33 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
         self._profile_plot.setMinimumHeight(300)
         self._summary_plot.setMinimumHeight(180)
         self._peak_plot.setMinimumHeight(180)
-        self._profile_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self._summary_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self._peak_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # GraphicsView has a large preferred width. Ignore that horizontal
+        # hint so the two lower PSD plots always fit inside the current tab.
+        for plot_widget in (
+            self._profile_plot,
+            self._summary_plot,
+            self._peak_plot,
+        ):
+            plot_widget.setMinimumWidth(0)
+            plot_widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
 
-        grid = QGridLayout()
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(10)
-        grid.addWidget(self._profile_plot, 0, 0, 1, 2)
-        grid.addWidget(self._summary_plot, 1, 0)
-        grid.addWidget(self._peak_plot, 1, 1)
+        self._plot_grid = QGridLayout()
+        self._plot_grid.setContentsMargins(0, 0, 0, 0)
+        self._plot_grid.setHorizontalSpacing(10)
+        self._plot_grid.setVerticalSpacing(10)
+        self._plot_grid.setColumnStretch(0, 1)
+        self._plot_grid.setColumnStretch(1, 1)
+        self._plot_grid.setRowStretch(0, 2)
+        self._plot_grid.setRowStretch(1, 1)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         layout.addWidget(self._title_label)
-        layout.addLayout(grid)
+        layout.addLayout(self._plot_grid)
         self.setLayout(layout)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self._profile_plot_item = self._profile_plot.getPlotItem()
         self._summary_plot_item = self._summary_plot.getPlotItem()
@@ -199,6 +230,7 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
         self._summary_y_label = ""
         self._peak_y_label = ""
         self._run_title = ""
+        self._plot_mode = "1d"
 
         self._profile_history = {}
         self._live_profile_lines = {}
@@ -233,6 +265,8 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
     @QtCore.Slot(object)
     def reset(self, config=None):
         config = dict(config or {})
+        plot_mode = str(config.get("plot_mode", "1d") or "1d").strip().lower()
+        self._plot_mode = "scalar" if plot_mode == "scalar" else "1d"
         self._run_title = str(config.get("run_title", "") or "")
         self._profile_title = str(config.get("profile_title", "Current Spectrum") or "Current Spectrum")
         self._summary_title = str(config.get("summary_title", "Total Counts") or "Total Counts")
@@ -265,11 +299,59 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
         self._peak_y.clear()
         self._peak_yerr.clear()
 
+        self._apply_plot_mode()
         self._apply_theme_from_palette()
         self._apply_plot_metadata()
         self._set_plot_x_limits(self._profile_plot_item, self._profile_x_limits)
         self._set_plot_x_limits(self._summary_plot_item, self._summary_x_limits)
         self._set_plot_x_limits(self._peak_plot_item, self._peak_x_limits)
+
+    def _apply_plot_mode(self):
+        for plot_widget in (self._profile_plot, self._summary_plot, self._peak_plot):
+            self._plot_grid.removeWidget(plot_widget)
+
+        if self._plot_mode == "scalar":
+            self._profile_plot.hide()
+            self._peak_plot.hide()
+            self._summary_plot.show()
+            self._summary_plot.setMinimumHeight(480)
+            self._plot_grid.addWidget(self._summary_plot, 0, 0, 2, 2)
+            self._schedule_plot_grid_reflow()
+            return
+
+        self._summary_plot.setMinimumHeight(180)
+        self._profile_plot.show()
+        self._summary_plot.show()
+        self._peak_plot.show()
+        self._plot_grid.addWidget(self._profile_plot, 0, 0, 1, 2)
+        self._plot_grid.addWidget(self._summary_plot, 1, 0)
+        self._plot_grid.addWidget(self._peak_plot, 1, 1)
+        self._schedule_plot_grid_reflow()
+
+    def _schedule_plot_grid_reflow(self):
+        """Discard geometry cached by the previous one/three-plot layout."""
+        self._plot_grid.invalidate()
+        outer_layout = self.layout()
+        if outer_layout is not None:
+            outer_layout.invalidate()
+            outer_layout.activate()
+        self.updateGeometry()
+        QtCore.QTimer.singleShot(0, self._finish_plot_grid_reflow)
+
+    def _finish_plot_grid_reflow(self):
+        if not self.isVisible():
+            return
+        self._plot_grid.invalidate()
+        outer_layout = self.layout()
+        if outer_layout is not None:
+            outer_layout.activate()
+        for plot_widget in (
+            self._profile_plot,
+            self._summary_plot,
+            self._peak_plot,
+        ):
+            plot_widget.updateGeometry()
+            plot_widget.viewport().update()
 
     @QtCore.Slot(str, object, object)
     def set_profile(self, detector_name, x_values, y_values):
@@ -349,6 +431,7 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
             fixed_limits=self._summary_x_limits,
         )
         self._autoscale_y(self._summary_plot_item)
+        self._update_legends()
 
     @QtCore.Slot(str, object, object)
     def update_live_profile(self, detector_name, x_values, y_values):
@@ -449,6 +532,7 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
                 self._restyle_profile_history(detector_name)
         for detector_name in tuple(self._summary_live_lines.keys()):
             self._remove_live_summary_line(detector_name)
+        self._update_legends()
 
     def changeEvent(self, event):
         super().changeEvent(event)
@@ -500,13 +584,18 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
         legend = getattr(self, legend_attr, None)
         if legend is not None:
             try:
-                legend.scene().removeItem(legend)
+                legend.clear()
             except Exception:
                 pass
         plot_item.clear()
         plot_item.showGrid(x=True, y=True, alpha=0.25)
         plot_item.getViewBox().enableAutoRange(x=False, y=True)
-        setattr(self, legend_attr, plot_item.addLegend(offset=(12, 12)))
+        # PlotItem caches its legend. Reuse an attached legend; if an older
+        # reset detached it, clear the stale cache before creating a new one.
+        if legend is None or legend.scene() is None:
+            plot_item.legend = None
+            legend = plot_item.addLegend(offset=(12, 12))
+        setattr(self, legend_attr, legend)
 
     def _apply_plot_metadata(self):
         self._title_label.setText(self._run_title)
@@ -609,7 +698,9 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
             if history
         }
         self._refresh_legend(self._profile_legend, profile_items)
-        self._refresh_legend(self._summary_legend, self._summary_lines)
+        summary_items = dict(self._summary_live_lines)
+        summary_items.update(self._summary_lines)
+        self._refresh_legend(self._summary_legend, summary_items)
         self._refresh_legend(self._peak_legend, self._peak_lines)
         self._apply_theme_from_palette()
 
@@ -693,7 +784,9 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
             age = 1.0
         else:
             age = index / (total - 1)
-        alpha = 0.95 if is_latest else 0.35 + (0.15 * color_pos)
+        # Older spectra remain clearly readable; hue and line width still
+        # communicate scan history without fading early points into the grid.
+        alpha = 0.95 if is_latest else 0.75 + (0.10 * color_pos)
         width = 1.5 if is_latest else 0.8 + (0.3 * age)
         color = _color_to_qcolor(color_map(color_pos), alpha=alpha)
         pen = pg.mkPen(color=color, width=width)
@@ -854,12 +947,10 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
         if color is not None:
             return color
 
-        color_map = self._profile_colormaps.get(detector_name)
-        if color_map is None:
-            color_map = self._select_profile_colormap(detector_name)
-            self._profile_colormaps[detector_name] = color_map
-        rgba = color_map(0.82)
-        color = _rgba_to_hex(rgba)
+        if detector_name not in self._detector_order:
+            self._detector_order.append(detector_name)
+        index = self._detector_order.index(detector_name)
+        color = _CATEGORICAL_SERIES_COLORS[index % len(_CATEGORICAL_SERIES_COLORS)]
         self._detector_series_colors[detector_name] = color
         return color
 

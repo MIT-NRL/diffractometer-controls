@@ -1,12 +1,9 @@
-# import bluesky.plans
-import bluesky.plan_patterns
-import bluesky.plans as bp
-from bluesky.plans import scan, count, grid_scan, rel_scan, rel_grid_scan
-from bluesky_queueserver import parameter_annotation_decorator
+import os
 
-# import bluesky.plan_stubs
+import bluesky.plan_patterns
+from bluesky_queueserver import parameter_annotation_decorator, register_plan
+
 import bluesky.plan_stubs as bps
-# from bluesky.plan_stubs import *
 from bluesky import plan_patterns, utils
 from collections import defaultdict
 
@@ -52,9 +49,6 @@ except ImportError:
 
 frame_type_sig = EpicsSignal("4dh4:TS:FrameType", name="frame_type_sig")
 
-# monitor_and_count = bpp.monitor_during_decorator([he3psd0.counts])(bp.count)
-
-
 def _collect_diffraction_detector_names():
     """Collect HE3 diffraction detector names for Queue Server dropdowns."""
     required_components = {"acquire", "acquire_time", "nbins", "soft_lld", "counts", "total_counts"}
@@ -81,23 +75,65 @@ def _collect_diffraction_detector_names():
     return out
 
 
+def _diffraction_detector_parameter_annotation():
+    """Group top-level PSDs by their declared Plan Editor device family."""
+    groups = {}
+    for name in _collect_diffraction_detector_names():
+        detector = globals().get(name)
+        group_name = str(
+            getattr(detector, "plan_editor_group", "Diffraction_detectors")
+            or "Diffraction_detectors"
+        )
+        groups.setdefault(group_name, []).append(name)
+
+    if not groups:
+        groups["Diffraction_detectors"] = []
+    group_names = list(groups)
+    if len(group_names) == 1:
+        item_annotation = group_names[0]
+    else:
+        item_annotation = f"typing.Union[{', '.join(group_names)}]"
+    annotation = (
+        f"typing.Union[typing.List[{item_annotation}], {', '.join(group_names)}]"
+    )
+    return {
+        "annotation": annotation,
+        "description": "Diffraction detector or detectors to read",
+        "devices": groups,
+        "convert_device_names": True,
+    }
+
+
 def _plan_estimation_context():
     return build_estimation_context(caget_func=caget)
+
+
+def _he3psd_plot_metadata(detectors):
+    """Return the common routing metadata used by every HE3 PSD plan."""
+    live_plot_fields, _ = _build_live_plot_fields(detectors)
+    metadata = {
+        "experiment_type": "diffraction",
+        "data_type": "1d",
+        "detector_type": "he3psd",
+        "live_plot_fields": live_plot_fields,
+    }
+    acquisition_monitor = _build_acquisition_monitor(
+        detectors,
+        duration=detectors[0].acquire_time.get(),
+    )
+    if acquisition_monitor:
+        metadata["acquisition_monitor"] = acquisition_monitor
+    return metadata
 
 
 @parameter_annotation_decorator(
     {
         "parameters": {
-            "detectors": {
-                "annotation": "typing.Union[typing.List[DiffractionDetectors], DiffractionDetectors]",
-                "description": "Diffraction detector or detectors to read",
-                "devices": {"DiffractionDetectors": _collect_diffraction_detector_names()},
-                "convert_device_names": True,
-            }
+            "detectors": _diffraction_detector_parameter_annotation()
         }
     }
 )
-def count_he3(
+def count_he3psd(
                 title:str,
                 sample:str = "",
                 gauge_volume:str = "",
@@ -136,7 +172,7 @@ def count_he3(
             yield from bps.mov(det.acquire_time, acquire_time)
 
     estimate = estimate_plan_runtime(
-        "count_he3",
+        "count_he3psd",
         kwargs={
             "acquire_time": detectors[0].acquire_time.get(),
             "num": num,
@@ -166,8 +202,8 @@ def count_he3(
         "num_intervals": num_intervals,
         "estimated_total_time_s": total_time,
         "estimated_total_units": total_units,
-        "experiment_type": "diffraction",
-        "plan_name": "count_he3",
+        **_he3psd_plot_metadata(detectors),
+        "plan_name": "count_he3psd",
         "hints": {},
     }
     _md.update(md or {})
@@ -208,18 +244,10 @@ def count_he3(
     return (yield from inner_count())
 
 
-
-
-
 @parameter_annotation_decorator(
     {
         "parameters": {
-            "detectors": {
-                "annotation": "typing.Union[typing.List[DiffractionDetectors], DiffractionDetectors]",
-                "description": "Diffraction detector or detectors to read",
-                "devices": {"DiffractionDetectors": _collect_diffraction_detector_names()},
-                "convert_device_names": True,
-            },
+            "detectors": _diffraction_detector_parameter_annotation(),
             "motor": {
                 "annotation": "typing.Union[str, Motors]",
                 "description": "Motor to scan (must be movable)",
@@ -229,7 +257,7 @@ def count_he3(
         }
     }
 )
-def scan_he3( 
+def scan_he3psd(
             title:str,
             sample:str = "",
             gauge_volume:str = "",
@@ -265,7 +293,7 @@ def scan_he3(
     )
 
     estimate = estimate_plan_runtime(
-        "scan_he3",
+        "scan_he3psd",
         kwargs={
             "start_pos": start_pos,
             "stop_pos": stop_pos_calc,
@@ -320,8 +348,8 @@ def scan_he3(
             "nbins": detectors[0].nbins.get(),
             "soft_lld": detectors[0].soft_lld.get()
         },
-        "experiment_type": "diffraction",
-        "plan_name": "scan_he3",
+        **_he3psd_plot_metadata(detectors),
+        "plan_name": "scan_he3psd",
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,
         "plan_pattern_args": dict(motor=motor.name, start_pos=start_pos, stop_pos=stop_pos_calc, step_size=step_size_calc, num_steps=num_steps_calc),  # noqa: C408
@@ -366,12 +394,7 @@ def scan_he3(
 @parameter_annotation_decorator(
     {
         "parameters": {
-            "detectors": {
-                "annotation": "typing.Union[typing.List[DiffractionDetectors], DiffractionDetectors]",
-                "description": "Diffraction detector or detectors to read",
-                "devices": {"DiffractionDetectors": _collect_diffraction_detector_names()},
-                "convert_device_names": True,
-            },
+            "detectors": _diffraction_detector_parameter_annotation(),
             "motor1": {
                 "annotation": "typing.Union[str, Motors]",
                 "description": "First motor to scan in parallel",
@@ -387,7 +410,7 @@ def scan_he3(
         }
     }
 )
-def scan_parallel_he3( 
+def scan_parallel_he3psd(
             title:str,
             sample:str = "",
             gauge_volume:str = "",
@@ -424,7 +447,7 @@ def scan_parallel_he3(
     step_size1 = (stop_pos1-start_pos1)/(num_steps_calc-1)
     step_size2 = (stop_pos2-start_pos2)/(num_steps_calc-1)
     estimate = estimate_plan_runtime(
-        "scan_parallel_he3",
+        "scan_parallel_he3psd",
         kwargs={
             "num_steps": num_steps_calc,
             "acquire_time": acquire_time,
@@ -464,8 +487,8 @@ def scan_parallel_he3(
             "nbins": detectors[0].nbins.get(),
             "soft_lld": detectors[0].soft_lld.get()
         },
-        "experiment_type": "diffraction",
-        "plan_name": "scan_parallel_he3",
+        **_he3psd_plot_metadata(detectors),
+        "plan_name": "scan_parallel_he3psd",
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,
         "plan_pattern_args": dict(motor1=motor1.name, start_pos1=start_pos1, stop_pos1=stop_pos1, motor2=motor2.name, start_pos2=start_pos2, stop_pos2=stop_pos2, step_size1=step_size1, step_size2=step_size2, num_steps=num_steps_calc),  # noqa: C408
@@ -516,12 +539,7 @@ def scan_parallel_he3(
 @parameter_annotation_decorator(
     {
         "parameters": {
-            "detectors": {
-                "annotation": "typing.Union[typing.List[DiffractionDetectors], DiffractionDetectors]",
-                "description": "Diffraction detector or detectors to read",
-                "devices": {"DiffractionDetectors": _collect_diffraction_detector_names()},
-                "convert_device_names": True,
-            },
+            "detectors": _diffraction_detector_parameter_annotation(),
             "motor": {
                 "annotation": "typing.Union[str, Motors]",
                 "description": "Motor to scan through the requested positions",
@@ -531,7 +549,7 @@ def scan_parallel_he3(
         }
     }
 )
-def scan_list_he3( 
+def scan_list_he3psd(
             title:str,
             sample:str = "",
             gauge_volume:str = "",
@@ -558,7 +576,7 @@ def scan_list_he3(
 
     num_steps = len(position_list)
     estimate = estimate_plan_runtime(
-        "scan_list_he3",
+        "scan_list_he3psd",
         kwargs={
             "position_list": position_list,
             "acquire_time": acquire_time,
@@ -598,8 +616,8 @@ def scan_list_he3(
             "nbins": detectors[0].nbins.get(),
             "soft_lld": detectors[0].soft_lld.get()
         },
-        "experiment_type": "diffraction",
-        "plan_name": "scan_list_he3",
+        **_he3psd_plot_metadata(detectors),
+        "plan_name": "scan_list_he3psd",
         "plan_pattern": "inner_list_product",
         "plan_pattern_module": plan_patterns.__name__,
         "plan_pattern_args": dict(motor=motor.name, position_list=position_list, num_steps=num_steps),  # noqa: C408
@@ -644,12 +662,7 @@ def scan_list_he3(
 @parameter_annotation_decorator(
     {
         "parameters": {
-            "detectors": {
-                "annotation": "typing.Union[typing.List[DiffractionDetectors], DiffractionDetectors]",
-                "description": "Diffraction detector or detectors to read",
-                "devices": {"DiffractionDetectors": _collect_diffraction_detector_names()},
-                "convert_device_names": True,
-            },
+            "detectors": _diffraction_detector_parameter_annotation(),
             "motor_outer": {
                 "annotation": "typing.Union[str, Motors]",
                 "description": "Outer motor for the 2D scan",
@@ -665,7 +678,7 @@ def scan_list_he3(
         }
     }
 )
-def scan2D_he3( 
+def scan2D_he3psd(
             title:str,
             sample:str = "",
             gauge_volume:str = "",
@@ -722,7 +735,7 @@ def scan2D_he3(
 
     total_steps = num_steps_outer*num_steps_inner
     estimate = estimate_plan_runtime(
-        "scan2D_he3",
+        "scan2D_he3psd",
         kwargs={
             "start_pos_outer": start_pos_outer,
             "stop_pos_outer": stop_pos_outer_calc,
@@ -772,8 +785,8 @@ def scan2D_he3(
             "nbins": detectors[0].nbins.get(),
             "soft_lld": detectors[0].soft_lld.get()
         },
-        "experiment_type": "diffraction",
-        "plan_name": "scan2D_he3",
+        **_he3psd_plot_metadata(detectors),
+        "plan_name": "scan2D_he3psd",
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,
         "plan_pattern_args": dict(motor_outer=motor_outer.name, start_pos_outer=start_pos_outer, stop_pos_outer=stop_pos_outer_calc, step_size_outer=step_size_outer_calc, num_steps_outer=num_steps_outer,
@@ -816,3 +829,22 @@ def scan2D_he3(
         yield from bps.mov(detectors[0].acquire_time, old_acquire_time)
 
     return(yield from main_plan())
+
+
+# Keep the original Python entry points for scripts that import this startup
+# namespace directly.  Excluding them prevents QueueServer/Plan Editor from
+# presenting duplicate plans; queued items should use the canonical names.
+count_he3 = count_he3psd
+scan_he3 = scan_he3psd
+scan_parallel_he3 = scan_parallel_he3psd
+scan_list_he3 = scan_list_he3psd
+scan2D_he3 = scan2D_he3psd
+
+for _legacy_plan_name in (
+    "count_he3",
+    "scan_he3",
+    "scan_parallel_he3",
+    "scan_list_he3",
+    "scan2D_he3",
+):
+    register_plan(_legacy_plan_name, exclude=True)

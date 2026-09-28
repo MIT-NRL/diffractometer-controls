@@ -6,6 +6,190 @@ from ophyd.positioner import PositionerBase
 import time
 
 
+def _resolve_dotted_attribute(obj, dotted_name):
+    """Resolve a component path such as ``channels.chan1`` on a Device."""
+    value = obj
+    for part in str(dotted_name or "").split("."):
+        if not part:
+            continue
+        value = getattr(value, part)
+    return value
+
+
+def _walk_device_signals(device):
+    """Return instantiated signals indexed by both component path and data key."""
+    signals = {}
+    try:
+        walks = list(device.walk_signals(include_lazy=False))
+    except TypeError:
+        walks = list(device.walk_signals())
+    except Exception:
+        walks = []
+
+    for walk in walks:
+        dotted_name = getattr(walk, "dotted_name", None)
+        signal = getattr(walk, "item", None)
+        if dotted_name is None:
+            try:
+                dotted_name, signal = walk
+            except Exception:
+                continue
+        if signal is None:
+            try:
+                signal = _resolve_dotted_attribute(device, dotted_name)
+            except Exception:
+                continue
+        signals[str(dotted_name)] = signal
+        signal_name = str(getattr(signal, "name", "") or "")
+        if signal_name:
+            signals[signal_name] = signal
+    return signals
+
+
+def _live_plot_declarations(readable):
+    """Return explicit declarations, or infer the readable's hinted fields."""
+    declarations = getattr(readable, "live_plot_signals", None)
+    if declarations:
+        return dict(declarations)
+
+    # A selected child Signal inherits its label/units/role declaration from
+    # the parent device.  This lets plans expose ``usbctr.he3_tube`` while
+    # still using the device-owned plotting metadata.
+    if not isinstance(readable, Device):
+        parent = getattr(readable, "parent", None)
+        parent_declarations = dict(getattr(parent, "live_plot_signals", {}) or {})
+        for attribute, spec in parent_declarations.items():
+            try:
+                if _resolve_dotted_attribute(parent, attribute) is readable:
+                    return {"": dict(spec or {})}
+            except Exception:
+                continue
+        return {"": {"role": "signal"}}
+
+    try:
+        hinted_fields = list(readable.hints.get("fields", []) or [])
+    except Exception:
+        hinted_fields = []
+    return {field: {"role": "signal", "data_key": field} for field in hinted_fields}
+
+
+def _build_live_plot_fields(readables):
+    """Serialize device-owned live-plot declarations for a Bluesky Start doc.
+
+    Returns
+    -------
+    fields : dict
+        JSON-safe mapping keyed by the final Bluesky data key.
+    monitor_signals : list
+        In-memory Signals that need Bluesky monitor streams. EPICS signals use
+        direct Channel Access subscriptions in the GUI and are not returned.
+    """
+    fields = {}
+    monitor_signals = []
+
+    for readable in list(readables or []):
+        signal_index = _walk_device_signals(readable) if isinstance(readable, Device) else {}
+        for attribute, raw_spec in _live_plot_declarations(readable).items():
+            spec = dict(raw_spec or {})
+            signal = None
+            if not isinstance(readable, Device):
+                signal = readable
+            else:
+                explicit_data_key = str(spec.get("data_key", "") or "")
+                signal = signal_index.get(str(attribute)) or signal_index.get(explicit_data_key)
+                if signal is None:
+                    try:
+                        signal = _resolve_dotted_attribute(readable, attribute)
+                    except Exception:
+                        continue
+
+            data_key = str(spec.pop("data_key", "") or getattr(signal, "name", "") or "")
+            if not data_key:
+                continue
+
+            entry = {
+                "label": str(spec.pop("label", "") or data_key.replace("_", " ").title()),
+                "role": str(spec.pop("role", "signal") or "signal"),
+            }
+            series = str(spec.pop("series", "") or "")
+            if series:
+                entry["series"] = series
+            elif entry["role"] in {"profile", "summary"}:
+                entry["series"] = str(getattr(readable, "name", "") or data_key)
+
+            units = str(spec.pop("units", "") or "")
+            if not units:
+                try:
+                    units = str(signal.describe().get(data_key, {}).get("units", "") or "")
+                except Exception:
+                    units = ""
+            if units:
+                entry["units"] = units
+
+            requested_transport = str(spec.pop("transport", "") or "").lower()
+            pvname = str(getattr(signal, "pvname", "") or "")
+            if pvname and requested_transport != "document":
+                entry["transport"] = "ca"
+                entry["pv"] = pvname
+            elif requested_transport == "document":
+                entry["transport"] = "document"
+                entry["stream"] = f"{data_key}_monitor"
+                if not any(signal is existing for existing in monitor_signals):
+                    monitor_signals.append(signal)
+            else:
+                # The value will still be plotted from final primary Events.
+                # Only explicitly opted-in soft Signals create monitor streams.
+                entry["transport"] = "event"
+
+            entry.update({str(key): value for key, value in spec.items()})
+            fields[data_key] = entry
+
+    return fields, monitor_signals
+
+
+def _build_acquisition_monitor(devices, *, duration=None):
+    """Serialize one device's exposure-progress PVs for the Start document.
+
+    Devices opt in with an ``acquisition_monitor_signals`` mapping whose keys
+    are ``active``, ``duration``, and either ``remaining`` or ``elapsed``.
+    Keeping this declaration on the device makes the GUI independent of a
+    particular detector type or EPICS record layout.
+    """
+    device_list = list(devices if isinstance(devices, (list, tuple)) else [devices])
+    for device in device_list:
+        signal_names = dict(
+            getattr(device, "acquisition_monitor_signals", {}) or {}
+        )
+        if not signal_names:
+            continue
+
+        monitor = {"device": str(getattr(device, "name", "") or "")}
+        for role in ("active", "duration", "remaining", "elapsed"):
+            attribute = str(signal_names.get(role, "") or "")
+            if not attribute:
+                continue
+            try:
+                signal = _resolve_dotted_attribute(device, attribute)
+            except Exception:
+                continue
+            pvname = str(getattr(signal, "pvname", "") or "").strip()
+            if pvname:
+                monitor[f"{role}_pv"] = pvname
+
+        # A hardware active-state PV is required. Soft simulators and passive
+        # readouts deliberately do not advertise an exposure monitor.
+        if not monitor.get("active_pv"):
+            continue
+        try:
+            duration_value = float(duration)
+        except (TypeError, ValueError):
+            duration_value = None
+        if duration_value is not None and duration_value >= 0:
+            monitor["duration"] = duration_value
+        return monitor
+    return {}
+
+
 def _component_walk_name_and_cls(comp_walk):
     """
     Normalize ``Device.walk_components()`` output across ophyd versions.

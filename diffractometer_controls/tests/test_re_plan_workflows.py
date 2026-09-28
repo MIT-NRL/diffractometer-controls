@@ -14,7 +14,9 @@ try:
     from diffractometer_controls.re_plan_editor_widget import (
         RePlanEditorTable,
         RePlanEditorWidget,
+        _CheckableChoicesComboBox,
         _GroupedChoicesComboBox,
+        _organize_device_choice_groups,
     )
     from diffractometer_controls.re_plans import REPlans
     from diffractometer_controls.re_queue_widget import QtRePlanQueueEstimated
@@ -330,8 +332,8 @@ class RePlanWorkflowTests(unittest.TestCase):
             {
                 "Cam advanced": {
                     "cam1": [
-                        ("cam1.cam.acquire_time", "cam1_acquire_time"),
-                        ("cam1.cam.gain", "cam1_gain"),
+                        ("cam1.adv.acquire_time", "cam1_acquire_time"),
+                        ("cam1.adv.gain", "cam1_gain"),
                     ]
                 }
             }
@@ -344,9 +346,9 @@ class RePlanWorkflowTests(unittest.TestCase):
         self.assertEqual(selected, [])
 
         combo._select_value(
-            "cam1_acquire_time", display_text="cam1.cam.acquire_time"
+            "cam1_acquire_time", display_text="cam1.adv.acquire_time"
         )
-        self.assertEqual(combo.currentText(), "cam1.cam.acquire_time")
+        self.assertEqual(combo.currentText(), "cam1.adv.acquire_time")
         self.assertEqual(combo.selected_value(), "cam1_acquire_time")
         self.assertEqual(selected, ["cam1_acquire_time"])
 
@@ -354,6 +356,106 @@ class RePlanWorkflowTests(unittest.TestCase):
         self.assertIn(
             'custom_action = menu.addAction("")',
             inspect.getsource(_GroupedChoicesComboBox.showPopup),
+        )
+
+    def test_device_choices_group_components_but_leave_standalone_at_root(self):
+        root, groups, display_names = _organize_device_choice_groups(
+            {
+                "Motors": ["sample_th", "stage2.theta", "stage2.x"],
+                "Cam_advanced": ["cam1_acquire_time", "cam1_gain"],
+                "ScalarReadables": [
+                    "temperature",
+                    "sim_focus_cam_acquire_time",
+                    "usb2408.temperature.ti1",
+                    "usb2408.analog.ai1",
+                ],
+                "HE3_PSD": ["he3psd0", "he3psd7"],
+            }
+        )
+
+        self.assertEqual(root, ["sample_th", "temperature"])
+        self.assertEqual(
+            [entry[1] for entry in groups["stage2"]],
+            ["stage2.theta", "stage2.x"],
+        )
+        self.assertEqual(
+            [entry[1] for entry in groups["cam1"]["adv"]],
+            ["cam1_acquire_time", "cam1_gain"],
+        )
+        self.assertEqual(
+            [entry[1] for entry in groups["sim_focus_cam"]["adv"]],
+            ["sim_focus_cam_acquire_time"],
+        )
+        self.assertEqual(
+            [entry[1] for entry in groups["usb2408"]["temperature"]],
+            ["usb2408.temperature.ti1"],
+        )
+        self.assertEqual(
+            [entry[1] for entry in groups["usb2408"]["analog"]],
+            ["usb2408.analog.ai1"],
+        )
+        self.assertEqual(
+            [entry[1] for entry in groups["HE3 PSD"]],
+            ["he3psd0", "he3psd7"],
+        )
+        self.assertEqual(display_names["cam1_gain"], "cam1.adv.gain")
+
+    def test_grouped_multi_select_preserves_full_device_names(self):
+        combo = _CheckableChoicesComboBox()
+        self.addCleanup(combo.deleteLater)
+        choices = ["temperature", "usbctr.beam_monitor", "usbctr.he3_tube"]
+        combo.set_choices(choices)
+        combo.set_choice_groups(
+            {
+                "usbctr": [
+                    ("Beam monitor", "usbctr.beam_monitor", "usbctr.beam_monitor"),
+                    ("He3 tube", "usbctr.he3_tube", "usbctr.he3_tube"),
+                ]
+            },
+            root_choices=["temperature"],
+        )
+
+        combo._set_value_checked("usbctr.he3_tube", True)
+        combo._set_value_checked("temperature", True)
+        self.assertEqual(
+            combo.checked_items(),
+            ["temperature", "usbctr.he3_tube"],
+        )
+
+    def test_enum_parameter_is_rendered_as_a_dropdown(self):
+        self.model._allowed_plans["enum_plan"] = {
+            "name": "enum_plan",
+            "parameters": [
+                {
+                    "name": "file_type",
+                    "kind": {"name": "KEYWORD_ONLY", "value": 3},
+                    "description": "Output file type",
+                    "annotation": {
+                        "type": "ScalarFileType",
+                        "enums": {"ScalarFileType": ["csv", "nexus"]},
+                    },
+                    "default": "'csv'",
+                }
+            ],
+        }
+        self.editor.load_new_plan_item(
+            {"item_type": "plan", "name": "enum_plan", "kwargs": {}},
+            preserve_existing=False,
+        )
+        self._process_events()
+
+        table = self.editor._plan_editor._wd_editor
+        file_type_row = next(
+            row
+            for row in range(table.rowCount())
+            if table.item(row, 0) is not None
+            and table.item(row, 0).text() == "file_type"
+        )
+        combo = table.cellWidget(file_type_row, 2)
+        self.assertIsInstance(combo, QtWidgets.QComboBox)
+        self.assertEqual(
+            [combo.itemText(index) for index in range(combo.count())],
+            ["", "csv", "nexus"],
         )
 
     def test_camera_axis_constraints_hide_and_omit_matching_fixed_value(self):

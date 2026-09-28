@@ -292,6 +292,8 @@ def _register_camera_advanced_axes(detector_name, detector):
             # selected camera control is read at every scan point, so expose
             # it just like a conventional motor readback.
             axis.kind = "hinted"
+            # This alias is a scan axis, not an experiment detector.
+            axis.scalar_plan_hidden = True
             globals()[axis_name] = axis
             register_device(axis_name, depth=1)
 

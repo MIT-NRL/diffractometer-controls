@@ -18,6 +18,20 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+
+_CATEGORICAL_SERIES_COLORS = (
+    "#1f77b4",
+    "#ff7f0e",
+    "#2ca02c",
+    "#d62728",
+    "#9467bd",
+    "#8c564b",
+    "#e377c2",
+    "#7f7f7f",
+    "#bcbd22",
+    "#17becf",
+)
+
 try:
     from lmfit.models import GaussianModel, LinearModel
 except Exception:
@@ -283,6 +297,42 @@ def _is_diffraction_start_doc(start_doc):
     return str(start_doc.get("experiment_type", "") or "").strip().lower() == DIFFRACTION_EXPERIMENT_TYPE
 
 
+def _run_data_type(start_doc):
+    """Return the detector-output shape, retaining compatibility with old runs."""
+    start_doc = dict(start_doc or {})
+    data_type = str(start_doc.get("data_type", "") or "").strip().lower()
+    if data_type in {"scalar", "1d", "2d"}:
+        return data_type
+    plan_name = str(start_doc.get("plan_name", "") or "").strip().lower()
+    if plan_name in {"count_scalar", "scan_scalar"}:
+        return "scalar"
+    return "1d"
+
+
+def _start_live_plot_fields(start_doc):
+    fields = dict(dict(start_doc or {}).get("live_plot_fields", {}) or {})
+    return {
+        str(data_key): dict(spec or {})
+        for data_key, spec in fields.items()
+        if str(data_key)
+    }
+
+
+def _data_keys_have_plot_payload(data_keys, start_doc):
+    data_keys = _plain_mapping(data_keys)
+    declared_fields = set(_start_live_plot_fields(start_doc))
+    if declared_fields.intersection(str(key) for key in data_keys):
+        return True
+    if _run_data_type(start_doc) == "scalar":
+        return False
+    return any(
+        str(key).endswith("_counts")
+        or str(key).endswith("_position_x")
+        or str(key).endswith("_total_counts")
+        for key in data_keys
+    )
+
+
 def _format_run_timestamp(epoch_seconds):
     value = _coerce_number(epoch_seconds)
     if value is None:
@@ -477,12 +527,7 @@ def _synthesize_run_documents(run, start_doc, stop_doc):
             continue
 
         data_keys = _plain_mapping(descriptor_docs[0].get("data_keys"))
-        if not any(
-            str(key).endswith("_counts")
-            or str(key).endswith("_position_x")
-            or str(key).endswith("_total_counts")
-            for key in data_keys
-        ):
+        if not _data_keys_have_plot_payload(data_keys, start_doc):
             continue
         row_count = _stream_row_count(dataset, data_keys)
         if row_count <= 0:
@@ -526,17 +571,17 @@ def _synthesize_run_documents(run, start_doc, stop_doc):
 
 
 def _documents_have_diffraction_payload(documents):
+    start_doc = {}
+    for name, doc in list(documents or []):
+        if str(name) == "start":
+            start_doc = dict(doc or {})
+            break
     detector_descriptors = set()
     for name, doc in list(documents or []):
         if str(name) != "descriptor":
             continue
         data_keys = _plain_mapping(dict(doc or {}).get("data_keys"))
-        if any(
-            str(key).endswith("_counts")
-            or str(key).endswith("_position_x")
-            or str(key).endswith("_total_counts")
-            for key in data_keys
-        ):
+        if _data_keys_have_plot_payload(data_keys, start_doc):
             detector_descriptors.add(str(dict(doc or {}).get("uid", "") or ""))
 
     if not detector_descriptors:
@@ -734,6 +779,7 @@ class DiffractionPlotWidget(QWidget):
     @QtCore.Slot(object)
     def reset(self, config=None):
         config = dict(config or {})
+        plot_mode = str(config.get("plot_mode", "1d") or "1d").strip().lower()
         run_title = str(config.get("run_title", "") or "")
         profile_title = str(config.get("profile_title", "Current Spectrum") or "Current Spectrum")
         summary_title = str(config.get("summary_title", "Total Counts") or "Total Counts")
@@ -750,6 +796,10 @@ class DiffractionPlotWidget(QWidget):
         self.figure.clf()
         self.profile_axes, self.summary_axes, self.peak_axes = self._create_axes()
         self._apply_static_layout()
+        if plot_mode == "scalar":
+            self.profile_axes.set_visible(False)
+            self.peak_axes.set_visible(False)
+            self.summary_axes.set_position([0.08, 0.10, 0.90, 0.80])
         self.profile_axes.grid(alpha=0.25)
         self.summary_axes.grid(alpha=0.25)
         self.peak_axes.grid(alpha=0.25)
@@ -901,6 +951,7 @@ class DiffractionPlotWidget(QWidget):
             fixed_limits=self._summary_x_limits,
         )
         self._autoscale_y(self.summary_axes)
+        self._update_legends()
         self._redraw()
 
     @QtCore.Slot(str, object, object)
@@ -1017,7 +1068,9 @@ class DiffractionPlotWidget(QWidget):
                 if history
             },
         )
-        self._set_axis_legend(self.summary_axes, self._summary_lines)
+        summary_lines = dict(self._summary_live_lines)
+        summary_lines.update(self._summary_lines)
+        self._set_axis_legend(self.summary_axes, summary_lines)
         self._set_axis_legend(self.peak_axes, self._peak_lines)
         self._style_legends()
 
@@ -1093,7 +1146,7 @@ class DiffractionPlotWidget(QWidget):
         else:
             age = index / (total - 1)
         line.set_color(color_map(color_pos))
-        line.set_alpha(0.95 if is_latest else 0.35 + (0.15 * color_pos))
+        line.set_alpha(0.95 if is_latest else 0.65 + (0.20 * color_pos))
         line.set_linewidth(1.5 if is_latest else 0.8 + (0.3 * age))
         line.set_marker("o" if is_latest else "None")
 
@@ -1140,12 +1193,10 @@ class DiffractionPlotWidget(QWidget):
         if color is not None:
             return color
 
-        color_map = self._profile_colormaps.get(detector_name)
-        if color_map is None:
-            color_map = self._select_profile_colormap(detector_name)
-            self._profile_colormaps[detector_name] = color_map
-        rgba = color_map(0.82)
-        color = _rgba_to_hex(rgba)
+        if detector_name not in self._detector_order:
+            self._detector_order.append(detector_name)
+        index = self._detector_order.index(detector_name)
+        color = _CATEGORICAL_SERIES_COLORS[index % len(_CATEGORICAL_SERIES_COLORS)]
         self._detector_series_colors[detector_name] = color
         return color
 
@@ -1621,6 +1672,9 @@ class DiffractionLivePlot(QtCore.QObject):
         self._run_uid = None
         self._run_title = ""
         self._plan_name = ""
+        self._data_type = "1d"
+        self._live_plot_fields = {}
+        self._run_detector_names = []
         self._motor_names = []
         self._summary_mode = "point"
         self._summary_x_label = "Point"
@@ -1633,7 +1687,9 @@ class DiffractionLivePlot(QtCore.QObject):
         self._detector_axis_bounds = {}
         self._live_subscriptions = {}
         self._live_total_counts = {}
+        self._live_elapsed_time = {}
         self._armed_live_detectors = ()
+        self._armed_live_field_signature = ()
         self._planned_summary_x = []
         self._displayed_run_uid = ""
         self._current_live_run_uid = ""
@@ -1735,10 +1791,15 @@ class DiffractionLivePlot(QtCore.QObject):
             return
         running_item = dict(getattr(self.re_client, "_running_item", {}) or {})
         if not running_item:
+            if self._current_live_run_uid and self._live_plot_fields:
+                self._arm_live_plot_field_subscriptions(self._live_plot_fields)
             return
         self._ensure_live_context_from_running_item(running_item)
         detector_names = self._extract_live_detector_names_from_running_item(running_item)
-        self._arm_live_subscriptions(detector_names)
+        if self._live_plot_fields:
+            self._arm_live_plot_field_subscriptions(self._live_plot_fields)
+        else:
+            self._arm_live_subscriptions(detector_names)
 
     def _emit_history_state(self, *, status_text=None, selected_uid=None):
         if status_text is not None:
@@ -2225,12 +2286,7 @@ class DiffractionLivePlot(QtCore.QObject):
             if not descriptor_docs:
                 continue
             data_keys = _plain_mapping(descriptor_docs[0].get("data_keys"))
-            if not any(
-                str(key).endswith("_counts")
-                or str(key).endswith("_position_x")
-                or str(key).endswith("_total_counts")
-                for key in data_keys
-            ):
+            if not _data_keys_have_plot_payload(data_keys, start_doc):
                 continue
             if stream_name == self.stream_name:
                 priority = 0
@@ -2342,6 +2398,9 @@ class DiffractionLivePlot(QtCore.QObject):
         self._displayed_run_uid = str(self._run_uid or "")
         self._run_title = str(start_doc.get("title", "") or "")
         self._plan_name = str(start_doc.get("plan_name", "") or "")
+        self._data_type = _run_data_type(start_doc)
+        self._live_plot_fields = _start_live_plot_fields(start_doc)
+        self._run_detector_names = self._normalize_detector_names(start_doc.get("detectors"))
         self._motor_names = self._normalize_motor_names(start_doc.get("motors"))
         self._summary_mode = "point"
         self._summary_counter = 0
@@ -2351,6 +2410,7 @@ class DiffractionLivePlot(QtCore.QObject):
         self._summary_path_distance = 0.0
         self._planned_summary_x = []
         self._live_total_counts.clear()
+        self._live_elapsed_time.clear()
 
         det_config = dict(start_doc.get("det_config", {}) or {})
         axis_min = det_config.get("position_x_min", -209.21799055746422)
@@ -2370,23 +2430,59 @@ class DiffractionLivePlot(QtCore.QObject):
         self._planned_summary_x = self._build_planned_summary_x(start_doc)
         peak_title = self._choose_peak_title()
 
+        scalar_signal_specs = [
+            spec
+            for spec in self._live_plot_fields.values()
+            if str(spec.get("role", "signal") or "signal") == "signal"
+        ]
+        scalar_units = {
+            str(spec.get("units", "") or "").strip()
+            for spec in scalar_signal_specs
+            if str(spec.get("units", "") or "").strip()
+        }
+        if self._data_type == "scalar" and scalar_units == {"counts"}:
+            summary_y_label = "Counts"
+        elif self._data_type == "scalar" and len(scalar_signal_specs) == 1:
+            scalar_spec = scalar_signal_specs[0]
+            scalar_label = str(scalar_spec.get("label", "") or "Value")
+            scalar_unit = str(scalar_spec.get("units", "") or "").strip()
+            summary_y_label = (
+                f"{scalar_label} ({scalar_unit})" if scalar_unit else scalar_label
+            )
+        elif self._data_type == "scalar" and len(scalar_units) == 1:
+            summary_y_label = f"Value ({next(iter(scalar_units))})"
+        elif self._data_type == "scalar":
+            summary_y_label = "Value"
+        else:
+            summary_y_label = "Total Counts"
+
         run_title = self._run_title or self._plan_name or "Diffraction Run"
         if historical:
             run_title = f"{run_title} [Historical Run]"
         self._reset_requested.emit(
             {
                 "run_title": run_title,
+                "plot_mode": "scalar" if self._data_type == "scalar" else "1d",
                 "profile_title": "Current PSD Profile",
                 "summary_title": self._summary_title,
                 "peak_title": peak_title,
                 "summary_x_label": self._summary_x_label,
-                "summary_y_label": "Total Counts",
+                "summary_y_label": summary_y_label,
                 "peak_y_label": "Peak Position",
                 "profile_x_limits": (axis_min, axis_max),
                 "summary_x_limits": self._build_summary_x_limits(start_doc),
                 "peak_x_limits": self._build_summary_x_limits(start_doc),
             }
         )
+        if (
+            self._active
+            and not historical
+            and self._live_follow_enabled
+            and self._display_mode == "live"
+        ):
+            self._arm_live_plot_field_subscriptions(self._live_plot_fields)
+            if self._live_subscriptions:
+                self._armed_live_detectors = tuple(self._run_detector_names)
         self._merge_history_entry(_make_history_entry(self._run_uid, start_doc))
         self._emit_history_state(selected_uid=self._run_uid)
 
@@ -2405,6 +2501,18 @@ class DiffractionLivePlot(QtCore.QObject):
             )
 
     def _render_history_row(self, *, data, seq_num):
+        if self._data_type == "scalar":
+            summary_x = self._extract_summary_x(data=data, seq_num=seq_num)
+            self._emit_scalar_values(data, x_value=summary_x, live=False)
+            seq_num_value = _coerce_number(seq_num)
+            if seq_num_value is not None:
+                seq_num_int = int(seq_num_value)
+                self._rendered_primary_seq_nums.add(seq_num_int)
+                self._primary_points_seen = max(int(self._primary_points_seen), seq_num_int)
+            else:
+                self._primary_points_seen += 1
+            return
+
         detector_fields = self._extract_detector_fields(data)
         if not detector_fields:
             return
@@ -2521,8 +2629,9 @@ class DiffractionLivePlot(QtCore.QObject):
             self._render_history_row(data=dict(row or {}), seq_num=seq_num_value)
 
     def on_document(self, name, doc):
-        if not self._active:
-            return
+        # PyDM caches this screen during navigation. Continue consuming run
+        # documents while it is hidden so switching back does not lose a run;
+        # deactivate() separately suspends direct CA and history work.
         if str(name) == "start":
             start_doc = dict(doc or {})
             if not _is_diffraction_start_doc(start_doc):
@@ -2620,9 +2729,11 @@ class DiffractionLivePlot(QtCore.QObject):
         self._arm_live_subscriptions(detector_names)
 
     def _process_event(self, *, descriptor_uid, data, seq_num):
-        detector_fields = self._extract_detector_fields(data)
-        if not detector_fields:
-            return
+        detector_fields = {}
+        if self._data_type != "scalar":
+            detector_fields = self._extract_detector_fields(data)
+            if not detector_fields:
+                return
 
         descriptor_uid = str(descriptor_uid or "")
         descriptor_known = (
@@ -2655,6 +2766,23 @@ class DiffractionLivePlot(QtCore.QObject):
                 seq_num_value = None
             if seq_num_value is not None and seq_num_value in self._rendered_primary_seq_nums:
                 return
+
+        if self._data_type == "scalar":
+            if is_primary_stream:
+                self._emit_scalar_values(data, x_value=summary_x, live=False)
+                if seq_num_value is not None:
+                    self._rendered_primary_seq_nums.add(int(seq_num_value))
+                    self._primary_points_seen = max(
+                        int(self._primary_points_seen),
+                        int(seq_num_value),
+                    )
+                else:
+                    self._primary_points_seen += 1
+            else:
+                live_x = self._estimate_live_summary_x()
+                if live_x is not None:
+                    self._emit_scalar_values(data, x_value=live_x, live=True)
+            return
 
         for detector_name, fields in detector_fields.items():
             counts = _coerce_array(fields.get("counts"))
@@ -2838,7 +2966,7 @@ class DiffractionLivePlot(QtCore.QObject):
         num_points = kwargs.get("num_points", None)
         if num_points is None:
             num_points = kwargs.get("num_steps", None)
-        if num_points is None and str(plan_name) == "count_he3":
+        if num_points is None and str(plan_name) in {"count_he3", "count_he3psd"}:
             num_points = kwargs.get("num_exposures", None)
         try:
             if num_points is not None:
@@ -2865,56 +2993,87 @@ class DiffractionLivePlot(QtCore.QObject):
 
     def _arm_live_subscriptions(self, detector_names):
         unique_names = tuple(dict.fromkeys(detector_names))
-        if unique_names == self._armed_live_detectors:
+        if unique_names == self._armed_live_detectors and self._live_subscriptions:
+            return
+        fields = {}
+        for detector_name in unique_names:
+            counts_pv_name = self._get_live_counts_pv(detector_name)
+            if counts_pv_name:
+                fields[f"{detector_name}_counts"] = {
+                    "pv": counts_pv_name,
+                    "transport": "ca",
+                    "role": "profile",
+                    "series": detector_name,
+                }
+            total_counts_pv_name = self._get_live_total_counts_pv(detector_name)
+            if total_counts_pv_name:
+                fields[f"{detector_name}_total_counts"] = {
+                    "pv": total_counts_pv_name,
+                    "transport": "ca",
+                    "role": "summary",
+                    "series": detector_name,
+                }
+        self._arm_live_plot_field_subscriptions(fields)
+        self._armed_live_detectors = unique_names
+
+    def _arm_live_plot_field_subscriptions(self, fields):
+        ca_fields = {
+            str(data_key): dict(spec or {})
+            for data_key, spec in dict(fields or {}).items()
+            if str(spec.get("transport", "") or "").lower() == "ca"
+            and str(spec.get("pv", "") or "").strip()
+        }
+        signature = tuple(
+            sorted(
+                (
+                    data_key,
+                    str(spec.get("pv", "") or ""),
+                    str(spec.get("role", "signal") or "signal"),
+                    str(spec.get("series", "") or ""),
+                )
+                for data_key, spec in ca_fields.items()
+            )
+        )
+        if signature == self._armed_live_field_signature:
             return
 
         self._disarm_live_subscriptions()
-        self._armed_live_detectors = unique_names
-
+        self._armed_live_field_signature = signature
         if PV is None:
             return
 
-        for detector_name in unique_names:
-            detector_subscriptions = []
-
-            counts_pv_name = self._get_live_counts_pv(detector_name)
-            if counts_pv_name:
-                try:
-                    counts_pv = PV(counts_pv_name, auto_monitor=True)
-                    counts_callback_index = counts_pv.add_callback(
-                        lambda pvname=None, value=None, char_value=None, _det=detector_name, **kwargs: (
-                            self._handle_live_counts_update(_det, value)
-                        )
+        for data_key, spec in ca_fields.items():
+            pv_name = str(spec.get("pv", "") or "")
+            role = str(spec.get("role", "signal") or "signal")
+            series = str(spec.get("series", "") or spec.get("label", "") or data_key)
+            try:
+                pv = PV(pv_name, auto_monitor=True)
+                if role == "profile":
+                    callback = (
+                        lambda pvname=None, value=None, char_value=None, _series=series, **kwargs:
+                        self._handle_live_counts_update(_series, value)
                     )
-                    detector_subscriptions.append(
-                        {
-                            "pv": counts_pv,
-                            "callback_index": counts_callback_index,
-                        }
+                elif role == "summary":
+                    callback = (
+                        lambda pvname=None, value=None, char_value=None, _series=series, **kwargs:
+                        self._handle_live_total_counts_update(_series, value)
                     )
-                except Exception:
-                    pass
-
-            total_counts_pv_name = self._get_live_total_counts_pv(detector_name)
-            if total_counts_pv_name:
-                try:
-                    total_counts_pv = PV(total_counts_pv_name, auto_monitor=True)
-                    total_counts_callback_index = total_counts_pv.add_callback(
-                        lambda pvname=None, value=None, char_value=None, _det=detector_name, **kwargs: (
-                            self._handle_live_total_counts_update(_det, value)
-                        )
+                elif role == "elapsed_time":
+                    callback = (
+                        lambda pvname=None, value=None, char_value=None, _key=data_key, **kwargs:
+                        self._handle_live_elapsed_time_update(_key, value)
                     )
-                    detector_subscriptions.append(
-                        {
-                            "pv": total_counts_pv,
-                            "callback_index": total_counts_callback_index,
-                        }
+                else:
+                    callback = (
+                        lambda pvname=None, value=None, char_value=None, _series=series, **kwargs:
+                        self._handle_live_scalar_update(_series, value)
                     )
-                except Exception:
-                    pass
-
-            if detector_subscriptions:
-                self._live_subscriptions[detector_name] = detector_subscriptions
+                callback_index = pv.add_callback(callback)
+                self._live_subscriptions[data_key] = [
+                    {"pv": pv, "callback_index": callback_index}
+                ]
+            except Exception:
+                continue
 
     def _disarm_live_subscriptions(self):
         for subscription_group in self._live_subscriptions.values():
@@ -2928,7 +3087,9 @@ class DiffractionLivePlot(QtCore.QObject):
                         pass
         self._live_subscriptions.clear()
         self._live_total_counts.clear()
+        self._live_elapsed_time.clear()
         self._armed_live_detectors = ()
+        self._armed_live_field_signature = ()
 
     def _handle_live_counts_update(self, detector_name, value):
         if (not self._live_follow_enabled) or self._display_mode != "live":
@@ -2949,7 +3110,11 @@ class DiffractionLivePlot(QtCore.QObject):
         total_counts = _coerce_number(self._live_total_counts.get(detector_name))
         if total_counts is None:
             total_counts = _coerce_number(np.nansum(counts))
-        elif self._get_live_total_counts_pv(detector_name):
+        elif self._get_live_total_counts_pv(detector_name) or any(
+            str(spec.get("role", "") or "") == "summary"
+            and str(spec.get("series", "") or "") == str(detector_name)
+            for spec in self._live_plot_fields.values()
+        ):
             should_emit_summary = False
         summary_x = self._estimate_live_summary_x()
         if should_emit_summary and total_counts is not None and summary_x is not None:
@@ -2958,6 +3123,24 @@ class DiffractionLivePlot(QtCore.QObject):
                 float(summary_x),
                 float(total_counts),
             )
+
+    def _handle_live_scalar_update(self, series_name, value):
+        if (not self._live_follow_enabled) or self._display_mode != "live":
+            return
+        scalar_value = _coerce_number(value)
+        summary_x = self._estimate_live_summary_x()
+        if scalar_value is None or summary_x is None:
+            return
+        self._live_summary_point_updated.emit(
+            str(series_name),
+            float(summary_x),
+            float(scalar_value),
+        )
+
+    def _handle_live_elapsed_time_update(self, data_key, value):
+        elapsed = _coerce_number(value)
+        if elapsed is not None:
+            self._live_elapsed_time[str(data_key)] = float(elapsed)
 
     @staticmethod
     def _get_live_counts_pv(detector_name):
@@ -3044,6 +3227,19 @@ class DiffractionLivePlot(QtCore.QObject):
 
     def _descriptor_has_detector_fields(self, descriptor_uid):
         data_keys = self._descriptor_data_keys.get(str(descriptor_uid), set())
+        if self._data_type == "scalar":
+            declared = {
+                data_key
+                for data_key, spec in self._live_plot_fields.items()
+                if str(spec.get("role", "signal") or "signal") in {"signal", "elapsed_time"}
+            }
+            if declared.intersection(data_keys):
+                return True
+            return any(
+                key == detector_name or key.startswith(f"{detector_name}_")
+                for key in data_keys
+                for detector_name in self._run_detector_names
+            )
         for key in data_keys:
             if key.endswith("_counts") or key.endswith("_position_x") or key.endswith("_total_counts"):
                 return True
@@ -3082,13 +3278,27 @@ class DiffractionLivePlot(QtCore.QObject):
         return [text] if text else []
 
     def _choose_summary_config(self):
-        if self._plan_name == "count_he3":
-            return "exposure", "Acquisition Number", "Total Counts vs Acquisition Number"
+        is_scalar = self._data_type == "scalar"
+        scalar_labels = list(
+            dict.fromkeys(
+                str(spec.get("label", "") or data_key)
+                for data_key, spec in self._live_plot_fields.items()
+                if str(spec.get("role", "signal") or "signal") == "signal"
+            )
+        )
+        if is_scalar and len(scalar_labels) == 1:
+            value_name = scalar_labels[0]
+        elif is_scalar:
+            value_name = "Scalar Values"
+        else:
+            value_name = "Total Counts"
+        if self._plan_name in {"count_he3", "count_he3psd", "count_scalar"}:
+            return "exposure", "Acquisition Number", f"{value_name} vs Acquisition Number"
         if len(self._motor_names) == 1:
-            return "motor", self._motor_names[0], "Total Counts vs Position"
+            return "motor", self._motor_names[0], f"{value_name} vs Position"
         if len(self._motor_names) > 1:
-            return "path", "Path Length", "Total Counts vs Scan Path"
-        return "point", "Point", "Total Counts vs Point"
+            return "path", "Path Length", f"{value_name} vs Scan Path"
+        return "point", "Point", f"{value_name} vs Point"
 
     def _choose_peak_title(self):
         if self._summary_mode == "exposure":
@@ -3132,6 +3342,46 @@ class DiffractionLivePlot(QtCore.QObject):
         )
         self._summary_path_last_point = current
         return self._summary_path_distance
+
+    def _extract_scalar_values(self, data):
+        data = dict(data or {})
+        values = []
+        for data_key, spec in self._live_plot_fields.items():
+            if str(spec.get("role", "signal") or "signal") != "signal":
+                continue
+            value = _coerce_number(data.get(data_key))
+            if value is None:
+                continue
+            label = str(spec.get("label", "") or data_key)
+            values.append((label, value))
+        if values:
+            return values
+
+        # Compatibility fallback for scalar runs written before live field
+        # metadata was added. Restrict candidates to the declared detectors.
+        for data_key, raw_value in data.items():
+            data_key = str(data_key)
+            if data_key in self._motor_names:
+                continue
+            if self._run_detector_names and not any(
+                data_key == detector_name or data_key.startswith(f"{detector_name}_")
+                for detector_name in self._run_detector_names
+            ):
+                continue
+            if data_key.endswith("_time") or data_key.endswith("_clock_counts"):
+                continue
+            value = _coerce_number(raw_value)
+            if value is not None:
+                values.append((data_key, value))
+        return values
+
+    def _emit_scalar_values(self, data, *, x_value, live):
+        x_value = _coerce_number(x_value)
+        if x_value is None:
+            return
+        signal = self._live_summary_point_updated if live else self._summary_point_updated
+        for label, value in self._extract_scalar_values(data):
+            signal.emit(str(label), float(x_value), float(value))
 
     @staticmethod
     def _extract_detector_fields(data):

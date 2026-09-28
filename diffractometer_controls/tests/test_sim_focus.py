@@ -263,7 +263,7 @@ class SimulatedFocusImageTests(unittest.TestCase):
             Path(__file__).resolve().parents[1]
             / "bluesky_config"
             / "startup"
-            / "90-plans_general.py"
+            / "89-plan_helpers.py"
         )
         namespace = runpy.run_path(str(startup_file))
         collector = namespace["_collect_movable_names"]
@@ -281,7 +281,7 @@ class SimulatedFocusImageTests(unittest.TestCase):
             Path(__file__).resolve().parents[1]
             / "bluesky_config"
             / "startup"
-            / "90-plans_general.py"
+            / "89-plan_helpers.py"
         )
         namespace = runpy.run_path(str(startup_file))
         estimator = namespace["_ProgressEstimator"](

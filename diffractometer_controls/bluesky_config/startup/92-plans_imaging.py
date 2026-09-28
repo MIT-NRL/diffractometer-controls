@@ -1,14 +1,9 @@
-# import bluesky.plans
-import bluesky.plans as bp
-from bluesky.plans import scan, count, grid_scan, rel_scan, rel_grid_scan
 from bluesky.protocols import Readable, Movable
 
 from bluesky_queueserver import parameter_annotation_decorator
 
 
-# import bluesky.plan_stubs
 import bluesky.plan_stubs as bps
-# from bluesky.plan_stubs import *
 from bluesky import plan_patterns, utils
 from typing import Annotated
 from collections import defaultdict
@@ -501,6 +496,7 @@ def tomo_scan(file_name:str,
             "offset": detector[0].cam.offset.get(),
         },
         "experiment_type": "imaging",
+        "data_type": "2d",
         "plan_name": "tomo_scan",
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,
@@ -682,6 +678,7 @@ def imaging(
             "offset": detector[0].cam.offset.get(),
         },
         "experiment_type": "imaging",
+        "data_type": "2d",
         "plan_name": "imaging",
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,
@@ -998,6 +995,7 @@ def _run_imaging_scan_impl(
             "offset": detector[0].cam.offset.get(),
         },
         "experiment_type": "imaging",
+        "data_type": "2d",
         "plan_name": plan_name,
         "plan_pattern": "inner_product",
         "plan_pattern_module": plan_patterns.__name__,

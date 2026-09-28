@@ -8,15 +8,23 @@ from apstools.callbacks.nexus_writer import NXWriter
 
 
 HE3_DIFFRACTION_ROOT = pathlib.Path("/home/mitr_4dh4/Data/Diffraction")
+HE3_DIFFRACTION_TEST_ROOT = pathlib.Path(
+    "/home/mitr_4dh4/Data/TestData/Diffraction"
+)
 HE3PSD_POSITION_MIN = -209.21799055746422
 HE3PSD_POSITION_MAX = 209.21799055746422
 TEST_CATALOG_NAMES = {"testdb"}
 HE3_PLAN_NAMES = {
     "count_he3",
+    "count_he3psd",
     "scan_he3",
+    "scan_he3psd",
     "scan_parallel_he3",
+    "scan_parallel_he3psd",
     "scan_list_he3",
+    "scan_list_he3psd",
     "scan2D_he3",
+    "scan2D_he3psd",
 }
 
 
@@ -45,6 +53,7 @@ class HE3DiffractionNXWriter(NXWriter):
     instrument_name = "4DH4"
     file_extension = "nxs"
     output_root = HE3_DIFFRACTION_ROOT
+    test_output_root = HE3_DIFFRACTION_TEST_ROOT
 
     def clear(self):
         super().clear()
@@ -59,10 +68,9 @@ class HE3DiffractionNXWriter(NXWriter):
         return self._catalog_name() in TEST_CATALOG_NAMES
 
     def _output_root_for_run(self):
-        output_root = pathlib.Path(self.output_root)
         if self._is_test_catalog():
-            return output_root / "Test"
-        return output_root
+            return pathlib.Path(self.test_output_root)
+        return pathlib.Path(self.output_root)
 
     def _is_supported_run(self, doc):
         experiment_type = str(doc.get("experiment_type", "") or "").strip().lower()
@@ -90,6 +98,41 @@ class HE3DiffractionNXWriter(NXWriter):
             return None
         primary_uid = primary_uids[0]
         return self.acquisitions.get(primary_uid, {}).get("data")
+
+    @staticmethod
+    def _metadata_value(value):
+        if isinstance(value, np.generic):
+            return value.item()
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+        return value
+
+    def _capture_baseline_metadata(self):
+        readings = {}
+        for descriptor_uid in list(self.streams.get("baseline", []) or []):
+            descriptor = dict(self.acquisitions.get(descriptor_uid, {}) or {})
+            for data_key, entry in dict(descriptor.get("data", {}) or {}).items():
+                data_key = str(data_key)
+                entry = dict(entry or {})
+                values = list(entry.get("data", []) or [])
+                if not values:
+                    continue
+                readings[data_key] = {
+                    "start": self._metadata_value(values[0]),
+                    "end": self._metadata_value(values[-1]),
+                    "units": str(entry.get("units", "") or ""),
+                }
+        if readings:
+            self.metadata["baseline_readings"] = readings
+        return readings
+
+    def writer(self):
+        self._capture_baseline_metadata()
+        return super().writer()
+
+    def write_metadata(self, parent):
+        self._capture_baseline_metadata()
+        return super().write_metadata(parent)
 
     def _get_primary_detector_fields(self, primary):
         detector_names = _normalize_detector_names(self.detectors)

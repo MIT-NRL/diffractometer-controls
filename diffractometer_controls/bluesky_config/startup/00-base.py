@@ -139,10 +139,6 @@ import numpy as np
 import bluesky.callbacks
 from bluesky.callbacks import *
 
-import bluesky.plans
-import bluesky.plans as bp
-# from bluesky.plans import *
-
 import bluesky.plan_stubs
 import bluesky.plan_stubs as bps
 # from bluesky.plan_stubs import *
@@ -154,12 +150,6 @@ import bluesky.preprocessors as bpp
 
 from bluesky.simulators import summarize_plan, check_limits, plot_raster_path
 #from bluesky.plan_tools import plot_raster_path
-
-from ophyd.sim import det, motor, noisy_det
-
-### make temperature motor alias
-from ophyd.sim import motor3 as temperature
-temperature.name = "temperature"
 
 # from bluesky.utils import ProgressBarManager
 # RE.waiting_hook = ProgressBarManager()

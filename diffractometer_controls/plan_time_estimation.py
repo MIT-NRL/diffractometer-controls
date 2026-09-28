@@ -344,6 +344,40 @@ def _estimate_count_he3(params: Mapping[str, Any], context: Mapping[str, Any]) -
     return _known_estimate(float(num) * float(acquire_time), num)
 
 
+def _estimate_count_scalar(
+    params: Mapping[str, Any], context: Mapping[str, Any]
+) -> dict[str, float | int | None]:
+    num = _as_int(params.get("num"), 1)
+    if num is None or num <= 0:
+        return _unknown_estimate()
+    acquire_time = _as_float(params.get("acquire_time"), 0.0)
+    delay = _as_float(params.get("delay"), 0.0)
+    if acquire_time is None or acquire_time < 0 or delay is None or delay < 0:
+        return _unknown_estimate(num)
+    total_time = float(num) * float(acquire_time)
+    total_time += float(max(0, num - 1)) * float(delay)
+    return _known_estimate(total_time, num)
+
+
+def _estimate_scan_scalar(
+    params: Mapping[str, Any], context: Mapping[str, Any]
+) -> dict[str, float | int | None]:
+    num_steps = _as_int(params.get("num_steps"), None)
+    if num_steps is None:
+        start_pos = _as_float(params.get("start_pos"), None)
+        stop_pos = _as_float(params.get("stop_pos"), None)
+        step_size = _as_float(params.get("step_size", params.get("step")), None)
+        if start_pos is None or stop_pos is None or step_size is None:
+            return _unknown_estimate()
+        num_steps = _num_steps_from_step_size_scan(start_pos, stop_pos, step_size)
+    if num_steps is None or num_steps <= 0:
+        return _unknown_estimate()
+    acquire_time = _as_float(params.get("acquire_time"), 0.0)
+    if acquire_time is None or acquire_time < 0:
+        return _unknown_estimate(num_steps)
+    return _known_estimate(float(num_steps) * float(acquire_time), num_steps)
+
+
 def _estimate_scan_parallel_he3(params: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, float | int | None]:
     num_steps = _as_int(params.get("num_steps"), None)
     if num_steps is None or num_steps <= 0:
@@ -406,6 +440,8 @@ def _estimate_wait_seconds(params: Mapping[str, Any], context: Mapping[str, Any]
 
 _ESTIMATORS = {
     "count_he3": _estimate_count_he3,
+    "count_he3psd": _estimate_count_he3,
+    "count_scalar": _estimate_count_scalar,
     "imaging": _estimate_imaging,
     "imaging_scan": _estimate_imaging_scan,
     "imaging_scan_discrete": _estimate_imaging_scan_discrete,
@@ -413,9 +449,14 @@ _ESTIMATORS = {
     "tomo_scan": _estimate_tomo_scan,
     "adaptive_imaging_focus_scan": _estimate_adaptive_imaging_focus_scan,
     "scan_he3": _estimate_scan_he3,
+    "scan_he3psd": _estimate_scan_he3,
+    "scan_scalar": _estimate_scan_scalar,
     "scan_parallel_he3": _estimate_scan_parallel_he3,
+    "scan_parallel_he3psd": _estimate_scan_parallel_he3,
     "scan_list_he3": _estimate_scan_list_he3,
+    "scan_list_he3psd": _estimate_scan_list_he3,
     "scan2D_he3": _estimate_scan2d_he3,
+    "scan2D_he3psd": _estimate_scan2d_he3,
     "wait_seconds": _estimate_wait_seconds,
 }
 

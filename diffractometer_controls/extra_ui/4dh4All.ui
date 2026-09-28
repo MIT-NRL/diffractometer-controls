@@ -2815,8 +2815,32 @@ background-color: rgb(25, 102, 255);</string>
           <string notr="true">color: rgb(228, 228, 228);
 background-color: rgb(25, 102, 255);</string>
          </property>
+         <property name="text">
+          <string>USB-CTR08</string>
+         </property>
+         <property name="filenames" stdset="0">
+          <stringlist>
+           <string>USBCTR.adl</string>
+           <string>usbctr_mcs_rate.py</string>
+           <string>usbctr_timed_counter.py</string>
+          </stringlist>
+         </property>
+         <property name="titles" stdset="0">
+          <stringlist>
+           <string>USB-CTR08 module</string>
+           <string>MCS count-rate gauge</string>
+           <string>Basic timed counter</string>
+          </stringlist>
+         </property>
          <property name="showIcon" stdset="0">
           <bool>false</bool>
+         </property>
+         <property name="macros" stdset="0">
+          <stringlist>
+           <string>P=${P}USBCTR:,SP=${P}USBCTR:,S=scaler1,MP=${P}USBCTR:MCS:,Bi=Bi,Li=Li,Bo=Bo,Lo=Lo,Bd=Bd,Ct=Counter,Pg=PulseGen,Tg=Trig</string>
+           <string>P=${P}USBCTR:,MP=${P}USBCTR:MCS:,S=scaler1</string>
+           <string>P=${P}USBCTR:,MP=${P}USBCTR:MCS:,S=scaler1</string>
+          </stringlist>
          </property>
          <property name="openInNewWindow" stdset="0">
           <bool>true</bool>

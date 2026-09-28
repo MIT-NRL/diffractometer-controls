@@ -139,6 +139,7 @@ class HE3DiffractionNXWriterTests(unittest.TestCase):
     def _new_writer(self, root_path):
         writer = self.module.HE3DiffractionNXWriter()
         writer.output_root = pathlib.Path(root_path)
+        writer.test_output_root = pathlib.Path(root_path) / "TestData" / "Diffraction"
         return writer
 
     def _prepare_writer(self, writer, start_doc, descriptor_doc, events):
@@ -210,6 +211,13 @@ class HE3DiffractionNXWriterTests(unittest.TestCase):
             self.assertTrue(writer.scanning)
             self.assertIsNotNone(writer.file_name)
 
+    def test_accepts_renamed_count_he3psd_plan(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = self._new_writer(tmpdir)
+            writer.start(_build_start_doc(plan_name="count_he3psd"))
+            self.assertTrue(writer.scanning)
+            self.assertIsNotNone(writer.file_name)
+
     def test_filename_generation_uses_diffraction_root_and_readable_name(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             writer = self._new_writer(tmpdir)
@@ -238,7 +246,10 @@ class HE3DiffractionNXWriterTests(unittest.TestCase):
             writer.start(start_doc)
             file_name = pathlib.Path(writer.file_name)
             expected_prefix = datetime.datetime.fromtimestamp(start_doc["time"]).strftime("%Y%m%d-%H%M%S")
-            self.assertEqual(file_name.parent, pathlib.Path(tmpdir) / "Test" / "2024")
+            self.assertEqual(
+                file_name.parent,
+                pathlib.Path(tmpdir) / "TestData" / "Diffraction" / "2024",
+            )
             self.assertEqual(
                 file_name.name,
                 f"test-{expected_prefix}-S00017-count_he3-HE3_test-1234567.nxs",
@@ -272,6 +283,65 @@ class HE3DiffractionNXWriterTests(unittest.TestCase):
                     _normalize_attr(handle["/entry/instrument/bluesky/metadata/nexus_file"][()]),
                     str(file_name),
                 )
+
+    def test_all_baseline_start_and_end_values_are_promoted_to_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = self._new_writer(tmpdir)
+            start_doc = _build_start_doc(plan_name="count_he3")
+            descriptor_doc = _build_descriptor(start_uid=start_doc["uid"])
+            event_doc = _build_event(
+                descriptor_uid=descriptor_doc["uid"],
+                seq_num=1,
+                counts=[1, 2, 3, 4, 5],
+                position_x=[-2, -1, 0, 1, 2],
+                total_counts=15,
+                time_value=start_doc["time"] + 0.1,
+            )
+            self._prepare_writer(writer, start_doc, descriptor_doc, [event_doc])
+            writer.streams["baseline"] = ["baseline-descriptor"]
+            writer.acquisitions["baseline-descriptor"] = {
+                "stream": "baseline",
+                "data": {
+                    "reactor_power_6": {
+                        "data": [5.95, 5.90],
+                        "time": [start_doc["time"], start_doc["time"] + 1.0],
+                        "units": "MW",
+                        "source": "SIM:POWER6",
+                        "dtype": "number",
+                        "shape": [],
+                        "lower_ctrl_limit": "",
+                        "upper_ctrl_limit": "",
+                        "precision": 3,
+                        "object_name": "reactor_power_6",
+                        "external": False,
+                    },
+                    "sample_temperature": {
+                        "data": [24.0, 24.5],
+                        "time": [start_doc["time"], start_doc["time"] + 1.0],
+                        "units": "C",
+                        "source": "SIM:SAMPLE:TEMP",
+                        "dtype": "number",
+                        "shape": [],
+                        "lower_ctrl_limit": "",
+                        "upper_ctrl_limit": "",
+                        "precision": 2,
+                        "object_name": "sample_temperature",
+                        "external": False,
+                    },
+                },
+            }
+            file_name = self._write_file(writer)
+
+            with h5py.File(file_name, "r") as handle:
+                baseline = _normalize_attr(
+                    handle[
+                        "/entry/instrument/bluesky/metadata/baseline_readings"
+                    ][()]
+                )
+                self.assertIn("reactor_power_6", baseline)
+                self.assertIn("sample_temperature", baseline)
+                self.assertIn("start: 5.95", baseline)
+                self.assertIn("end: 24.5", baseline)
 
     def test_curated_position_axis_is_generated_from_fixed_geometry(self):
         with tempfile.TemporaryDirectory() as tmpdir:

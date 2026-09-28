@@ -34,6 +34,21 @@ reactor_power_suspender_enable = EpicsSignal(
 reactor_power_suspender_installed = EpicsSignal(
     "4dh4:Bluesky:SuspenderInstalled", name="reactor_power_suspender_installed"
 )
+
+# These signals support baseline recording, monitoring, and suspender control;
+# they are not experiment detectors and should not appear in scalar-plan menus.
+for _reactor_power_signal in (
+    reactor_power_6,
+    reactor_power_4,
+    reactor_power_thm,
+    reactor_power_dwk1,
+    reactor_power_dwk2,
+    reactor_power_dwk3,
+    reactor_power_dwk4,
+    reactor_power_suspender_enable,
+    reactor_power_suspender_installed,
+):
+    _reactor_power_signal.scalar_plan_hidden = True
 _suspender_enable_feedback_write = False
 
 
