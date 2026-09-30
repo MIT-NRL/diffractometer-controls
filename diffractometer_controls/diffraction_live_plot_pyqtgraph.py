@@ -12,6 +12,14 @@ import pyqtgraph as pg
 from qtpy import QtCore, QtGui
 from qtpy.QtWidgets import QGridLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
+try:
+    from diffractometer_controls.scalar_scan_widgets import (
+        ScalarCountReadout,
+        ScalarScanTable,
+    )
+except ModuleNotFoundError:  # Support direct PyDM display loading.
+    from scalar_scan_widgets import ScalarCountReadout, ScalarScanTable
+
 _PROFILE_COLOR_STOPS = {
     "viridis": [(68, 1, 84), (58, 82, 139), (32, 144, 140), (94, 201, 98), (253, 231, 37)],
     "plasma": [(13, 8, 135), (84, 3, 160), (182, 55, 121), (251, 136, 97), (240, 249, 33)],
@@ -185,6 +193,8 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
         self._profile_plot = pg.PlotWidget()
         self._summary_plot = pg.PlotWidget()
         self._peak_plot = pg.PlotWidget()
+        self._scalar_readout = ScalarCountReadout(self)
+        self._scalar_table = ScalarScanTable(self)
         self._profile_plot.setMinimumHeight(300)
         self._summary_plot.setMinimumHeight(180)
         self._peak_plot.setMinimumHeight(180)
@@ -231,6 +241,7 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
         self._peak_y_label = ""
         self._run_title = ""
         self._plot_mode = "1d"
+        self._show_count_rate_gauge = True
 
         self._profile_history = {}
         self._live_profile_lines = {}
@@ -267,6 +278,7 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
         config = dict(config or {})
         plot_mode = str(config.get("plot_mode", "1d") or "1d").strip().lower()
         self._plot_mode = "scalar" if plot_mode == "scalar" else "1d"
+        self._show_count_rate_gauge = bool(config.get("show_count_rate_gauge", True))
         self._run_title = str(config.get("run_title", "") or "")
         self._profile_title = str(config.get("profile_title", "Current Spectrum") or "Current Spectrum")
         self._summary_title = str(config.get("summary_title", "Total Counts") or "Total Counts")
@@ -298,6 +310,8 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
         self._peak_x.clear()
         self._peak_y.clear()
         self._peak_yerr.clear()
+        self._scalar_readout.reset()
+        self._scalar_table.reset_scan(self._summary_x_label)
 
         self._apply_plot_mode()
         self._apply_theme_from_palette()
@@ -307,19 +321,38 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
         self._set_plot_x_limits(self._peak_plot_item, self._peak_x_limits)
 
     def _apply_plot_mode(self):
-        for plot_widget in (self._profile_plot, self._summary_plot, self._peak_plot):
-            self._plot_grid.removeWidget(plot_widget)
+        for widget in (
+            self._profile_plot,
+            self._summary_plot,
+            self._peak_plot,
+            self._scalar_readout,
+            self._scalar_table,
+        ):
+            self._plot_grid.removeWidget(widget)
 
         if self._plot_mode == "scalar":
+            self._plot_grid.setRowStretch(0, 2)
+            self._plot_grid.setRowStretch(1, 1)
             self._profile_plot.hide()
             self._peak_plot.hide()
             self._summary_plot.show()
-            self._summary_plot.setMinimumHeight(480)
-            self._plot_grid.addWidget(self._summary_plot, 0, 0, 2, 2)
+            self._scalar_table.show()
+            self._scalar_readout.setVisible(self._show_count_rate_gauge)
+            self._summary_plot.setMinimumHeight(300)
+            self._plot_grid.addWidget(self._summary_plot, 0, 0, 1, 2)
+            if self._show_count_rate_gauge:
+                self._plot_grid.addWidget(self._scalar_readout, 1, 0)
+                self._plot_grid.addWidget(self._scalar_table, 1, 1)
+            else:
+                self._plot_grid.addWidget(self._scalar_table, 1, 0, 1, 2)
             self._schedule_plot_grid_reflow()
             return
 
         self._summary_plot.setMinimumHeight(180)
+        self._plot_grid.setRowStretch(0, 2)
+        self._plot_grid.setRowStretch(1, 1)
+        self._scalar_readout.hide()
+        self._scalar_table.hide()
         self._profile_plot.show()
         self._summary_plot.show()
         self._peak_plot.show()
@@ -408,6 +441,8 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
         )
         self._autoscale_y(self._summary_plot_item)
         self._update_legends()
+        if self._plot_mode == "scalar":
+            self._scalar_table.append_point(detector_name, x_value, y_value)
 
     @QtCore.Slot(str, float, float)
     def update_live_summary_point(self, detector_name, x_value, y_value):
@@ -432,6 +467,14 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
         )
         self._autoscale_y(self._summary_plot_item)
         self._update_legends()
+
+    @QtCore.Slot(str, float, object)
+    def update_scalar_readout(self, detector_name, total_counts, elapsed_time=None):
+        self._scalar_readout.update_reading(
+            detector_name,
+            total_counts,
+            elapsed_time,
+        )
 
     @QtCore.Slot(str, object, object)
     def update_live_profile(self, detector_name, x_values, y_values):

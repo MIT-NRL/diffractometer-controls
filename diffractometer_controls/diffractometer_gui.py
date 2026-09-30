@@ -232,6 +232,16 @@ class MainScreen(display.MITRDisplay):
         self._setup_time_remaining_progress()
 
         self.ui.Data_Viewer.layout().addWidget(viewer)
+        QtCore.QTimer.singleShot(0, self._apply_initial_main_splitter_sizes)
+
+    def _apply_initial_main_splitter_sizes(self):
+        """Favor the plotter at startup without changing either pane's minimum."""
+        splitter = getattr(self.ui, "splitter", None)
+        if splitter is None or splitter.count() < 2:
+            return
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 3)
+        splitter.setSizes([500, 900])
 
     def _set_manual_channels_connected(self, connected):
         connected = bool(connected)

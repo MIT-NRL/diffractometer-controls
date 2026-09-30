@@ -3,6 +3,7 @@ import ast
 import concurrent.futures
 import datetime as dt
 import os
+import re
 from collections.abc import Iterable, Mapping
 
 import numpy as np
@@ -17,6 +18,14 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+try:
+    from diffractometer_controls.scalar_scan_widgets import (
+        ScalarCountReadout,
+        ScalarScanTable,
+    )
+except ModuleNotFoundError:  # Support direct PyDM display loading.
+    from scalar_scan_widgets import ScalarCountReadout, ScalarScanTable
 
 
 _CATEGORICAL_SERIES_COLORS = (
@@ -316,6 +325,64 @@ def _start_live_plot_fields(start_doc):
         for data_key, spec in fields.items()
         if str(data_key)
     }
+
+
+def _friendly_source_name(source):
+    text = str(source or "").strip().replace("_", " ")
+    text = " ".join(word.capitalize() for word in text.split())
+    return re.sub(r"\bUsbctr\b", "USBCTR", text)
+
+
+def _infer_field_source(data_key, label):
+    channel_name = re.sub(
+        r"^CTR\d+\s*[-:]\s*",
+        "",
+        str(label or "").strip(),
+        flags=re.IGNORECASE,
+    )
+    channel_slug = re.sub(r"[^a-z0-9]+", "_", channel_name.lower()).strip("_")
+    data_key = str(data_key or "")
+    if channel_slug and data_key.lower().endswith(f"_{channel_slug}"):
+        return data_key[: -(len(channel_slug) + 1)]
+    return ""
+
+
+def _qualify_duplicate_field_labels(fields):
+    """Give same-named scalar channels stable, source-qualified identities."""
+    fields = {str(key): dict(spec or {}) for key, spec in dict(fields or {}).items()}
+    label_keys = {}
+    for data_key, spec in fields.items():
+        if str(spec.get("role", "signal") or "signal") != "signal":
+            continue
+        label = str(spec.get("label", "") or data_key)
+        label_keys.setdefault(label, []).append(data_key)
+
+    for label, data_keys in label_keys.items():
+        if len(data_keys) < 2:
+            continue
+        short_label = re.sub(
+            r"^CTR\d+\s*[-:]\s*",
+            "",
+            label,
+            flags=re.IGNORECASE,
+        )
+        candidates = []
+        for data_key in data_keys:
+            spec = fields[data_key]
+            source = str(spec.get("source", "") or "")
+            if not source:
+                source = _infer_field_source(data_key, label)
+            if source:
+                spec["source"] = source
+            friendly_source = _friendly_source_name(source)
+            candidates.append(
+                f"{friendly_source}: {short_label}" if friendly_source else data_key
+            )
+        if len(set(candidates)) != len(candidates):
+            candidates = [f"{candidate} [{key}]" for candidate, key in zip(candidates, data_keys)]
+        for data_key, qualified_label in zip(data_keys, candidates):
+            fields[data_key]["label"] = qualified_label
+    return fields
 
 
 def _data_keys_have_plot_payload(data_keys, start_doc):
@@ -724,10 +791,25 @@ class DiffractionPlotWidget(QWidget):
         self._toolbar = NavigationToolbar(canvas, parent=self)
         self._canvas.mpl_connect("button_press_event", self._on_mouse_press)
 
+        self._scalar_readout = ScalarCountReadout(self)
+        self._scalar_table = ScalarScanTable(self)
+        self._scalar_details = QWidget(self)
+        scalar_details_layout = QHBoxLayout(self._scalar_details)
+        scalar_details_layout.setContentsMargins(0, 0, 0, 0)
+        scalar_details_layout.setSpacing(10)
+        scalar_details_layout.addWidget(self._scalar_readout, 1)
+        scalar_details_layout.addWidget(self._scalar_table, 1)
+        self._scalar_details.hide()
+
         layout = QVBoxLayout()
-        layout.addWidget(canvas)
+        layout.addWidget(canvas, 2)
+        layout.addWidget(self._scalar_details, 1)
         layout.addWidget(self._toolbar)
         self.setLayout(layout)
+        self._main_layout = layout
+
+        self._plot_mode = "1d"
+        self._show_count_rate_gauge = True
 
         self._profile_history = {}
         self._live_profile_lines = {}
@@ -780,6 +862,8 @@ class DiffractionPlotWidget(QWidget):
     def reset(self, config=None):
         config = dict(config or {})
         plot_mode = str(config.get("plot_mode", "1d") or "1d").strip().lower()
+        self._plot_mode = "scalar" if plot_mode == "scalar" else "1d"
+        self._show_count_rate_gauge = bool(config.get("show_count_rate_gauge", True))
         run_title = str(config.get("run_title", "") or "")
         profile_title = str(config.get("profile_title", "Current Spectrum") or "Current Spectrum")
         summary_title = str(config.get("summary_title", "Total Counts") or "Total Counts")
@@ -796,10 +880,18 @@ class DiffractionPlotWidget(QWidget):
         self.figure.clf()
         self.profile_axes, self.summary_axes, self.peak_axes = self._create_axes()
         self._apply_static_layout()
-        if plot_mode == "scalar":
+        if self._plot_mode == "scalar":
+            self._main_layout.setStretch(0, 2)
+            self._main_layout.setStretch(1, 1)
             self.profile_axes.set_visible(False)
             self.peak_axes.set_visible(False)
             self.summary_axes.set_position([0.08, 0.10, 0.90, 0.80])
+            self._scalar_details.show()
+            self._scalar_readout.setVisible(self._show_count_rate_gauge)
+        else:
+            self._main_layout.setStretch(0, 2)
+            self._main_layout.setStretch(1, 1)
+            self._scalar_details.hide()
         self.profile_axes.grid(alpha=0.25)
         self.summary_axes.grid(alpha=0.25)
         self.peak_axes.grid(alpha=0.25)
@@ -838,6 +930,8 @@ class DiffractionPlotWidget(QWidget):
         self._peak_x.clear()
         self._peak_y.clear()
         self._peak_yerr.clear()
+        self._scalar_readout.reset()
+        self._scalar_table.reset_scan(summary_x_label)
         self._redraw()
 
     @QtCore.Slot(str, object, object)
@@ -916,6 +1010,8 @@ class DiffractionPlotWidget(QWidget):
         )
         self._autoscale_y(self.summary_axes)
         self._update_legends()
+        if self._plot_mode == "scalar":
+            self._scalar_table.append_point(detector_name, x_value, y_value)
         self._redraw()
 
     @QtCore.Slot(str, float, float)
@@ -953,6 +1049,14 @@ class DiffractionPlotWidget(QWidget):
         self._autoscale_y(self.summary_axes)
         self._update_legends()
         self._redraw()
+
+    @QtCore.Slot(str, float, object)
+    def update_scalar_readout(self, detector_name, total_counts, elapsed_time=None):
+        self._scalar_readout.update_reading(
+            detector_name,
+            total_counts,
+            elapsed_time,
+        )
 
     @QtCore.Slot(str, object, object)
     def update_live_profile(self, detector_name, x_values, y_values):
@@ -1531,6 +1635,12 @@ class DiffractionHistoryViewer(QWidget):
     def update_live_summary_point(self, detector_name, x_value, y_value):
         return self._plot_widget.update_live_summary_point(detector_name, x_value, y_value)
 
+    @QtCore.Slot(str, float, object)
+    def update_scalar_readout(self, detector_name, total_counts, elapsed_time=None):
+        slot = getattr(self._plot_widget, "update_scalar_readout", None)
+        if callable(slot):
+            return slot(detector_name, total_counts, elapsed_time)
+
     @QtCore.Slot(str, float, float, object)
     def append_peak_point(self, detector_name, x_value, y_value, y_err):
         return self._plot_widget.append_peak_point(detector_name, x_value, y_value, y_err)
@@ -1639,6 +1749,7 @@ class DiffractionLivePlot(QtCore.QObject):
     _live_profile_updated = QtCore.Signal(str, object, object)
     _summary_point_updated = QtCore.Signal(str, float, float)
     _live_summary_point_updated = QtCore.Signal(str, float, float)
+    _scalar_readout_updated = QtCore.Signal(str, float, object)
     _peak_point_updated = QtCore.Signal(str, float, float, object)
     _status_updated = QtCore.Signal(str)
     _history_state_updated = QtCore.Signal(object)
@@ -1658,6 +1769,9 @@ class DiffractionLivePlot(QtCore.QObject):
         self._live_profile_updated.connect(self.widget.update_live_profile, queued)
         self._summary_point_updated.connect(self.widget.append_summary_point, queued)
         self._live_summary_point_updated.connect(self.widget.update_live_summary_point, queued)
+        update_scalar_readout = getattr(self.widget, "update_scalar_readout", None)
+        if callable(update_scalar_readout):
+            self._scalar_readout_updated.connect(update_scalar_readout, queued)
         self._peak_point_updated.connect(self.widget.append_peak_point, queued)
         self._status_updated.connect(self.widget.set_status, queued)
         set_history_state = getattr(self.widget, "set_history_state", None)
@@ -1688,6 +1802,12 @@ class DiffractionLivePlot(QtCore.QObject):
         self._live_subscriptions = {}
         self._live_total_counts = {}
         self._live_elapsed_time = {}
+        self._live_scalar_counts = {}
+        self._scalar_count_labels = set()
+        self._scalar_elapsed_keys = {}
+        self._scalar_count_origins = {}
+        self._scalar_sample_elapsed = {}
+        self._scalar_elapsed_fallback = None
         self._armed_live_detectors = ()
         self._armed_live_field_signature = ()
         self._planned_summary_x = []
@@ -2399,7 +2519,23 @@ class DiffractionLivePlot(QtCore.QObject):
         self._run_title = str(start_doc.get("title", "") or "")
         self._plan_name = str(start_doc.get("plan_name", "") or "")
         self._data_type = _run_data_type(start_doc)
-        self._live_plot_fields = _start_live_plot_fields(start_doc)
+        self._live_plot_fields = _qualify_duplicate_field_labels(
+            _start_live_plot_fields(start_doc)
+        )
+        acquisition_monitor = dict(start_doc.get("acquisition_monitor", {}) or {})
+        elapsed_pv = str(acquisition_monitor.get("elapsed_pv", "") or "").strip()
+        has_elapsed_field = any(
+            str(spec.get("role", "signal") or "signal") == "elapsed_time"
+            for spec in self._live_plot_fields.values()
+        )
+        if self._data_type == "scalar" and elapsed_pv and not has_elapsed_field:
+            self._live_plot_fields["__scalar_elapsed_time"] = {
+                "label": "Elapsed Time",
+                "role": "elapsed_time",
+                "units": "s",
+                "transport": "ca",
+                "pv": elapsed_pv,
+            }
         self._run_detector_names = self._normalize_detector_names(start_doc.get("detectors"))
         self._motor_names = self._normalize_motor_names(start_doc.get("motors"))
         self._summary_mode = "point"
@@ -2411,6 +2547,9 @@ class DiffractionLivePlot(QtCore.QObject):
         self._planned_summary_x = []
         self._live_total_counts.clear()
         self._live_elapsed_time.clear()
+        self._live_scalar_counts.clear()
+        self._scalar_count_origins.clear()
+        self._scalar_sample_elapsed.clear()
 
         det_config = dict(start_doc.get("det_config", {}) or {})
         axis_min = det_config.get("position_x_min", -209.21799055746422)
@@ -2440,6 +2579,54 @@ class DiffractionLivePlot(QtCore.QObject):
             for spec in scalar_signal_specs
             if str(spec.get("units", "") or "").strip()
         }
+        self._scalar_count_labels = {
+            str(spec.get("label", "") or data_key)
+            for data_key, spec in self._live_plot_fields.items()
+            if str(spec.get("role", "signal") or "signal") == "signal"
+            and str(spec.get("units", "") or "").strip().lower() == "counts"
+        }
+        self._scalar_elapsed_keys = {}
+        elapsed_fields = {
+            key: spec for key, spec in self._live_plot_fields.items()
+            if str(spec.get("role", "") or "") == "elapsed_time"
+        }
+        for data_key, spec in self._live_plot_fields.items():
+            label = str(spec.get("label", "") or data_key)
+            if label not in self._scalar_count_labels:
+                continue
+            source = str(spec.get("source", "") or _infer_field_source(data_key, label))
+            keys = [
+                key for key, elapsed_spec in elapsed_fields.items()
+                if source and (
+                    str(elapsed_spec.get("source", "") or "") == source
+                    or key == f"{source}_time"
+                )
+            ]
+            if not keys and len(elapsed_fields) == 1:
+                key = next(iter(elapsed_fields))
+                # The injected acquisition-monitor PV belongs to its device.
+                monitor_source = str(acquisition_monitor.get("device", "") or "")
+                if key == "__scalar_elapsed_time" and (
+                    not source or not monitor_source or source == monitor_source
+                ):
+                    keys = [key]
+                elif not source:
+                    keys = [key]
+            self._scalar_elapsed_keys[label] = keys
+        plan_args = dict(start_doc.get("plan_args", {}) or {})
+        self._scalar_elapsed_fallback = _coerce_number(plan_args.get("acquire_time"))
+        if self._scalar_elapsed_fallback is None:
+            acquire_times = dict(det_config.get("acquire_times", {}) or {})
+            valid_times = [
+                value
+                for value in (_coerce_number(item) for item in acquire_times.values())
+                if value is not None and value > 0
+            ]
+            if valid_times:
+                self._scalar_elapsed_fallback = max(valid_times)
+        show_count_rate_gauge = bool(
+            self._data_type == "scalar" and self._scalar_count_labels
+        )
         if self._data_type == "scalar" and scalar_units == {"counts"}:
             summary_y_label = "Counts"
         elif self._data_type == "scalar" and len(scalar_signal_specs) == 1:
@@ -2463,6 +2650,7 @@ class DiffractionLivePlot(QtCore.QObject):
             {
                 "run_title": run_title,
                 "plot_mode": "scalar" if self._data_type == "scalar" else "1d",
+                "show_count_rate_gauge": show_count_rate_gauge,
                 "profile_title": "Current PSD Profile",
                 "summary_title": self._summary_title,
                 "peak_title": peak_title,
@@ -2666,6 +2854,7 @@ class DiffractionLivePlot(QtCore.QObject):
                 descriptor_uid=str(doc.get("descriptor", "")),
                 data=dict(doc.get("data", {}) or {}),
                 seq_num=doc.get("seq_num"),
+                timestamps=dict(doc.get("timestamps", {}) or {}),
             )
             return
 
@@ -2674,6 +2863,7 @@ class DiffractionLivePlot(QtCore.QObject):
                 return
             descriptor_uid = str(doc.get("descriptor", ""))
             page_data = dict(doc.get("data", {}) or {})
+            page_timestamps = dict(doc.get("timestamps", {}) or {})
             seq_nums = list(doc.get("seq_num", []) or [])
             keys = list(page_data.keys())
             n_items = len(seq_nums)
@@ -2696,6 +2886,10 @@ class DiffractionLivePlot(QtCore.QObject):
                     descriptor_uid=descriptor_uid,
                     data=row,
                     seq_num=seq_num,
+                    timestamps={
+                        key: values[index] for key, values in page_timestamps.items()
+                        if index < len(values)
+                    },
                 )
             return
 
@@ -2728,7 +2922,7 @@ class DiffractionLivePlot(QtCore.QObject):
             return
         self._arm_live_subscriptions(detector_names)
 
-    def _process_event(self, *, descriptor_uid, data, seq_num):
+    def _process_event(self, *, descriptor_uid, data, seq_num, timestamps=None):
         detector_fields = {}
         if self._data_type != "scalar":
             detector_fields = self._extract_detector_fields(data)
@@ -2769,7 +2963,7 @@ class DiffractionLivePlot(QtCore.QObject):
 
         if self._data_type == "scalar":
             if is_primary_stream:
-                self._emit_scalar_values(data, x_value=summary_x, live=False)
+                self._emit_scalar_values(data, x_value=summary_x, live=False, timestamps=timestamps)
                 if seq_num_value is not None:
                     self._rendered_primary_seq_nums.add(int(seq_num_value))
                     self._primary_points_seen = max(
@@ -2781,7 +2975,7 @@ class DiffractionLivePlot(QtCore.QObject):
             else:
                 live_x = self._estimate_live_summary_x()
                 if live_x is not None:
-                    self._emit_scalar_values(data, x_value=live_x, live=True)
+                    self._emit_scalar_values(data, x_value=live_x, live=True, timestamps=timestamps)
             return
 
         for detector_name, fields in detector_fields.items():
@@ -3088,6 +3282,7 @@ class DiffractionLivePlot(QtCore.QObject):
         self._live_subscriptions.clear()
         self._live_total_counts.clear()
         self._live_elapsed_time.clear()
+        self._live_scalar_counts.clear()
         self._armed_live_detectors = ()
         self._armed_live_field_signature = ()
 
@@ -3136,11 +3331,55 @@ class DiffractionLivePlot(QtCore.QObject):
             float(summary_x),
             float(scalar_value),
         )
+        if str(series_name) in self._scalar_count_labels:
+            self._live_scalar_counts[str(series_name)] = float(scalar_value)
+            self._scalar_readout_updated.emit(
+                str(series_name),
+                float(scalar_value),
+                self._current_scalar_elapsed_time(str(series_name)),
+            )
 
     def _handle_live_elapsed_time_update(self, data_key, value):
+        self._set_live_scalar_elapsed(data_key, value)
+
+    def _set_live_scalar_elapsed(self, data_key, value):
         elapsed = _coerce_number(value)
-        if elapsed is not None:
-            self._live_elapsed_time[str(data_key)] = float(elapsed)
+        if elapsed is None:
+            return
+        self._live_elapsed_time[str(data_key)] = float(elapsed)
+        for series_name, total_counts in self._live_scalar_counts.items():
+            self._scalar_readout_updated.emit(
+                str(series_name),
+                float(total_counts),
+                self._current_scalar_elapsed_time(str(series_name)),
+            )
+
+    def _current_scalar_elapsed_time(self, series_name):
+        for key in self._scalar_elapsed_keys.get(str(series_name), []):
+            value = _coerce_number(self._live_elapsed_time.get(key))
+            if value is not None:
+                return max(0.0, float(value))
+        value = self._scalar_sample_elapsed.get(str(series_name))
+        if value is not None:
+            return value
+        return self._scalar_elapsed_fallback
+
+    def _track_scalar_count_time(self, data_key, label, value, timestamps):
+        """Time soft-counter exposures from their reset when older workers
+        publish counts without an elapsed-time monitor.
+        """
+        stamp = _coerce_number(dict(timestamps or {}).get(data_key))
+        if stamp is None:
+            return
+        previous = self._scalar_count_origins.get(label)
+        if value == 0 or (previous is not None and value < previous[1]):
+            origin = stamp
+        elif previous is not None:
+            origin = previous[0]
+        else:
+            return  # Wait for a reset rather than guess an exposure start.
+        self._scalar_count_origins[label] = (origin, float(value))
+        self._scalar_sample_elapsed[label] = max(0.0, stamp - origin)
 
     @staticmethod
     def _get_live_counts_pv(detector_name):
@@ -3375,13 +3614,38 @@ class DiffractionLivePlot(QtCore.QObject):
                 values.append((data_key, value))
         return values
 
-    def _emit_scalar_values(self, data, *, x_value, live):
+    def _emit_scalar_values(self, data, *, x_value, live, timestamps=None):
         x_value = _coerce_number(x_value)
         if x_value is None:
             return
+        data = dict(data or {})
         signal = self._live_summary_point_updated if live else self._summary_point_updated
+        for data_key, spec in self._live_plot_fields.items():
+            if str(spec.get("role", "signal") or "signal") != "elapsed_time":
+                continue
+            elapsed_time = _coerce_number(data.get(data_key))
+            if elapsed_time is not None:
+                self._set_live_scalar_elapsed(data_key, elapsed_time)
         for label, value in self._extract_scalar_values(data):
             signal.emit(str(label), float(x_value), float(value))
+            if str(label) in self._scalar_count_labels:
+                if live:
+                    self._live_scalar_counts[str(label)] = float(value)
+                    for data_key, spec in self._live_plot_fields.items():
+                        if (
+                            str(spec.get("role", "signal") or "signal") == "signal"
+                            and str(spec.get("label", "") or data_key) == str(label)
+                        ):
+                            self._track_scalar_count_time(data_key, str(label), value, timestamps)
+                elapsed_time = self._current_scalar_elapsed_time(str(label))
+                if not live and not self._scalar_elapsed_keys.get(str(label)):
+                    # The committed value covers the complete configured dwell.
+                    elapsed_time = self._scalar_elapsed_fallback or elapsed_time
+                self._scalar_readout_updated.emit(
+                    str(label),
+                    float(value),
+                    elapsed_time,
+                )
 
     @staticmethod
     def _extract_detector_fields(data):

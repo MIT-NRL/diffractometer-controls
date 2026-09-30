@@ -116,6 +116,27 @@ class CountRateGauge(QtWidgets.QWidget):
             return f"× {self._scale / 1.0e3:g}k"
         return f"× {self._scale:g}"
 
+    def _draw_multiplier_badge(self, painter, top, font):
+        text = self.multiplier_text()
+        metrics = QtGui.QFontMetricsF(font)
+        badge = QtCore.QRectF(
+            0, top, metrics.horizontalAdvance(text) + 24.0, metrics.height() + 8.0
+        )
+        badge.moveLeft((self.width() - badge.width()) / 2.0)
+        palette = self.palette()
+        dark = palette.color(QtGui.QPalette.Window).lightness() < 128
+        background = QtGui.QColor("#555555" if dark else "#dddddd")
+        if self._connected:
+            foreground = QtGui.QColor("#f0f0f0" if dark else "#202020")
+        else:
+            foreground = palette.color(QtGui.QPalette.Disabled, QtGui.QPalette.ButtonText)
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.setBrush(background)
+        painter.drawRoundedRect(badge, 5.0, 5.0)
+        painter.setPen(foreground)
+        painter.setFont(font)
+        painter.drawText(badge, QtCore.Qt.AlignCenter, text)
+
     def paintEvent(self, event) -> None:
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
@@ -127,8 +148,21 @@ class CountRateGauge(QtWidgets.QWidget):
             foreground = muted
 
         width, height = self.width(), self.height()
-        center_x, center_y = width / 2.0, height * 0.52
-        radius = min(width * 0.40, height * 0.40)
+        multiplier_font = QtGui.QFont(self.font())
+        multiplier_font.setPointSize(11 if self._compact else 13)
+        multiplier_font.setBold(True)
+        badge_height = QtGui.QFontMetricsF(multiplier_font).height() + 8.0
+        center_x = width / 2.0
+        if self._compact:
+            # The open-bottom arc occupies 1 + sqrt(1/2) radii in height.
+            # Fit the dial to that footprint, reserving space for its scale.
+            radius = max(1.0, min(
+                (width - 12.0) / 2.0, (height - badge_height - 12.0) / 1.7072
+            ))
+            center_y = radius + 6.0
+        else:
+            center_y = height * 0.52
+            radius = min(width * 0.40, height * 0.40)
         start_angle = 225.0
         sweep = 270.0
 
@@ -187,11 +221,8 @@ class CountRateGauge(QtWidgets.QWidget):
             self._title,
         )
         if self._compact:
-            painter.setFont(QtGui.QFont("Sans Serif", 9))
-            painter.drawText(
-                QtCore.QRectF(0, height - 23, width, 20),
-                QtCore.Qt.AlignCenter,
-                self.multiplier_text(),
+            self._draw_multiplier_badge(
+                painter, center_y + radius * 0.7072 + 3.0, multiplier_font
             )
             return
 
@@ -204,9 +235,8 @@ class CountRateGauge(QtWidgets.QWidget):
             QtCore.Qt.AlignCenter,
             rate_text,
         )
-        painter.setFont(QtGui.QFont("Sans Serif", 11))
-        painter.drawText(
-            QtCore.QRectF(0, center_y + radius * 0.60, width, 30),
-            QtCore.Qt.AlignCenter,
-            self.multiplier_text(),
+        self._draw_multiplier_badge(
+            painter,
+            max(center_y + radius * 0.60, center_y + radius * 0.40 + 38.0),
+            multiplier_font,
         )

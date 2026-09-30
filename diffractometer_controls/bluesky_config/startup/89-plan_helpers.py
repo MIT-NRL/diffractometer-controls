@@ -58,12 +58,27 @@ def _live_plot_declarations(readable):
     if not isinstance(readable, Device):
         parent = getattr(readable, "parent", None)
         parent_declarations = dict(getattr(parent, "live_plot_signals", {}) or {})
+        selected_declaration = None
         for attribute, spec in parent_declarations.items():
             try:
                 if _resolve_dotted_attribute(parent, attribute) is readable:
-                    return {"": dict(spec or {})}
+                    selected_declaration = dict(spec or {})
+                    break
             except Exception:
                 continue
+        if selected_declaration is not None:
+            selected_declaration.setdefault(
+                "source", str(getattr(parent, "name", "") or "")
+            )
+            declarations = {"": selected_declaration}
+            # Count-rate displays need the device's actual elapsed time even
+            # when the plan reads only one selected scaler channel.
+            for attribute, spec in parent_declarations.items():
+                spec = dict(spec or {})
+                if str(spec.get("role", "") or "") == "elapsed_time":
+                    spec.setdefault("source", str(getattr(parent, "name", "") or ""))
+                    declarations[str(attribute)] = spec
+            return declarations
         return {"": {"role": "signal"}}
 
     try:
@@ -93,7 +108,15 @@ def _build_live_plot_fields(readables):
             spec = dict(raw_spec or {})
             signal = None
             if not isinstance(readable, Device):
-                signal = readable
+                if str(attribute):
+                    try:
+                        signal = _resolve_dotted_attribute(
+                            getattr(readable, "parent", None), attribute
+                        )
+                    except Exception:
+                        continue
+                else:
+                    signal = readable
             else:
                 explicit_data_key = str(spec.get("data_key", "") or "")
                 signal = signal_index.get(str(attribute)) or signal_index.get(explicit_data_key)

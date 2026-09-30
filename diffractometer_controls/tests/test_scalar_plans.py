@@ -311,6 +311,18 @@ class TestScalarPlans(unittest.TestCase):
             start["live_plot_fields"]["sim_usbctr_he3_tube"]["transport"],
             "document",
         )
+        self.assertEqual(
+            start["live_plot_fields"]["sim_usbctr_he3_tube"]["source"],
+            "sim_usbctr",
+        )
+        self.assertEqual(
+            start["live_plot_fields"]["sim_usbctr_time"]["role"],
+            "elapsed_time",
+        )
+        self.assertEqual(
+            start["live_plot_fields"]["sim_usbctr_time"]["transport"],
+            "document",
+        )
         self.assertNotIn("sim_usbctr_beam_monitor", start["live_plot_fields"])
         descriptors = {
             doc["uid"]: doc["name"]
@@ -328,6 +340,23 @@ class TestScalarPlans(unittest.TestCase):
             tube_events[-1]["data"]["sim_usbctr_he3_tube"],
             tube_events[0]["data"]["sim_usbctr_he3_tube"],
         )
+        time_events = [
+            doc
+            for name, doc in documents
+            if name == "event"
+            and descriptors.get(doc["descriptor"]) == "sim_usbctr_time_monitor"
+        ]
+        self.assertGreaterEqual(len(time_events), 2)
+        self.assertGreater(
+            time_events[-1]["data"]["sim_usbctr_time"],
+            time_events[0]["data"]["sim_usbctr_time"],
+        )
+        observed_rate = (
+            tube_events[-1]["data"]["sim_usbctr_he3_tube"]
+            / time_events[-1]["data"]["sim_usbctr_time"]
+        )
+        self.assertGreater(observed_rate, 500.0)
+        self.assertLess(observed_rate, 1200.0)
         primary_events = [
             doc
             for name, doc in documents

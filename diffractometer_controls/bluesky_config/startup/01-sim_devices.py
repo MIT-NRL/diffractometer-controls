@@ -331,10 +331,13 @@ class SimUSBCTR08Scaler(Device):
                 if interval:
                     beam_counts += int(self._rng.poisson(self._beam_monitor_rate * interval))
                     tube_counts += int(self._rng.poisson(self._he3_tube_rate * interval))
+                    # Publish the new elapsed time first so each following
+                    # counter update is divided by the matching interval in
+                    # the live count-rate display.
+                    self.time.put(float(elapsed))
                     self.clock_counts.put(int(round(self._clock_frequency * elapsed)))
                     self.beam_monitor.put(beam_counts)
                     self.he3_tube.put(tube_counts)
-                    self.time.put(float(elapsed))
                     previous_elapsed = elapsed
                 if elapsed >= target:
                     break
