@@ -8,6 +8,12 @@ from pydm.widgets.channel import PyDMChannel
 from qtpy import QtCore
 
 
+# EPICS enum selections (VAL), not the raw hardware values in *VL fields.
+MCS_CHANNEL_ADVANCE_INTERNAL = 0
+MCS_TRIGGER_LOW_LEVEL = 3
+MCS_POINT_ZERO_SKIP = 2
+
+
 def value_slot(method):
     """Accept the scalar and array value types emitted by PyDM plugins."""
     for value_type in (int, float, str, bool, object):
@@ -42,6 +48,23 @@ def display_macros(display) -> dict[str, str]:
 
 def ca_address(pv: str) -> str:
     return pv if "://" in pv else f"ca://{pv}"
+
+
+def configure_spinbox(
+    widget,
+    minimum: float,
+    maximum: float,
+    *,
+    single_step: float | None = None,
+) -> None:
+    """Give a PyDM spinbox useful limits when its EPICS record has none."""
+    widget.userMinimum = float(minimum)
+    widget.userMaximum = float(maximum)
+    widget.userDefinedLimits = True
+    widget.writeOnPress = True
+    widget.showStepExponent = False
+    if single_step is not None:
+        widget.setSingleStep(float(single_step))
 
 
 def channel_waveform_suffix(channel_index: int) -> str:

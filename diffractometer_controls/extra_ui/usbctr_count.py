@@ -1,9 +1,9 @@
-"""Single-channel timed scaler display for the USB-CTR08."""
+"""Simple timed-count display for the USB-CTR08."""
 
 from __future__ import annotations
 
 from pydm import Display
-from pydm.widgets import PyDMEnumComboBox, PyDMLabel, PyDMSpinbox
+from pydm.widgets import PyDMLabel, PyDMSpinbox
 from pydm.widgets.channel import PyDMChannel
 from qtpy import QtCore, QtWidgets
 
@@ -13,6 +13,7 @@ try:
         FloatPVWriter,
         IntPVWriter,
         ca_address,
+        configure_spinbox,
         count_rate,
         display_macros,
         scaler_count_field,
@@ -29,6 +30,7 @@ except ModuleNotFoundError as exc:
         FloatPVWriter,
         IntPVWriter,
         ca_address,
+        configure_spinbox,
         count_rate,
         display_macros,
         scaler_count_field,
@@ -36,8 +38,8 @@ except ModuleNotFoundError as exc:
     )
 
 
-class USBCTRTimedCounterDisplay(Display):
-    """Run a native scaler count and show one selected counter."""
+class USBCTRCountDisplay(Display):
+    """Configure a timed scaler count and show one selected counter."""
 
     def __init__(self, parent=None, args=None, macros=None):
         self._channels = []
@@ -48,11 +50,14 @@ class USBCTRTimedCounterDisplay(Display):
         self._running = False
         self._mcs_busy = False
         self._display_rate = None
+        self._clock_frequency = None
+        self._preset_time = None
         self._start_pending = False
         super().__init__(parent=parent, args=args, macros=macros)
 
         values = display_macros(self)
         board_prefix = values.get("P", "4dh4:USBCTR:")
+        self._board_prefix = board_prefix
         scaler_name = values.get("S", "scaler1")
         self._scaler_prefix = f"{board_prefix}{scaler_name}"
         self._mcs_prefix = values.get("MP", f"{board_prefix}MCS:")
@@ -60,33 +65,52 @@ class USBCTRTimedCounterDisplay(Display):
         self._count_writer = IntPVWriter(f"{self._scaler_prefix}.CNT", self)
         self._mode_writer = IntPVWriter(f"{self._scaler_prefix}.CONT", self)
         self._rate_writer = FloatPVWriter(f"{self._scaler_prefix}.RATE", self)
+        self._clock_writer = FloatPVWriter(f"{self._scaler_prefix}.FREQ", self)
+        self._preset_writer = FloatPVWriter(f"{self._scaler_prefix}.TP", self)
+        self._pulse_run_writer = IntPVWriter(
+            f"{board_prefix}PulseGen1Run", self
+        )
         self._writers.extend(
-            (self._count_writer, self._mode_writer, self._rate_writer)
+            (
+                self._count_writer,
+                self._mode_writer,
+                self._rate_writer,
+                self._clock_writer,
+                self._preset_writer,
+                self._pulse_run_writer,
+            )
         )
 
         self._build_ui()
         self._connect_fixed_channels()
-        self._select_channel(0)
+        self.channel_selector.setCurrentIndex(1)
+        self._select_channel(1)
         self._refresh_controls()
 
     def _scaler_pv(self, field: str) -> str:
         return ca_address(f"{self._scaler_prefix}.{field}")
 
     def _build_ui(self) -> None:
-        self.setWindowTitle("USB-CTR08 Basic Timed Counter")
-        self.resize(900, 560)
+        self.setWindowTitle("USB-CTR Count")
+        self.resize(860, 540)
         outer = QtWidgets.QVBoxLayout(self)
 
-        heading = QtWidgets.QLabel("USB-CTR08 Basic Timed Counter")
+        heading = QtWidgets.QLabel("USB-CTR Count")
         heading.setStyleSheet("font-size: 20px; font-weight: 600;")
         outer.addWidget(heading)
 
         selector_row = QtWidgets.QHBoxLayout()
         selector_row.addWidget(QtWidgets.QLabel("Counter channel"))
         self.channel_selector = QtWidgets.QComboBox()
+        channel_names = {
+            0: "clock",
+            1: "beam monitor",
+            2: "He-3 tube",
+        }
         for index in range(8):
+            description = channel_names.get(index, "counter")
             self.channel_selector.addItem(
-                f"CTR{index}  (EPICS scaler S{index + 1})", index
+                f"CTR{index} — {description}", index
             )
         self.channel_selector.currentIndexChanged.connect(
             self._select_channel
@@ -124,27 +148,30 @@ class USBCTRTimedCounterDisplay(Display):
         controls = QtWidgets.QWidget()
         controls_layout = QtWidgets.QVBoxLayout(controls)
 
-        settings = QtWidgets.QGroupBox("Timed-count settings")
+        settings = QtWidgets.QGroupBox("Count settings")
         settings_form = QtWidgets.QFormLayout(settings)
         count_time = PyDMSpinbox(init_channel=self._scaler_pv("TP"))
         count_time.precisionFromPV = False
         count_time.precision = 3
+        configure_spinbox(count_time, 0.001, 604800.0, single_step=1.0)
         settings_form.addRow("Count time (s)", count_time)
         update_rate = PyDMSpinbox(init_channel=self._scaler_pv("RATE"))
         update_rate.precisionFromPV = False
         update_rate.precision = 1
+        configure_spinbox(update_rate, 0.1, 100.0, single_step=0.1)
         settings_form.addRow("Live update rate (Hz)", update_rate)
-        clock = PyDMSpinbox(init_channel=self._scaler_pv("FREQ"))
-        clock.precisionFromPV = False
-        clock.precision = 0
-        settings_form.addRow("CTR0 clock frequency (Hz)", clock)
         settings_form.addRow(
-            "Count mode", PyDMEnumComboBox(init_channel=self._scaler_pv("CONT"))
+            "Clock frequency (Hz)",
+            PyDMLabel(
+                init_channel=ca_address(
+                    f"{self._board_prefix}PulseGen1Frequency_RBV"
+                )
+            ),
         )
         controls_layout.addWidget(settings)
 
         actions = QtWidgets.QHBoxLayout()
-        self.start_button = QtWidgets.QPushButton("Start count")
+        self.start_button = QtWidgets.QPushButton("Start")
         self.start_button.clicked.connect(self._start_count)
         self.stop_button = QtWidgets.QPushButton("Stop")
         self.stop_button.clicked.connect(self._stop_count)
@@ -164,13 +191,14 @@ class USBCTRTimedCounterDisplay(Display):
         controls_layout.addWidget(readings)
 
         wiring = QtWidgets.QLabel(
-            "Timed scaler operation requires a clock into CTR0 and CTR0 Output "
-            "wired to the Gate inputs of CTR1–CTR7. The FREQ value must match "
-            "the actual CTR0 clock. CTR0 is normally the timing reference."
+            "Required jumpers: TMR0 to C0IN, then C0OUT to each detector "
+            "counter gate in use (for C1IN, connect C0OUT to C1GT). CTR0 is "
+            "the timing reference; detector inputs begin at CTR1."
         )
         wiring.setWordWrap(True)
         wiring.setStyleSheet(
-            "background: #fff4ce; color: #3b3100; padding: 8px; border: 1px solid #d6b656;"
+            "background: #fff4ce; color: #3b3100; padding: 8px; "
+            "border: 1px solid #d6b656;"
         )
         controls_layout.addWidget(wiring)
 
@@ -196,7 +224,14 @@ class USBCTRTimedCounterDisplay(Display):
         self._connect(f"{self._scaler_prefix}.T", self._on_elapsed)
         self._connect(f"{self._scaler_prefix}.CNT", self._on_running)
         self._connect(f"{self._scaler_prefix}.RATE", self._on_display_rate)
-        self._connect(f"{self._mcs_prefix}Acquiring", self._on_mcs_busy)
+        self._connect(
+            f"{self._board_prefix}PulseGen1Frequency_RBV",
+            self._on_clock_frequency,
+        )
+        self._connect(f"{self._scaler_prefix}.TP", self._on_preset_time)
+        self._connect(
+            f"{self._mcs_prefix}HardwareAcquiring", self._on_mcs_busy
+        )
 
     @QtCore.Slot(int)
     def _select_channel(self, index: int) -> None:
@@ -259,6 +294,22 @@ class USBCTRTimedCounterDisplay(Display):
         except (TypeError, ValueError):
             self._display_rate = None
 
+    @value_slot
+    def _on_clock_frequency(self, value) -> None:
+        try:
+            self._clock_frequency = float(value)
+        except (TypeError, ValueError):
+            self._clock_frequency = None
+        self._refresh_controls()
+
+    @value_slot
+    def _on_preset_time(self, value) -> None:
+        try:
+            self._preset_time = float(value)
+        except (TypeError, ValueError):
+            self._preset_time = None
+        self._refresh_controls()
+
     def _update_rate(self) -> None:
         rate = count_rate(self._counts, self._elapsed)
         self.gauge.set_rate(rate)
@@ -273,20 +324,38 @@ class USBCTRTimedCounterDisplay(Display):
                 "Cannot start the timed counter while MCS acquisition is active."
             )
             return
+        if self._clock_frequency is None or self._clock_frequency <= 0.0:
+            self.status.setText(
+                "Cannot start: the TMR0 clock frequency is unavailable."
+            )
+            return
+        if self._preset_time is None or self._preset_time <= 0.0:
+            self.status.setText("Cannot start: set Count time above zero.")
+            return
         self._start_pending = True
         self._mode_writer.value.emit(0)
+        self._clock_writer.value.emit(self._clock_frequency)
+        self._pulse_run_writer.value.emit(1)
         if self._display_rate is None or self._display_rate <= 0.0:
             self._rate_writer.value.emit(5.0)
             self.status.setText(
                 "Live update rate was zero; set to 5 Hz. Starting timed count."
             )
         else:
-            self.status.setText("Timed count start requested.")
-        QtCore.QTimer.singleShot(100, self._finish_start_count)
+            self.status.setText("Configuring timed count…")
+        QtCore.QTimer.singleShot(100, self._apply_preset_time)
+
+    def _apply_preset_time(self) -> None:
+        if self._start_pending and not self._mcs_busy:
+            # scalerRecord only recalculates PR1 when TP is processed.  FREQ
+            # must therefore be written first and TP reprocessed afterward.
+            self._preset_writer.value.emit(self._preset_time)
+            QtCore.QTimer.singleShot(100, self._finish_start_count)
 
     def _finish_start_count(self) -> None:
         if self._start_pending and not self._mcs_busy:
             self._start_pending = False
+            self.status.setText("Timed count start requested.")
             self._count_writer.value.emit(1)
 
     @QtCore.Slot()
@@ -296,14 +365,30 @@ class USBCTRTimedCounterDisplay(Display):
         self._count_writer.value.emit(0)
 
     def _refresh_controls(self) -> None:
-        self.start_button.setEnabled(not self._running and not self._mcs_busy)
-        self.stop_button.setEnabled(self._running)
+        self.start_button.setEnabled(
+            self._clock_frequency is not None
+            and self._clock_frequency > 0.0
+            and self._preset_time is not None
+            and self._preset_time > 0.0
+            and not self._running
+            and not self._mcs_busy
+            and not self._start_pending
+        )
+        self.stop_button.setEnabled(self._running or self._start_pending)
         if self._mcs_busy:
-            self.status.setText("MCS mode is active; timed-count Start is interlocked.")
+            self.status.setText(
+                "MCS mode is active; timed-count Start is interlocked."
+            )
         elif self._running:
             self.status.setText("Timed count is running.")
+        elif self._clock_frequency is None or self._clock_frequency <= 0.0:
+            self.status.setText("Waiting for the timer clock.")
+        elif self._preset_time is None or self._preset_time <= 0.0:
+            self.status.setText("Set Count time above zero before starting.")
         elif self._elapsed > 0.0:
             self.status.setText("Timed count is complete or stopped.")
+        else:
+            self.status.setText("Ready to count.")
 
     def closeEvent(self, event) -> None:
         for channel in tuple(self._channels):

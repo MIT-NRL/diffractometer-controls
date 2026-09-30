@@ -147,6 +147,8 @@ class USBCTR08Scaler(EpicsScaler):
     # scalar fields even though it is a multi-signal Device.
     scalar_plan_compatible = True
     detector_type = "usbctr08"
+    clock_frequency_hz = 1000.0
+    trigger_timeout_margin_s = 5.0
     acquisition_monitor_signals = {
         "active": "count",
         "duration": "preset_time",
@@ -209,7 +211,41 @@ class USBCTR08Scaler(EpicsScaler):
     counter_6 = Cpt(EpicsSignalRO, ".S7", kind="normal")
     counter_7 = Cpt(EpicsSignalRO, ".S8", kind="normal")
 
+    # The scaler record requires Counter 0 to receive a real pulse train.
+    # PulseGen1 is the board's TMR0 output; a short external jumper connects
+    # TMR0 to C0IN.  A second jumper from C0OUT to each detector counter's
+    # gate input makes Counter 0 the common hardware exposure gate.
+    pulse_frequency = FCpt(
+        EpicsSignal,
+        "{self._board_prefix}PulseGen1Frequency",
+        kind="config",
+    )
+    pulse_frequency_readback = FCpt(
+        EpicsSignalRO,
+        "{self._board_prefix}PulseGen1Frequency_RBV",
+        kind="config",
+    )
+    pulse_duty_cycle = FCpt(
+        EpicsSignal,
+        "{self._board_prefix}PulseGen1DutyCycle",
+        kind="config",
+    )
+    pulse_count = FCpt(
+        EpicsSignal,
+        "{self._board_prefix}PulseGen1Count",
+        kind="config",
+    )
+    pulse_run = FCpt(
+        EpicsSignal,
+        "{self._board_prefix}PulseGen1Run",
+        kind="omitted",
+    )
+
     def __init__(self, *args, **kwargs):
+        prefix = args[0] if args else kwargs.get("prefix", "")
+        self._board_prefix = kwargs.pop("board_prefix", None) or str(
+            prefix
+        ).removesuffix("scaler1")
         # Use stable, descriptive data keys rather than the generic scaler's
         # 32-channel ``channels.chanN`` hierarchy.
         kwargs.setdefault(
@@ -228,7 +264,16 @@ class USBCTR08Scaler(EpicsScaler):
         )
         kwargs.setdefault(
             "configuration_attrs",
-            ["preset_time", "freq", "count_mode", "delay"],
+            [
+                "preset_time",
+                "freq",
+                "count_mode",
+                "delay",
+                "pulse_frequency",
+                "pulse_frequency_readback",
+                "pulse_duty_cycle",
+                "pulse_count",
+            ],
         )
         super().__init__(*args, **kwargs)
 
@@ -238,6 +283,13 @@ class USBCTR08Scaler(EpicsScaler):
         self.stage_sigs.update(
             [("count_mode", 0), ("gates.gate1", 1)]
             + [(f"gates.gate{channel}", 0) for channel in range(2, 9)]
+            + [
+                ("freq", self.clock_frequency_hz),
+                ("pulse_frequency", self.clock_frequency_hz),
+                ("pulse_duty_cycle", 0.5),
+                ("pulse_count", 0),
+                ("pulse_run", 1),
+            ]
         )
 
     @property
@@ -248,22 +300,58 @@ class USBCTR08Scaler(EpicsScaler):
     def stage(self):
         if self.count.get() != 0:
             raise RuntimeError(f"Cannot stage {self.name} while it is counting")
-        if self.freq.get() <= 0:
-            raise RuntimeError(
-                f"Cannot stage {self.name} with a non-positive clock frequency"
-            )
-        return super().stage()
+        staged = super().stage()
+        try:
+            # The scaler record converts preset time to CTR0 ticks only when
+            # .TP is processed.  Plans may set .TP before staging, so changing
+            # .FREQ here without reprocessing .TP would leave .PR1 calculated
+            # from the old clock.  Use the pulse generator's actual frequency,
+            # as required by the measComp scaler documentation, then rewrite
+            # the current preset time to regenerate .PR1.
+            actual_frequency = float(self.pulse_frequency_readback.get())
+            if not np.isfinite(actual_frequency) or actual_frequency <= 0:
+                raise RuntimeError(
+                    f"Cannot stage {self.name}: PulseGen1 frequency readback "
+                    f"is not positive ({actual_frequency!r})"
+                )
+            self.freq.set(actual_frequency).wait()
+            self.preset_time.set(float(self.preset_time.get())).wait()
+        except Exception:
+            self.unstage()
+            raise
+        return staged
+
+    def trigger(self):
+        """Start one scaler exposure with a finite hardware-failure timeout."""
+        acquire_time = max(0.0, float(self.preset_time.get()))
+        timeout = acquire_time + max(
+            self.trigger_timeout_margin_s,
+            acquire_time * 0.1,
+        )
+        status = DeviceStatus(self, timeout=timeout)
+
+        def acquisition_complete(**_kwargs):
+            if not status.done:
+                status.set_finished()
+
+        try:
+            # The scaler record's put callback completes when asynchronous
+            # counting completes, not merely when CNT is written.
+            self.count.put(1, wait=False, callback=acquisition_complete)
+        except Exception as exc:
+            status.set_exception(exc)
+        return status
 
     def stop(self, *, success=False):
         # Device.stop() only visits child devices; explicitly stop the scaler
         # record as well so an interrupted Bluesky run stops the hardware.
-        self.count.set(0).wait()
+        self.count.put(0, wait=False)
         return super().stop(success=success)
 
 
 # Leave the class importable for plan/display development, but do not create
 # EPICS connections until the CTR-08 has arrived and its IOC is enabled.
-ENABLE_USBCTR08 = False
+ENABLE_USBCTR08 = True
 
 if ENABLE_USBCTR08:
     usbctr = USBCTR08Scaler("4dh4:USBCTR:scaler1", name="usbctr")

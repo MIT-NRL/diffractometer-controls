@@ -1,4 +1,4 @@
-"""Single-channel MCS count-rate display for the USB-CTR08."""
+"""Simple MCS count-rate display for the USB-CTR08."""
 
 from __future__ import annotations
 
@@ -12,8 +12,12 @@ try:
     from diffractometer_controls.extra_ui.count_rate_gauge import CountRateGauge
     from diffractometer_controls.extra_ui.usbctr_common import (
         IntPVWriter,
+        MCS_CHANNEL_ADVANCE_INTERNAL,
+        MCS_POINT_ZERO_SKIP,
+        MCS_TRIGGER_LOW_LEVEL,
         ca_address,
         channel_waveform_suffix,
+        configure_spinbox,
         display_macros,
         mcs_average_rate,
         value_slot,
@@ -27,16 +31,20 @@ except ModuleNotFoundError as exc:
     from count_rate_gauge import CountRateGauge
     from usbctr_common import (
         IntPVWriter,
+        MCS_CHANNEL_ADVANCE_INTERNAL,
+        MCS_POINT_ZERO_SKIP,
+        MCS_TRIGGER_LOW_LEVEL,
         ca_address,
         channel_waveform_suffix,
+        configure_spinbox,
         display_macros,
         mcs_average_rate,
         value_slot,
     )
 
 
-class USBCTRMCSRateDisplay(Display):
-    """Display one USB-CTR08 MCS channel as a live count rate."""
+class USBCTRRateDisplay(Display):
+    """Configure MCS acquisition and display one channel's live rate."""
 
     def __init__(self, parent=None, args=None, macros=None):
         self._channels = []
@@ -46,6 +54,8 @@ class USBCTRMCSRateDisplay(Display):
         self._samples = np.asarray([], dtype=float)
         self._dwell = 0.0
         self._acquiring = False
+        self._hardware_acquiring = False
+        self._snl_connected = False
         self._scaler_counting = False
         self._scaler_auto = False
         self._scaler_busy = False
@@ -73,7 +83,6 @@ class USBCTRMCSRateDisplay(Display):
         self._point_zero_writer = IntPVWriter(
             f"{self._mcs_prefix}Point0Action", self
         )
-        self._points_writer = IntPVWriter(f"{self._mcs_prefix}NuseAll", self)
         self._writers.extend(
             (
                 self._erase_start,
@@ -81,33 +90,39 @@ class USBCTRMCSRateDisplay(Display):
                 self._channel_advance_writer,
                 self._trigger_mode_writer,
                 self._point_zero_writer,
-                self._points_writer,
             )
         )
 
         self._build_ui()
         self._connect_fixed_channels()
-        self._select_channel(0)
+        self.channel_selector.setCurrentIndex(1)
+        self._select_channel(1)
         self._refresh_controls()
 
     def _pv(self, suffix: str) -> str:
         return ca_address(f"{self._mcs_prefix}{suffix}")
 
     def _build_ui(self) -> None:
-        self.setWindowTitle("USB-CTR08 MCS Count Rate")
-        self.resize(940, 620)
+        self.setWindowTitle("USB-CTR Count Rate")
+        self.resize(900, 600)
         outer = QtWidgets.QVBoxLayout(self)
 
-        heading = QtWidgets.QLabel("USB-CTR08 MCS Count-Rate Gauge")
+        heading = QtWidgets.QLabel("USB-CTR Count Rate")
         heading.setStyleSheet("font-size: 20px; font-weight: 600;")
         outer.addWidget(heading)
 
         top = QtWidgets.QHBoxLayout()
         top.addWidget(QtWidgets.QLabel("Counter channel"))
         self.channel_selector = QtWidgets.QComboBox()
+        channel_names = {
+            0: "clock",
+            1: "beam monitor",
+            2: "He-3 tube",
+        }
         for index in range(8):
+            description = channel_names.get(index, "counter")
             self.channel_selector.addItem(
-                f"CTR{index}  (EPICS mca{index + 1})", index
+                f"CTR{index} — {description}", index
             )
         self.channel_selector.currentIndexChanged.connect(
             self._select_channel
@@ -124,60 +139,52 @@ class USBCTRMCSRateDisplay(Display):
         outer.addLayout(top)
 
         content = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
-        self.gauge = CountRateGauge(title="CTR0 MCS RATE")
+        self.gauge = CountRateGauge(title="CTR0 RATE")
         content.addWidget(self.gauge)
 
         controls = QtWidgets.QWidget()
         controls_layout = QtWidgets.QVBoxLayout(controls)
 
-        acquisition = QtWidgets.QGroupBox("Acquisition")
+        acquisition = QtWidgets.QGroupBox("Rate settings")
         acquisition_form = QtWidgets.QFormLayout(acquisition)
         self.dwell_control = PyDMSpinbox(init_channel=self._pv("Dwell"))
         self.dwell_control.precisionFromPV = False
-        self.dwell_control.precision = 6
+        self.dwell_control.precision = 9
+        configure_spinbox(
+            self.dwell_control,
+            0.00000025,
+            3600.0,
+            single_step=0.001,
+        )
         acquisition_form.addRow("Dwell setpoint (s)", self.dwell_control)
         acquisition_form.addRow(
             "Actual dwell (s)", PyDMLabel(init_channel=self._pv("Dwell_RBV"))
         )
-        acquisition_form.addRow(
-            "Time points", PyDMSpinbox(init_channel=self._pv("NuseAll"))
-        )
+        self.time_points_control = self._time_points_control()
+        acquisition_form.addRow("Time points", self.time_points_control)
         preset = PyDMSpinbox(init_channel=self._pv("PresetReal"))
         preset.precisionFromPV = False
         preset.precision = 3
+        configure_spinbox(preset, 0.0, 604800.0, single_step=1.0)
         acquisition_form.addRow("Stop after (s, 0 disables)", preset)
         self.continuous = QtWidgets.QCheckBox("Restart when buffer completes")
+        self.continuous.setChecked(True)
         acquisition_form.addRow("Continuous", self.continuous)
-        controls_layout.addWidget(acquisition)
 
-        mode = QtWidgets.QGroupBox("MCS operating settings")
-        mode_form = QtWidgets.QFormLayout(mode)
-        mode_form.addRow(
-            "Channel advance",
-            PyDMEnumComboBox(init_channel=self._pv("ChannelAdvance")),
-        )
-        mode_form.addRow(
-            "Trigger mode", PyDMEnumComboBox(init_channel=self._pv("TrigMode"))
-        )
-        mode_form.addRow(
-            "Point zero", PyDMEnumComboBox(init_channel=self._pv("Point0Action"))
-        )
         self.enable_control = PyDMEnumComboBox()
-        mode_form.addRow("Selected counter enabled", self.enable_control)
-        self.apply_recommended = QtWidgets.QCheckBox(
-            "Internal / Low / Skip / 2048 points"
+        acquisition_form.addRow(
+            "Selected counter enabled", self.enable_control
         )
-        self.apply_recommended.setChecked(True)
-        mode_form.addRow("Apply on Start", self.apply_recommended)
         recommendation = QtWidgets.QLabel(
-            "Uncheck to preserve advanced MCS settings."
+            "Start applies the standard rate settings: internal channel "
+            "advance, low-level trigger, and skip point zero."
         )
         recommendation.setWordWrap(True)
-        mode_form.addRow(recommendation)
-        controls_layout.addWidget(mode)
+        acquisition_form.addRow(recommendation)
+        controls_layout.addWidget(acquisition)
 
         actions = QtWidgets.QHBoxLayout()
-        self.start_button = QtWidgets.QPushButton("Erase / Start")
+        self.start_button = QtWidgets.QPushButton("Start")
         self.start_button.clicked.connect(self._start_acquisition)
         self.stop_button = QtWidgets.QPushButton("Stop")
         self.stop_button.clicked.connect(self._stop_acquisition)
@@ -214,6 +221,13 @@ class USBCTRMCSRateDisplay(Display):
         content.setSizes([560, 380])
         outer.addWidget(content, 1)
 
+    def _time_points_control(self):
+        control = PyDMSpinbox(init_channel=self._pv("NuseAll"))
+        control.precisionFromPV = False
+        control.precision = 0
+        configure_spinbox(control, 1, 2048, single_step=1)
+        return control
+
     def _connect(self, pv: str, slot, connection_slot=None) -> PyDMChannel:
         channel = PyDMChannel(
             address=ca_address(pv),
@@ -226,7 +240,14 @@ class USBCTRMCSRateDisplay(Display):
 
     def _connect_fixed_channels(self) -> None:
         self._connect(f"{self._mcs_prefix}Dwell_RBV", self._on_dwell)
+        self._connect(
+            f"{self._mcs_prefix}SNL_Connected", self._on_snl_connected
+        )
         self._connect(f"{self._mcs_prefix}Acquiring", self._on_acquiring)
+        self._connect(
+            f"{self._mcs_prefix}HardwareAcquiring",
+            self._on_hardware_acquiring,
+        )
         self._connect(f"{self._scaler_prefix}.CNT", self._on_scaler_counting)
         self._connect(f"{self._scaler_prefix}.CONT", self._on_scaler_auto)
 
@@ -235,7 +256,7 @@ class USBCTRMCSRateDisplay(Display):
         if not hasattr(self, "gauge"):
             return
         index = max(0, min(7, int(index)))
-        self.gauge.set_title(f"CTR{index} MCS RATE")
+        self.gauge.set_title(f"CTR{index} RATE")
         self._samples = np.asarray([], dtype=float)
         self._update_rate()
 
@@ -284,10 +305,12 @@ class USBCTRMCSRateDisplay(Display):
         except (TypeError, ValueError):
             self._dwell = 0.0
         self._update_rate()
+        self._refresh_controls()
 
     @value_slot
     def _on_counter_enabled(self, value) -> None:
         self._selected_enabled = bool(value)
+        self._refresh_controls()
 
     @value_slot
     def _on_scaler_counting(self, value) -> None:
@@ -318,6 +341,16 @@ class USBCTRMCSRateDisplay(Display):
         ):
             QtCore.QTimer.singleShot(200, self._restart_if_allowed)
 
+    @value_slot
+    def _on_hardware_acquiring(self, value) -> None:
+        self._hardware_acquiring = bool(value)
+        self._refresh_controls()
+
+    @value_slot
+    def _on_snl_connected(self, value) -> None:
+        self._snl_connected = bool(value)
+        self._refresh_controls()
+
     def _update_rate(self) -> None:
         bins = self.average_bins.value() if hasattr(self, "average_bins") else 1
         rate = mcs_average_rate(self._samples, self._dwell, bins)
@@ -338,28 +371,37 @@ class USBCTRMCSRateDisplay(Display):
                 "Cannot start MCS mode while the scaler counter is running."
             )
             return
+        if not self._snl_connected:
+            self.status.setText(
+                "Cannot start: the USB-CTR MCS sequencer is not connected."
+            )
+            return
+        if self._dwell <= 0.0:
+            self.status.setText("Cannot start: set Dwell above zero.")
+            return
         if self._selected_enabled is not True:
             self.status.setText(
                 "The selected counter is disabled or its enable record is not "
-                "connected. Enable it in the vendor screen before starting."
+                "connected. Enable it with Selected counter enabled above."
             )
             return
         self._restart_armed = True
         self._start_pending = True
-        if self.apply_recommended.isChecked():
-            self._channel_advance_writer.value.emit(0)
-            self._trigger_mode_writer.value.emit(7)
-            self._point_zero_writer.value.emit(2)
-            self._points_writer.value.emit(2048)
-            self.status.setText(
-                "Applying Internal / Low / Skip / 2048, then starting MCS."
-            )
-            QtCore.QTimer.singleShot(150, self._finish_start_acquisition)
-        else:
-            self._finish_start_acquisition()
+        self._channel_advance_writer.value.emit(MCS_CHANNEL_ADVANCE_INTERNAL)
+        self._trigger_mode_writer.value.emit(MCS_TRIGGER_LOW_LEVEL)
+        self._point_zero_writer.value.emit(MCS_POINT_ZERO_SKIP)
+        self.status.setText("Configuring and starting count rate…")
+        QtCore.QTimer.singleShot(150, self._finish_start_acquisition)
 
     def _finish_start_acquisition(self) -> None:
-        if self._start_pending and not self._scaler_busy and not self._acquiring:
+        if (
+            self._start_pending
+            and self._snl_connected
+            and self._dwell > 0.0
+            and not self._scaler_busy
+            and not self._acquiring
+            and not self._hardware_acquiring
+        ):
             self._start_pending = False
             self.status.setText("MCS acquisition start requested.")
             self._erase_start.value.emit(1)
@@ -372,20 +414,43 @@ class USBCTRMCSRateDisplay(Display):
         self._stop.value.emit(1)
 
     def _restart_if_allowed(self) -> None:
-        if self._restart_armed and not self._scaler_busy and not self._acquiring:
+        if (
+            self._restart_armed
+            and self._snl_connected
+            and self._dwell > 0.0
+            and not self._scaler_busy
+            and not self._acquiring
+            and not self._hardware_acquiring
+        ):
             self.status.setText("Restarting the MCS count-rate acquisition.")
             self._erase_start.value.emit(1)
 
     def _refresh_controls(self) -> None:
-        self.start_button.setEnabled(not self._acquiring and not self._scaler_busy)
-        self.stop_button.setEnabled(self._acquiring)
-        if self._scaler_busy:
+        busy = self._acquiring or self._hardware_acquiring
+        self.start_button.setEnabled(
+            self._snl_connected
+            and self._dwell > 0.0
+            and self._selected_enabled is True
+            and not busy
+            and not self._scaler_busy
+            and not self._start_pending
+        )
+        self.stop_button.setEnabled(busy or self._start_pending)
+        if not self._snl_connected:
+            self.status.setText("MCS sequencer is not connected.")
+        elif self._dwell <= 0.0:
+            self.status.setText("Set Dwell above zero before starting.")
+        elif self._selected_enabled is not True:
+            self.status.setText("Enable the selected counter before starting.")
+        elif self._scaler_busy:
             mode = "AutoCount" if self._scaler_auto else "a timed count"
             self.status.setText(
                 f"Scaler {mode} is active; MCS Start is interlocked."
             )
-        elif self._acquiring:
+        elif busy:
             self.status.setText("MCS acquisition is running.")
+        else:
+            self.status.setText("Ready to measure count rate.")
 
     def closeEvent(self, event) -> None:
         self._restart_armed = False

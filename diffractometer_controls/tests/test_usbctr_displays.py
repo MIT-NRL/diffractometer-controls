@@ -6,14 +6,33 @@ from diffractometer_controls.extra_ui.count_rate_gauge import (
     engineering_rate_text,
 )
 from diffractometer_controls.extra_ui.usbctr_common import (
+    MCS_CHANNEL_ADVANCE_INTERNAL,
+    MCS_POINT_ZERO_SKIP,
+    MCS_TRIGGER_LOW_LEVEL,
     channel_waveform_suffix,
+    configure_spinbox,
     count_rate,
     mcs_average_rate,
     scaler_count_field,
 )
 
 
+class _SpinboxStub:
+    def setSingleStep(self, value):
+        self.single_step = value
+
+
 class CountRateCalculationTests(unittest.TestCase):
+    def test_spinbox_configuration_supplies_missing_epics_limits(self):
+        widget = _SpinboxStub()
+        configure_spinbox(widget, 0.001, 100.0, single_step=0.1)
+        self.assertEqual(widget.userMinimum, 0.001)
+        self.assertEqual(widget.userMaximum, 100.0)
+        self.assertTrue(widget.userDefinedLimits)
+        self.assertTrue(widget.writeOnPress)
+        self.assertFalse(widget.showStepExponent)
+        self.assertEqual(widget.single_step, 0.1)
+
     def test_channel_mapping_uses_physical_zero_based_labels(self):
         self.assertEqual(channel_waveform_suffix(0), "mca1")
         self.assertEqual(channel_waveform_suffix(7), "mca8")
@@ -37,6 +56,11 @@ class CountRateCalculationTests(unittest.TestCase):
     def test_running_average_rate(self):
         self.assertEqual(count_rate(1250, 2.5), 500.0)
 
+    def test_recommended_mcs_settings_use_epics_enum_selections(self):
+        self.assertEqual(MCS_CHANNEL_ADVANCE_INTERNAL, 0)
+        self.assertEqual(MCS_TRIGGER_LOW_LEVEL, 3)
+        self.assertEqual(MCS_POINT_ZERO_SKIP, 2)
+
 
 class CountRateGaugeFormattingTests(unittest.TestCase):
     def test_engineering_format(self):
@@ -52,9 +76,8 @@ class CountRateGaugeFormattingTests(unittest.TestCase):
 
 class USBCTRMenuTests(unittest.TestCase):
     def test_all_controls_menu_lists_vendor_and_custom_displays(self):
-        ui_path = (
-            Path(__file__).resolve().parents[1] / "extra_ui" / "4dh4All.ui"
-        )
+        extra_ui = Path(__file__).resolve().parents[1] / "extra_ui"
+        ui_path = extra_ui / "4dh4All.ui"
         root = ElementTree.parse(ui_path).getroot()
         button = root.find(
             ".//widget[@name='PyDMRelatedDisplayButton_84']"
@@ -84,21 +107,25 @@ class USBCTRMenuTests(unittest.TestCase):
             filenames,
             [
                 "USBCTR.adl",
-                "usbctr_mcs_rate.py",
-                "usbctr_timed_counter.py",
+                "usbctr_count.py",
+                "usbctr_rate.py",
             ],
         )
         self.assertEqual(
             titles,
             [
                 "USB-CTR08 module",
-                "MCS count-rate gauge",
-                "Basic timed counter",
+                "Count",
+                "Count rate",
             ],
         )
         self.assertEqual(len(macros), len(filenames))
-        self.assertIn("MP=${P}USBCTR:MCS:", macros[1])
-        self.assertIn("S=scaler1", macros[2])
+        self.assertIn("S=scaler1", macros[1])
+        self.assertIn("MP=${P}USBCTR:MCS:", macros[2])
+        self.assertTrue((extra_ui / "usbctr_count.py").is_file())
+        self.assertTrue((extra_ui / "usbctr_rate.py").is_file())
+        self.assertFalse((extra_ui / "usbctr_timed_counter.py").exists())
+        self.assertFalse((extra_ui / "usbctr_mcs_rate.py").exists())
 
 
 if __name__ == "__main__":
