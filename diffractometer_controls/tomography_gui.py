@@ -12,11 +12,7 @@ from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher
 from pydm.widgets.channel import PyDMChannel
 
 from bluesky_widgets.models.run_engine_client import RunEngineClient
-try:
-    from diffractometer_controls import display
-except ModuleNotFoundError:
-    import display
-
+from diffractometer_controls.experiment_screen import ExperimentScreen
 try:
     import pyqtgraph as pg
 except Exception:
@@ -65,7 +61,7 @@ AUTO_FILTER_SETTINGS_KEY = "analysis/auto_filter_method"
 AUTO_FILTER_RUNTIME_PROPERTY = "analysis_auto_filter_method_runtime"
 
 
-class MainScreen(display.MITRDisplay):
+class MainScreen(ExperimentScreen):
     re_dispatcher: RemoteDispatcher
     re_client: RunEngineClient
     profile_compute_ready = QtCore.Signal(object)
@@ -75,8 +71,8 @@ class MainScreen(display.MITRDisplay):
     live_filter_worker_idle = QtCore.Signal()
     queue_server_connection_changed = QtCore.Signal(bool)
 
-    def __init__(self, parent=None, args=None, macros=None, ui_filename='tomography_gui.ui'):
-        super().__init__(parent, args, macros, ui_filename)
+    def __init__(self, parent=None, args=None, macros=None, ui_filename='tomography_gui.ui', services=None):
+        super().__init__(parent, args, macros, ui_filename, services=services)
         # print("MainScreen here")
 
     def ui_filename(self):
@@ -86,6 +82,7 @@ class MainScreen(display.MITRDisplay):
         return super().ui_filepath()
 
     def customize_ui(self):
+        self.build_workspace(viewer_title="Imaging Viewer")
         # Robust normalization: clip dark and bright outliers so hot pixels/gamma spots
         # do not dominate the displayed intensity range.
         self._default_norm_low_percentile = 1.0
@@ -214,7 +211,6 @@ class MainScreen(display.MITRDisplay):
         self.live_filter_worker_idle.connect(self._on_live_filter_worker_idle)
 
         self.scan_calculator = None
-        self._pending_plan_editor_item = None
         self._install_scan_calculator_tab()
         self._setup_tomography_plan_transfer()
 
@@ -260,26 +256,9 @@ class MainScreen(display.MITRDisplay):
         self.destroyed.connect(self._shutdown_live_filter_worker)
 
     def _install_scan_calculator_tab(self):
-        tabs = getattr(self.ui, "PyDMTabWidget", None)
-        if tabs is None:
-            tabs = self.findChild(QtWidgets.QTabWidget, "PyDMTabWidget")
-        if tabs is None:
-            return
-
-        existing = tabs.findChild(QtWidgets.QWidget, "TomographyScanCalculator")
-        if existing is not None:
-            self.scan_calculator = existing
-            return
-
+        tabs = self.workspace.viewerTabs
         self.scan_calculator = TomographyScanCalculator(tabs)
-        tabs.insertTab(1, self.scan_calculator, "Tomo Calculator")
-        # PyDMTabBar stores a parallel alarm-channel map. Rebuild its empty
-        # entries after a programmatic insertion so the shifted RE tab has an
-        # entry at its new index.
-        try:
-            tabs.setAlarmChannels([""] * tabs.count())
-        except Exception:
-            pass
+        self.workspace.add_tab(self.scan_calculator, "Tomo Calculator", index=1)
 
     def _setup_tomography_plan_transfer(self):
         if self.scan_calculator is None:
@@ -299,52 +278,15 @@ class MainScreen(display.MITRDisplay):
         self._refresh_queue_server_connection()
 
     def _refresh_queue_server_connection(self):
-        app = QtWidgets.QApplication.instance()
-        re_client = getattr(app, "re_client", None)
+        re_client = self.services.re_client
         is_connected = bool(
             re_client is not None
             and getattr(re_client, "re_manager_connected", False)
         )
         self.queue_server_connection_changed.emit(is_connected)
 
-    def _find_re_plan_editor(self):
-        root = self.window()
-        if root is None:
-            return None
-        named_editor = root.findChild(QtWidgets.QWidget, "REPlanEditorWidget")
-        if named_editor is not None and callable(
-            getattr(named_editor, "load_new_plan_item", None)
-        ):
-            return named_editor
-        for widget in root.findChildren(QtWidgets.QWidget):
-            if callable(getattr(widget, "load_new_plan_item", None)):
-                return widget
-        return None
-
     def _load_tomography_recommendation_in_plan_editor(self, item):
-        self._pending_plan_editor_item = dict(item or {})
-        if self._apply_pending_plan_editor_item():
-            return
-        # Embedded displays may finish constructing one or two event cycles
-        # after the calculator. Retry without requiring a second button click.
-        QtCore.QTimer.singleShot(0, self._apply_pending_plan_editor_item)
-        QtCore.QTimer.singleShot(150, self._apply_pending_plan_editor_item)
-
-    def _apply_pending_plan_editor_item(self):
-        if not self._pending_plan_editor_item:
-            return False
-        editor = self._find_re_plan_editor()
-        if editor is None:
-            return False
-        try:
-            editor.load_new_plan_item(
-                self._pending_plan_editor_item,
-                preserve_existing=True,
-            )
-        except Exception:
-            return False
-        self._pending_plan_editor_item = None
-        return True
+        return self.workspace.load_proposed_plan(item)
 
     def _set_manual_channels_connected(self, connected):
         connected = bool(connected)

@@ -28,8 +28,8 @@ except ModuleNotFoundError:
     import display
 
 class REPlans(display.MITRDisplay):
-    def __init__(self, parent=None, args=None, macros=None, ui_filename='re_plans.ui'):
-        super().__init__(parent, args, macros, ui_filename)
+    def __init__(self, parent=None, args=None, macros=None, ui_filename='re_plans.ui', services=None):
+        super().__init__(parent, args, macros, ui_filename, services=services)
         # print("REScreen here")
         # self.customize_ui()
 
@@ -47,6 +47,21 @@ class REPlans(display.MITRDisplay):
                     shutdown(wait=True, timeout=0.25)
                 except Exception:
                     pass
+
+    def deactivate_display(self):
+        self.re_plan_editor.shutdown(wait=True, timeout=0.25)
+
+    def activate_display(self):
+        for owner in (self.re_plan_editor._plan_viewer, self.re_plan_editor._plan_editor):
+            table = owner._wd_editor
+            activate = getattr(table, "activate", None)
+            if callable(activate):
+                activate()
+        self.re_queue.slot_plan_queue_changed(
+            list(getattr(self.services.re_client, "_plan_queue_items", []) or []),
+            list(self.services.re_client.selected_queue_item_uids or []),
+        )
+        self.re_plan_editor._sync_initial_queue_selection()
 
     @staticmethod
     def _connect_queue_editor_workflows(queue_widget, editor_widget):
@@ -214,13 +229,7 @@ class REPlans(display.MITRDisplay):
             table.verticalHeader().setDefaultSectionSize(max(table.fontMetrics().height() + 8, 28))
 
     def customize_ui(self):
-        try:
-            from diffractometer_controls.application import MITRApplication
-        except ModuleNotFoundError:
-            from application import MITRApplication
-
-        app = MITRApplication.instance()
-        re_client = app.re_client
+        re_client = self.services.re_client
 
         re_queue = QtRePlanQueueEstimated(re_client)
         re_plan_editor = RePlanEditorWidget(re_client)

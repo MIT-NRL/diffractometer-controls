@@ -3,6 +3,7 @@ from pathlib import Path
 from pydm import Display
 from pydm.widgets.embedded_display import PyDMEmbeddedDisplay
 from qtpy import QtWidgets
+from control_ui.core.services import ControlServices
 
 class MITRDisplay(Display):
     _RE_EMBEDDED_FILENAMES = {
@@ -11,7 +12,14 @@ class MITRDisplay(Display):
         "re_extras.py",
     }
 
-    def __init__(self, parent=None, args=None, macros=None, ui_filename=None, **kwargs):
+    def __init__(self, parent=None, args=None, macros=None, ui_filename=None, services=None, **kwargs):
+        app = QtWidgets.QApplication.instance()
+        self.services = services or getattr(app, "control_services", None)
+        if self.services is None and getattr(app, "re_client", None) is not None:
+            self.services = ControlServices(
+                app.re_client, getattr(app, "document_dispatcher", None),
+                getattr(app, "re_manager_api", None),
+            )
         super().__init__(parent=parent, args=args, macros=macros, ui_filename=ui_filename, **kwargs)
         self._pending_embedded_reload = set()
         self.customize_ui()

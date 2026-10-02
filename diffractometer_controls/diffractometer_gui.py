@@ -12,12 +12,7 @@ from pydm.widgets.channel import PyDMChannel
 # from bluesky_widgets.models.auto_plot_builders import AutoLines, AutoPlotter, AutoImages
 # from bluesky_widgets.models.plot_builders import Lines, Images
 from bluesky_widgets.models.run_engine_client import RunEngineClient
-
-try:
-    from . import display
-except ImportError:
-    import display
-
+from diffractometer_controls.experiment_screen import ExperimentScreen
 
 _DIFFRACTION_PLOT_SUPPORT = None
 
@@ -164,13 +159,13 @@ def _load_diffraction_plot_classes():
         "pyqtgraph_plot": plot_widget_pyqtgraph,
     }
 
-class MainScreen(display.MITRDisplay):
+class MainScreen(ExperimentScreen):
     _acquisition_document_received = QtCore.Signal(str, object)
 
     re_client: RunEngineClient
 
-    def __init__(self, parent=None, args=None, macros=None, ui_filename='diffractometer_gui.ui'):
-        super().__init__(parent, args, macros, ui_filename)
+    def __init__(self, parent=None, args=None, macros=None, ui_filename='diffractometer_gui.ui', services=None):
+        super().__init__(parent, args, macros, ui_filename, services=services)
         # print("MainScreen here")
 
     def ui_filename(self):
@@ -180,7 +175,7 @@ class MainScreen(display.MITRDisplay):
         return super().ui_filepath()
 
     def customize_ui(self):
-        from application import MITRApplication
+        self.build_workspace(additional_tabs=(("analyzerTab", "Analyzer calculations"),))
 
         self._time_remaining_channel = None
         self._acquire_time_channel = None
@@ -206,8 +201,7 @@ class MainScreen(display.MITRDisplay):
             QtCore.Qt.QueuedConnection,
         )
 
-        app = MITRApplication.instance()
-        re_client = app.re_client
+        re_client = self.services.re_client
 
         support = _get_diffraction_plot_support()
         if support.get("controller_ok"):
@@ -218,30 +212,20 @@ class MainScreen(display.MITRDisplay):
             plot_widget = plot_class()
             viewer = classes["viewer"](plot_widget)
             self._diffraction_live_plot = classes["controller"](viewer, re_client=re_client)
-            self._document_subscription = app.document_dispatcher.subscribe(
+            self._document_subscription = self.services.documents.subscribe(
                 self._diffraction_live_plot.on_document
             )
         else:
             viewer = _DiffractionUnavailableWidget(support.get("message", ""))
             self._diffraction_live_plot = None
 
-        self._acquisition_document_subscription = app.document_dispatcher.subscribe(
+        self._acquisition_document_subscription = self.services.documents.subscribe(
             self._queue_acquisition_document
         )
         self._setup_acquire_indicator()
         self._setup_time_remaining_progress()
 
         self.ui.Data_Viewer.layout().addWidget(viewer)
-        QtCore.QTimer.singleShot(0, self._apply_initial_main_splitter_sizes)
-
-    def _apply_initial_main_splitter_sizes(self):
-        """Favor the plotter at startup without changing either pane's minimum."""
-        splitter = getattr(self.ui, "splitter", None)
-        if splitter is None or splitter.count() < 2:
-            return
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
-        splitter.setSizes([500, 900])
 
     def _set_manual_channels_connected(self, connected):
         connected = bool(connected)
@@ -273,25 +257,32 @@ class MainScreen(display.MITRDisplay):
         self._exposure_timer.stop()
 
     def activate_display(self):
-        from application import MITRApplication
-
         controller = getattr(self, "_diffraction_live_plot", None)
         if controller is not None:
             controller.activate()
             if self._document_subscription is None:
-                app = MITRApplication.instance()
-                self._document_subscription = app.document_dispatcher.subscribe(
+                self._document_subscription = self.services.documents.subscribe(
                     controller.on_document
                 )
         if self._acquisition_document_subscription is None:
-            app = MITRApplication.instance()
-            self._acquisition_document_subscription = app.document_dispatcher.subscribe(
+            self._acquisition_document_subscription = self.services.documents.subscribe(
                 self._queue_acquisition_document
             )
         pending_start = dict(getattr(self, "_pending_acquisition_start_doc", {}) or {})
         if pending_start and self._acquisition_run_uid:
             self._configure_acquisition_monitor(pending_start)
         self._set_manual_channels_connected(True)
+
+    def shutdown_experiment(self):
+        self.deactivate_display()
+        controller = getattr(self, "_diffraction_live_plot", None)
+        if controller is not None:
+            controller.shutdown()
+        for name in ("_document_subscription", "_acquisition_document_subscription"):
+            token = getattr(self, name, None)
+            if token is not None:
+                self.services.documents.unsubscribe(token)
+                setattr(self, name, None)
 
     def _setup_acquire_indicator(self):
         old_widget = getattr(self.ui, "PyDMByteIndicator", None)

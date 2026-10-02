@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ExperimentWorkspace</class>
+ <widget class="QWidget" name="ExperimentWorkspace">
+  <property name="geometry"><rect><x>0</x><y>0</y><width>2000</width><height>1200</height></rect></property>
+  <layout class="QVBoxLayout" name="workspaceLayout">
+   <property name="spacing"><number>6</number></property>
+   <property name="leftMargin"><number>9</number></property>
+   <property name="topMargin"><number>9</number></property>
+   <property name="rightMargin"><number>9</number></property>
+   <property name="bottomMargin"><number>9</number></property>
+   <item>
+    <layout class="QHBoxLayout" name="headerLayout">
+     <property name="spacing"><number>0</number></property>
+     <item><widget class="QWidget" name="sourceStatusSlot">
+      <property name="minimumSize"><size><width>150</width><height>200</height></size></property>
+      <property name="maximumSize"><size><width>150</width><height>200</height></size></property>
+      <layout class="QVBoxLayout" name="sourceStatusLayout">
+       <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property>
+       <property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
+      </layout>
+     </widget></item>
+     <item><widget class="QWidget" name="runEngineSlot">
+      <property name="minimumSize"><size><width>0</width><height>200</height></size></property>
+      <property name="maximumSize"><size><width>16777215</width><height>200</height></size></property>
+      <layout class="QVBoxLayout" name="runEngineLayout">
+       <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property>
+       <property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
+      </layout>
+     </widget></item>
+    </layout>
+   </item>
+   <item><widget class="QSplitter" name="contentSplitter">
+    <property name="orientation"><enum>Qt::Horizontal</enum></property>
+    <property name="childrenCollapsible"><bool>false</bool></property>
+    <widget class="QWidget" name="plansSlot">
+     <property name="minimumSize"><size><width>400</width><height>0</height></size></property>
+     <layout class="QVBoxLayout" name="plansLayout">
+      <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property>
+      <property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
+     </layout>
+    </widget>
+    <widget class="QWidget" name="viewerColumn">
+     <layout class="QVBoxLayout" name="viewerLayout">
+      <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property>
+      <property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
+      <item><widget class="QTabWidget" name="viewerTabs">
+       <widget class="QWidget" name="viewerSlot">
+        <attribute name="title"><string>Viewer</string></attribute>
+        <layout class="QVBoxLayout" name="primaryViewerLayout">
+         <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property>
+         <property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
+        </layout>
+       </widget>
+       <widget class="QWidget" name="consoleSlot">
+        <attribute name="title"><string>Run Engine Extras</string></attribute>
+        <layout class="QVBoxLayout" name="consoleLayout">
+         <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property>
+         <property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
+        </layout>
+       </widget>
+      </widget></item>
+      <item><widget class="QWidget" name="acquisitionSlot">
+       <layout class="QVBoxLayout" name="acquisitionLayout">
+        <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property>
+        <property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
+       </layout>
+      </widget></item>
+     </layout>
+    </widget>
+    <widget class="QWidget" name="controlsSlot">
+     <property name="minimumSize"><size><width>300</width><height>0</height></size></property>
+     <layout class="QVBoxLayout" name="controlsLayout">
+      <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property>
+      <property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
+     </layout>
+    </widget>
+   </widget></item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

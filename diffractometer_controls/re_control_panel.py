@@ -21,13 +21,13 @@ class REControlPanel(display.MITRDisplay):
     _running_plan_font_min_px = 11
     _running_plan_font_max_px = 28
 
-    def __init__(self, parent=None, args=None, macros=None, ui_filename='re_control_panel.ui'):
+    def __init__(self, parent=None, args=None, macros=None, ui_filename='re_control_panel.ui', services=None):
         self._running_plan_font_px = 15
         self._running_plan_font_min_px = 11
         self._running_plan_font_max_px = 28
         self._pending_restyle_methods = set()
         self._restyle_flush_scheduled = False
-        super().__init__(parent, args, macros, ui_filename)
+        super().__init__(parent, args, macros, ui_filename, services=services)
         # print("REControlPanel here")
         # self.customize_ui()
 
@@ -556,6 +556,21 @@ class REControlPanel(display.MITRDisplay):
             except Exception:
                 pass
 
+    def deactivate_display(self):
+        self._resume_updates = bool(self._re_manager.updates_activated)
+        self.prepare_for_detach()
+
+    def activate_display(self):
+        manager = self._re_manager
+        manager._dc_detaching = False
+        manager._deactivate_updates = False
+        thread = getattr(manager, "_thread", None)
+        if getattr(self, "_resume_updates", False):
+            manager.updates_activated = True
+            if not getattr(thread, "is_running", False):
+                manager._start_thread()
+        self._sync_from_model()
+
     def _sync_from_model(self):
         re_manager = getattr(self, "_re_manager", None)
         if re_manager is None:
@@ -577,6 +592,8 @@ class REControlPanel(display.MITRDisplay):
 
         if is_connected and not getattr(re_manager, "updates_activated", False):
             def _resume_status_updates():
+                if getattr(re_manager, "_dc_detaching", False) or re_manager.updates_activated:
+                    return
                 re_manager.updates_activated = True
                 re_manager._deactivate_updates = False
                 re_manager._first_connection = True
@@ -591,11 +608,8 @@ class REControlPanel(display.MITRDisplay):
         # print('Here')
         # button.clicked.connect(self.printstuff)
 
-        from application import MITRApplication
-
         self._ensure_neutral_tooltip_style()
-        app = MITRApplication.instance()
-        re_client = app.re_client
+        re_client = self.services.re_client
         self._apply_re_client_exception_compatibility(re_client)
         # re_client = RunEngineClient(zmq_control_addr='tcp://192.168.0.14:60615')
         re_manager = QtReManagerConnection(re_client)

@@ -465,6 +465,22 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
     def _on_destroyed(self, *args):
         self.shutdown(wait=False)
 
+    def activate(self):
+        """Resume a cached table's file-directory worker without duplicates."""
+        if not self._file_dir_stream_stop.is_set():
+            return
+        self._file_dir_stream_stop.clear()
+        self._file_dir_request_event.clear()
+        self.signal_file_dir_choices_ready.connect(self._on_file_dir_choices_ready)
+        for attr in ("_file_dir_stream_thread", "_file_dir_query_thread"):
+            thread = getattr(self, attr, None)
+            if thread is not None and not thread.is_alive():
+                setattr(self, attr, None)
+        if self._file_dir_query_mode == "stream":
+            self._start_file_dir_stream_subscriber()
+        else:
+            self._ensure_file_dir_query_thread()
+
     def shutdown(self, *, wait=False, timeout=0.2):
         self._file_dir_stream_stop.set()
         self._file_dir_request_event.set()
@@ -791,7 +807,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         return f"tcp://{host}:5570"
 
     def _start_file_dir_stream_subscriber(self):
-        if self._file_dir_stream_thread is not None:
+        if self._file_dir_stream_thread is not None and self._file_dir_stream_thread.is_alive():
             return
         if zmq is None:
             _LOG.warning("file_dir stream mode requested, but pyzmq is unavailable")
@@ -1108,7 +1124,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         return self._query_worker_file_dirs()
 
     def _ensure_file_dir_query_thread(self):
-        if self._file_dir_query_thread is not None:
+        if self._file_dir_query_thread is not None and self._file_dir_query_thread.is_alive():
             return
         self._file_dir_query_thread = threading.Thread(
             target=self._file_dir_query_loop, name="file-dir-query-thread", daemon=True

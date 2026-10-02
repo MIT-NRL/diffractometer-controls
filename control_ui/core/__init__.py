@@ -1,0 +1,1 @@
+"""Application-independent service contracts."""

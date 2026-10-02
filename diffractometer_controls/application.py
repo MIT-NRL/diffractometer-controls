@@ -20,6 +20,7 @@ from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher
 # from bluesky.callbacks.zmq import RemoteDispatcher
 from bluesky_queueserver_api.zmq import REManagerAPI
 from document_dispatcher import DocumentDispatcherService
+from control_ui.core.services import ControlServices
 
 log = logging.getLogger(__name__)
 THEME_MODE_SETTINGS_KEY = "appearance/theme_mode"
@@ -226,6 +227,7 @@ class MITRApplication(PyDMApplication):
         original_change_event = getattr(console_cls, "changeEvent", None)
         original_finished = getattr(console_cls, "_finished_receiving_console_output", None)
         original_process = getattr(console_cls, "_process_new_console_output", None)
+        original_update = console_cls._update_console_output
 
         def _apply_console_palette(self):
             text_edit = getattr(self, "_text_edit", None)
@@ -281,6 +283,8 @@ class MITRApplication(PyDMApplication):
             return None
 
         def _patched_start_thread(self):
+            if getattr(getattr(self, "_thread", None), "is_running", False):
+                return
             self._thread = bw_run_engine_client.FunctionWorker(lambda: _poll_console_once(self))
             self._thread.returned.connect(self._process_new_console_output)
             self._thread.finished.connect(self._finished_receiving_console_output)
@@ -301,11 +305,16 @@ class MITRApplication(PyDMApplication):
         def _patched_del(self):
             self._dc_console_stop_requested = True
 
+        def _patched_update_console_output(self):
+            if not getattr(self, "_dc_console_stop_requested", False):
+                original_update(self)
+
         console_cls.__init__ = _patched_init
         console_cls.changeEvent = _patched_change_event
         console_cls._start_thread = _patched_start_thread
         console_cls._finished_receiving_console_output = _patched_finished_receiving_console_output
         console_cls._process_new_console_output = _patched_process_new_console_output
+        console_cls._update_console_output = _patched_update_console_output
         console_cls.__del__ = _patched_del
         console_cls._dc_apply_console_palette = _apply_console_palette
         console_cls._dc_theme_refresh_patch_applied = True
@@ -324,6 +333,9 @@ class MITRApplication(PyDMApplication):
             zmq_control_addr=f'tcp://{ipaddress}:60615',
             zmq_info_addr=f'tcp://{ipaddress}:60625',
             zmq_public_key=zmq_public_key,
+        )
+        self.control_services = ControlServices(
+            self.re_client, self.document_dispatcher, self.re_manager_api
         )
         self._ipaddress = str(ipaddress)
         self._startup_ui_file = ui_file

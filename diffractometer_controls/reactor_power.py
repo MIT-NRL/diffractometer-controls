@@ -15,7 +15,7 @@ import display
 
 
 class ReactorPowerDisplay(display.MITRDisplay):
-    def __init__(self, parent=None, args=None, macros=None, ui_filename="extra_ui/reactor_power.ui"):
+    def __init__(self, parent=None, args=None, macros=None, ui_filename="extra_ui/reactor_power.ui", services=None):
         self._group_box = None
         self._power_value_label = None
         self._operations_button = None
@@ -23,7 +23,7 @@ class ReactorPowerDisplay(display.MITRDisplay):
         self._suspender_enable_channel = None
         self._suspender_enable_pv = ""
         self._suspender_checkbox_updating = False
-        super().__init__(parent, args, macros, ui_filename)
+        super().__init__(parent, args, macros, ui_filename, services=services)
 
     def ui_filename(self):
         return "extra_ui/reactor_power.ui"
@@ -119,8 +119,19 @@ class ReactorPowerDisplay(display.MITRDisplay):
             native_button.setMinimumHeight(h)
             native_button.setMaximumHeight(h)
 
-        QtCore.QTimer.singleShot(0, _sync_height)
-        QtCore.QTimer.singleShot(100, _sync_height)
+        for delay in (0, 100):
+            timer = QtCore.QTimer(native_button)
+            timer.setSingleShot(True)
+            timer.timeout.connect(_sync_height)
+            timer.start(delay)
+
+    def deactivate_display(self):
+        if self._suspender_enable_channel is not None:
+            self._suspender_enable_channel.disconnect()
+
+    def activate_display(self):
+        if self._suspender_enable_channel is not None:
+            self._suspender_enable_channel.connect()
 
     def _pv_prefix(self):
         prefix = ""
