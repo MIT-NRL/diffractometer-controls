@@ -1,16 +1,21 @@
+"""Device definitions only; importing this module does not construct EPICS devices."""
 import numpy as np
+
 from ophyd import (Device, Component as Cpt,FormattedComponent as FCpt,
-                   EpicsSignal, EpicsSignalRO, EpicsSignalWithRBV, 
+                   EpicsSignal, EpicsSignalRO, EpicsSignalWithRBV,
                    EpicsMotor, DerivedSignal)
+
 from ophyd.device import DeviceStatus
+
 from ophyd.scaler import EpicsScaler
+
 from ophyd.status import Status, SubscriptionStatus
+
 from bluesky_queueserver import register_device
 
-
 HE3PSD_POSITION_MIN = -209.21799055746422
-HE3PSD_POSITION_MAX = 209.21799055746422
 
+HE3PSD_POSITION_MAX = 209.21799055746422
 
 class PositionSignal(DerivedSignal):
     def inverse(self, value):
@@ -19,7 +24,6 @@ class PositionSignal(DerivedSignal):
 
     def forward(self, value):
         return len(value)
-
 
 class HE3PSD(Device):
 
@@ -54,7 +58,7 @@ class HE3PSD(Device):
     counts = FCpt(EpicsSignalRO, "{prefix}{_det_num}:LiveCounts",name="counts",kind="hinted")
 
     total_counts = FCpt(EpicsSignalRO, "{prefix}{_det_num}:LiveTotalCounts",name="total_counts",kind="hinted")
-    
+
     def trigger(self):
         def check_value(*, old_value, value, **kwargs):
             "Return True when the acquisition is complete, False otherwise."
@@ -63,15 +67,10 @@ class HE3PSD(Device):
         self.acquire.set(1).wait()
         status = SubscriptionStatus(self.acquire, check_value)
         return status
-    
+
     def __init__(self, prefix, det_num: str, **kwargs):
         self._det_num = det_num
         super().__init__(prefix, **kwargs)
-    
-
-he3psd0 = HE3PSD("4dh4:he3PSD:",det_num="Det0", name="he3psd0")
-he3psd7 = HE3PSD("4dh4:he3PSD:",det_num="Det7", name="he3psd7")
-
 
 class USB2408TemperatureInputs(Device):
     """Read-only USB-2408 thermocouple inputs (``Ti1`` through ``Ti8``)."""
@@ -85,7 +84,6 @@ class USB2408TemperatureInputs(Device):
     ti7 = Cpt(EpicsSignalRO, "Ti7", kind="hinted")
     ti8 = Cpt(EpicsSignalRO, "Ti8", kind="hinted")
 
-
 class USB2408AnalogInputs(Device):
     """Read-only USB-2408 analog inputs (``Ai1`` through ``Ai8``)."""
 
@@ -98,7 +96,6 @@ class USB2408AnalogInputs(Device):
     ai7 = Cpt(EpicsSignalRO, "Ai7", kind="hinted")
     ai8 = Cpt(EpicsSignalRO, "Ai8", kind="hinted")
 
-
 class USB2408BinaryInputs(Device):
     """Read-only USB-2408 binary inputs (``Bi1`` through ``Bi8``)."""
 
@@ -110,7 +107,6 @@ class USB2408BinaryInputs(Device):
     bi6 = Cpt(EpicsSignalRO, "Bi6", kind="hinted")
     bi7 = Cpt(EpicsSignalRO, "Bi7", kind="hinted")
     bi8 = Cpt(EpicsSignalRO, "Bi8", kind="hinted")
-
 
 class USB2408Readouts(Device):
     """Passive scalar readouts from a Measurement Computing USB-2408.
@@ -129,11 +125,6 @@ class USB2408Readouts(Device):
         + tuple(f"analog.ai{channel}" for channel in range(1, 9))
         + tuple(f"binary.bi{channel}" for channel in range(1, 9))
     )
-
-
-usb2408 = USB2408Readouts("4dh4:USB2408:", name="usb2408")
-register_device("usb2408", depth=3)
-
 
 class USBCTR08Scaler(EpicsScaler):
     """Measurement Computing USB-CTR08 exposed as an EPICS scaler.
@@ -348,13 +339,4 @@ class USBCTR08Scaler(EpicsScaler):
         self.count.put(0, wait=False)
         return super().stop(success=success)
 
-
-# Leave the class importable for plan/display development, but do not create
-# EPICS connections until the CTR-08 has arrived and its IOC is enabled.
-ENABLE_USBCTR08 = True
-
-if ENABLE_USBCTR08:
-    usbctr = USBCTR08Scaler("4dh4:USBCTR:scaler1", name="usbctr")
-    # QueueServer and the plan editor expose direct components using dotted
-    # paths such as ``usbctr.beam_monitor``.
-    register_device("usbctr", depth=2)
+__all__ = ['Cpt', 'DerivedSignal', 'Device', 'DeviceStatus', 'EpicsMotor', 'EpicsScaler', 'EpicsSignal', 'EpicsSignalRO', 'EpicsSignalWithRBV', 'FCpt', 'HE3PSD', 'HE3PSD_POSITION_MAX', 'HE3PSD_POSITION_MIN', 'PositionSignal', 'Status', 'SubscriptionStatus', 'USB2408AnalogInputs', 'USB2408BinaryInputs', 'USB2408Readouts', 'USB2408TemperatureInputs', 'USBCTR08Scaler', 'np', 'register_device']

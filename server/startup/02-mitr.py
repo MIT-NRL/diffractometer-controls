@@ -1,7 +1,7 @@
 import numpy as np
 import logging
 from ophyd import (Device, Component as Cpt,
-                   EpicsSignal, EpicsSignalRO, EpicsSignalWithRBV, 
+                   EpicsSignal, EpicsSignalRO, EpicsSignalWithRBV,
                    EpicsMotor, Signal)
 from ophyd.device import DeviceStatus
 from ophyd.status import Status, SubscriptionStatus
@@ -51,13 +51,11 @@ for _reactor_power_signal in (
     _reactor_power_signal.scalar_plan_hidden = True
 _suspender_enable_feedback_write = False
 
-
 def _is_reactor_power_suspender_installed():
     try:
         return len(_get_reactor_power_suspenders()) > 0
     except Exception:
         return False
-
 
 def _get_reactor_power_suspenders():
     matched = []
@@ -74,7 +72,6 @@ def _get_reactor_power_suspenders():
         return []
     return matched
 
-
 def _publish_reactor_power_suspender_state():
     global _suspender_enable_feedback_write
     installed = int(_is_reactor_power_suspender_installed())
@@ -90,7 +87,6 @@ def _publish_reactor_power_suspender_state():
         pass
     finally:
         _suspender_enable_feedback_write = False
-
 
 def _set_reactor_power_suspender_enabled(enable):
     enable = bool(enable)
@@ -130,7 +126,6 @@ def _set_reactor_power_suspender_enabled(enable):
     print(final_msg)
     logger.info(final_msg)
 
-
 def _queue_set_reactor_power_suspender(enable):
     enable = bool(enable)
     loop = getattr(RE, "loop", None)
@@ -141,7 +136,6 @@ def _queue_set_reactor_power_suspender(enable):
             _set_reactor_power_suspender_enabled(enable)
     except Exception:
         _set_reactor_power_suspender_enabled(enable)
-
 
 def _coerce_enable_value(value):
     if isinstance(value, str):
@@ -156,7 +150,6 @@ def _coerce_enable_value(value):
     except Exception:
         return None
 
-
 def _on_reactor_power_suspender_enable_changed(value=None, **kwargs):
     if _suspender_enable_feedback_write:
         return
@@ -170,7 +163,6 @@ def _on_reactor_power_suspender_enable_changed(value=None, **kwargs):
     except Exception:
         pass
     _queue_set_reactor_power_suspender(enable)
-
 
 reactor_power_suspender_enable.subscribe(
     _on_reactor_power_suspender_enable_changed, run=True

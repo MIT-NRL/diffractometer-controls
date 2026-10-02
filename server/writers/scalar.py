@@ -1,3 +1,4 @@
+"""Writer definitions; startup owns construction and RunEngine subscriptions."""
 import csv
 import datetime as dt
 import json
@@ -280,11 +281,3 @@ class ScalarDiffractionWriter(NXWriter):
                 temporary_path.unlink()
 
         self.output_csv_file = output_path
-
-
-scalar_data_writer = None
-scalar_data_writer_subscription = None
-
-if "RE" in globals():
-    scalar_data_writer = ScalarDiffractionWriter()
-    scalar_data_writer_subscription = RE.subscribe(scalar_data_writer.receiver)

@@ -7,9 +7,9 @@ network:
   # redis_name_prefix: qs_default # Seems to not exist anymore
 startup:
   # keep_re: true
-  startup_dir: /home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/bluesky_config/startup
-  # existing_plans_and_devices_path: /home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/bluesky_config/startup/existing_plans_and_devices.yaml
-  user_group_permissions_path: /home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/bluesky_config/startup/user_group_permissions.yaml
+  startup_dir: ${CONTROL_CHECKOUT}/server/startup
+  # existing_plans_and_devices_path: ${CONTROL_CHECKOUT}/server/startup/existing_plans_and_devices.yaml
+  user_group_permissions_path: ${CONTROL_CHECKOUT}/server/config/user_group_permissions.yaml
 operation:
   print_console_output: false
   console_logging_level: NORMAL

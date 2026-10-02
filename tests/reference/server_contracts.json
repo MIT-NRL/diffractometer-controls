@@ -1,0 +1,2100 @@
+{
+  "revision": "806496621ba808f7c9c5994030f71788a3350cb1",
+  "contracts": {
+    "move_motor": {
+      "name": "move_motor",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "motor",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "position",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "motor": {
+            "annotation": "typing.Union[str, Motors]",
+            "description": "Motor to move (must be movable)",
+            "devices": {
+              "Motors": [
+                "EpicsSignal",
+                "EpicsMotor",
+                "SimulatedFocusMotor",
+                "sim_motor",
+                "sim_focus_motor"
+              ]
+            },
+            "convert_device_names": true
+          }
+        }
+      },
+      "doc": "Move a motor to a specified position."
+    },
+    "wait_seconds": {
+      "name": "wait_seconds",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "seconds",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "seconds": {
+            "annotation": "float",
+            "description": "Time to wait in seconds (must be non-negative)"
+          }
+        }
+      },
+      "doc": "Pause plan execution for a fixed number of seconds."
+    },
+    "count_scalar": {
+      "name": "count_scalar",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "title",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "sample",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "detectors",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "acquire_time",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "num",
+          "kind": "KEYWORD_ONLY",
+          "default": 1,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "delay",
+          "kind": "KEYWORD_ONLY",
+          "default": 0.0,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "file_type",
+          "kind": "KEYWORD_ONLY",
+          "default": "csv",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "md",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.dict"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "detectors": {
+            "annotation": "typing.Union[typing.List[ScalarReadables], ScalarReadables]",
+            "description": "Scalar detector channels or readable scalar signals",
+            "devices": {
+              "ScalarReadables": [
+                "sim_usbctr.clock_counts",
+                "sim_usbctr.beam_monitor",
+                "sim_usbctr.he3_tube",
+                "sim_usbctr.counter_3",
+                "sim_usbctr.counter_4",
+                "sim_usbctr.counter_5",
+                "sim_usbctr.counter_6",
+                "sim_usbctr.counter_7"
+              ]
+            },
+            "convert_device_names": true
+          },
+          "file_type": {
+            "annotation": "ScalarFileType",
+            "description": "Additional scalar data file written after the run",
+            "enums": {
+              "ScalarFileType": [
+                "csv",
+                "nexus"
+              ]
+            }
+          }
+        }
+      },
+      "doc": "Count scalar readables with optional hardware or software timing.\n\nFor passive Signals, ``acquire_time`` is a software dwell: values are\nsampled about every 0.1 seconds and their arithmetic mean is recorded.\nA value of zero performs one immediate read."
+    },
+    "scan_scalar": {
+      "name": "scan_scalar",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "title",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "sample",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "detectors",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "motor",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "start_pos",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "stop_pos",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "step_size",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "num_steps",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "acquire_time",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "return_to_original_position",
+          "kind": "KEYWORD_ONLY",
+          "default": true,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "file_type",
+          "kind": "KEYWORD_ONLY",
+          "default": "csv",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "md",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.dict"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "detectors": {
+            "annotation": "typing.Union[typing.List[ScalarReadables], ScalarReadables]",
+            "description": "Scalar detector channels or readable scalar signals",
+            "devices": {
+              "ScalarReadables": [
+                "sim_usbctr.clock_counts",
+                "sim_usbctr.beam_monitor",
+                "sim_usbctr.he3_tube",
+                "sim_usbctr.counter_3",
+                "sim_usbctr.counter_4",
+                "sim_usbctr.counter_5",
+                "sim_usbctr.counter_6",
+                "sim_usbctr.counter_7"
+              ]
+            },
+            "convert_device_names": true
+          },
+          "file_type": {
+            "annotation": "ScalarFileType",
+            "description": "Additional scalar data file written after the run",
+            "enums": {
+              "ScalarFileType": [
+                "csv",
+                "nexus"
+              ]
+            }
+          },
+          "motor": {
+            "annotation": "typing.Union[str, Motors]",
+            "description": "Motor to scan (must be movable)",
+            "devices": {
+              "Motors": [
+                "EpicsSignal",
+                "EpicsMotor",
+                "SimulatedFocusMotor",
+                "sim_motor",
+                "sim_focus_motor"
+              ]
+            },
+            "convert_device_names": true
+          }
+        }
+      },
+      "doc": "Scan a motor while recording hardware-timed or averaged scalar data.\n\nPassive Signals are sampled and averaged at each motor position for\n``acquire_time`` seconds. A zero-second dwell performs one immediate read."
+    },
+    "count_he3psd": {
+      "name": "count_he3psd",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "title",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "sample",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "gauge_volume",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "detectors",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "acquire_time",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "num",
+          "kind": "KEYWORD_ONLY",
+          "default": 1,
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "md",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "inspect._empty"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "detectors": {
+            "annotation": "typing.Union[typing.List[Simulated_HE3_PSD], Simulated_HE3_PSD]",
+            "description": "Diffraction detector or detectors to read",
+            "devices": {
+              "Simulated_HE3_PSD": [
+                "sim_he3psd0",
+                "sim_he3psd1"
+              ]
+            },
+            "convert_device_names": true
+          }
+        }
+      },
+      "doc": "Take one or more readings from detectors.\n\nParameters\n----------\ndetectors : list\n    list of 'readable' objects\nnum : integer, optional\n    number of readings to take; default is 1\n\n    If None, capture data until canceled\n\nmd : dict, optional\n    metadata"
+    },
+    "scan_he3psd": {
+      "name": "scan_he3psd",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "title",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "sample",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "gauge_volume",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "detectors",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "motor",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "start_pos",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "stop_pos",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "step_size",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "num_steps",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "acquire_time",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "return_to_original_position",
+          "kind": "KEYWORD_ONLY",
+          "default": true,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "md",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.dict"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "detectors": {
+            "annotation": "typing.Union[typing.List[Simulated_HE3_PSD], Simulated_HE3_PSD]",
+            "description": "Diffraction detector or detectors to read",
+            "devices": {
+              "Simulated_HE3_PSD": [
+                "sim_he3psd0",
+                "sim_he3psd1"
+              ]
+            },
+            "convert_device_names": true
+          },
+          "motor": {
+            "annotation": "typing.Union[str, Motors]",
+            "description": "Motor to scan (must be movable)",
+            "devices": {
+              "Motors": [
+                "EpicsSignal",
+                "EpicsMotor",
+                "SimulatedFocusMotor",
+                "sim_motor",
+                "sim_focus_motor"
+              ]
+            },
+            "convert_device_names": true
+          }
+        }
+      },
+      "doc": "General scan for the imaging detector system."
+    },
+    "scan_parallel_he3psd": {
+      "name": "scan_parallel_he3psd",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "title",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "sample",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "gauge_volume",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "detectors",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "motor1",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "start_pos1",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "stop_pos1",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "motor2",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "start_pos2",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "stop_pos2",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "num_steps",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "acquire_time",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "return_to_original_position",
+          "kind": "KEYWORD_ONLY",
+          "default": true,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "md",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.dict"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "detectors": {
+            "annotation": "typing.Union[typing.List[Simulated_HE3_PSD], Simulated_HE3_PSD]",
+            "description": "Diffraction detector or detectors to read",
+            "devices": {
+              "Simulated_HE3_PSD": [
+                "sim_he3psd0",
+                "sim_he3psd1"
+              ]
+            },
+            "convert_device_names": true
+          },
+          "motor1": {
+            "annotation": "typing.Union[str, Motors]",
+            "description": "First motor to scan in parallel",
+            "devices": {
+              "Motors": [
+                "EpicsSignal",
+                "EpicsMotor",
+                "SimulatedFocusMotor",
+                "sim_motor",
+                "sim_focus_motor"
+              ]
+            },
+            "convert_device_names": true
+          },
+          "motor2": {
+            "annotation": "typing.Union[str, Motors]",
+            "description": "Second motor to scan in parallel",
+            "devices": {
+              "Motors": [
+                "EpicsSignal",
+                "EpicsMotor",
+                "SimulatedFocusMotor",
+                "sim_motor",
+                "sim_focus_motor"
+              ]
+            },
+            "convert_device_names": true
+          }
+        }
+      },
+      "doc": "General scan for the imaging detector system."
+    },
+    "scan_list_he3psd": {
+      "name": "scan_list_he3psd",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "title",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "sample",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "gauge_volume",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "detectors",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "motor",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "position_list",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.list"
+        },
+        {
+          "name": "acquire_time",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "return_to_original_position",
+          "kind": "KEYWORD_ONLY",
+          "default": true,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "md",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.dict"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "detectors": {
+            "annotation": "typing.Union[typing.List[Simulated_HE3_PSD], Simulated_HE3_PSD]",
+            "description": "Diffraction detector or detectors to read",
+            "devices": {
+              "Simulated_HE3_PSD": [
+                "sim_he3psd0",
+                "sim_he3psd1"
+              ]
+            },
+            "convert_device_names": true
+          },
+          "motor": {
+            "annotation": "typing.Union[str, Motors]",
+            "description": "Motor to scan through the requested positions",
+            "devices": {
+              "Motors": [
+                "EpicsSignal",
+                "EpicsMotor",
+                "SimulatedFocusMotor",
+                "sim_motor",
+                "sim_focus_motor"
+              ]
+            },
+            "convert_device_names": true
+          }
+        }
+      },
+      "doc": "General scan for the imaging detector system."
+    },
+    "scan2D_he3psd": {
+      "name": "scan2D_he3psd",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "title",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "sample",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "gauge_volume",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "detectors",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "motor_outer",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "start_pos_outer",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "stop_pos_outer",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "step_size_outer",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "motor_inner",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "start_pos_inner",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "stop_pos_inner",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "step_size_inner",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "acquire_time",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "return_to_original_positions",
+          "kind": "KEYWORD_ONLY",
+          "default": true,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "md",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.dict"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "detectors": {
+            "annotation": "typing.Union[typing.List[Simulated_HE3_PSD], Simulated_HE3_PSD]",
+            "description": "Diffraction detector or detectors to read",
+            "devices": {
+              "Simulated_HE3_PSD": [
+                "sim_he3psd0",
+                "sim_he3psd1"
+              ]
+            },
+            "convert_device_names": true
+          },
+          "motor_outer": {
+            "annotation": "typing.Union[str, Motors]",
+            "description": "Outer motor for the 2D scan",
+            "devices": {
+              "Motors": [
+                "EpicsSignal",
+                "EpicsMotor",
+                "SimulatedFocusMotor",
+                "sim_motor",
+                "sim_focus_motor"
+              ]
+            },
+            "convert_device_names": true
+          },
+          "motor_inner": {
+            "annotation": "typing.Union[str, Motors]",
+            "description": "Inner motor for the 2D scan",
+            "devices": {
+              "Motors": [
+                "EpicsSignal",
+                "EpicsMotor",
+                "SimulatedFocusMotor",
+                "sim_motor",
+                "sim_focus_motor"
+              ]
+            },
+            "convert_device_names": true
+          }
+        }
+      },
+      "doc": "General scan for the imaging detector system."
+    },
+    "count_he3": {
+      "name": "count_he3psd",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "title",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "sample",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "gauge_volume",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "detectors",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "acquire_time",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "num",
+          "kind": "KEYWORD_ONLY",
+          "default": 1,
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "md",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "inspect._empty"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "detectors": {
+            "annotation": "typing.Union[typing.List[Simulated_HE3_PSD], Simulated_HE3_PSD]",
+            "description": "Diffraction detector or detectors to read",
+            "devices": {
+              "Simulated_HE3_PSD": [
+                "sim_he3psd0",
+                "sim_he3psd1"
+              ]
+            },
+            "convert_device_names": true
+          }
+        }
+      },
+      "doc": "Take one or more readings from detectors.\n\nParameters\n----------\ndetectors : list\n    list of 'readable' objects\nnum : integer, optional\n    number of readings to take; default is 1\n\n    If None, capture data until canceled\n\nmd : dict, optional\n    metadata"
+    },
+    "scan_he3": {
+      "name": "scan_he3psd",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "title",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "sample",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "gauge_volume",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "detectors",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "motor",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "start_pos",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "stop_pos",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "step_size",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "num_steps",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "acquire_time",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "return_to_original_position",
+          "kind": "KEYWORD_ONLY",
+          "default": true,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "md",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.dict"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "detectors": {
+            "annotation": "typing.Union[typing.List[Simulated_HE3_PSD], Simulated_HE3_PSD]",
+            "description": "Diffraction detector or detectors to read",
+            "devices": {
+              "Simulated_HE3_PSD": [
+                "sim_he3psd0",
+                "sim_he3psd1"
+              ]
+            },
+            "convert_device_names": true
+          },
+          "motor": {
+            "annotation": "typing.Union[str, Motors]",
+            "description": "Motor to scan (must be movable)",
+            "devices": {
+              "Motors": [
+                "EpicsSignal",
+                "EpicsMotor",
+                "SimulatedFocusMotor",
+                "sim_motor",
+                "sim_focus_motor"
+              ]
+            },
+            "convert_device_names": true
+          }
+        }
+      },
+      "doc": "General scan for the imaging detector system."
+    },
+    "scan_parallel_he3": {
+      "name": "scan_parallel_he3psd",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "title",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "sample",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "gauge_volume",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "detectors",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "motor1",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "start_pos1",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "stop_pos1",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "motor2",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "start_pos2",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "stop_pos2",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "num_steps",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "acquire_time",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "return_to_original_position",
+          "kind": "KEYWORD_ONLY",
+          "default": true,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "md",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.dict"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "detectors": {
+            "annotation": "typing.Union[typing.List[Simulated_HE3_PSD], Simulated_HE3_PSD]",
+            "description": "Diffraction detector or detectors to read",
+            "devices": {
+              "Simulated_HE3_PSD": [
+                "sim_he3psd0",
+                "sim_he3psd1"
+              ]
+            },
+            "convert_device_names": true
+          },
+          "motor1": {
+            "annotation": "typing.Union[str, Motors]",
+            "description": "First motor to scan in parallel",
+            "devices": {
+              "Motors": [
+                "EpicsSignal",
+                "EpicsMotor",
+                "SimulatedFocusMotor",
+                "sim_motor",
+                "sim_focus_motor"
+              ]
+            },
+            "convert_device_names": true
+          },
+          "motor2": {
+            "annotation": "typing.Union[str, Motors]",
+            "description": "Second motor to scan in parallel",
+            "devices": {
+              "Motors": [
+                "EpicsSignal",
+                "EpicsMotor",
+                "SimulatedFocusMotor",
+                "sim_motor",
+                "sim_focus_motor"
+              ]
+            },
+            "convert_device_names": true
+          }
+        }
+      },
+      "doc": "General scan for the imaging detector system."
+    },
+    "scan_list_he3": {
+      "name": "scan_list_he3psd",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "title",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "sample",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "gauge_volume",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "detectors",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "motor",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "position_list",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.list"
+        },
+        {
+          "name": "acquire_time",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "return_to_original_position",
+          "kind": "KEYWORD_ONLY",
+          "default": true,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "md",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.dict"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "detectors": {
+            "annotation": "typing.Union[typing.List[Simulated_HE3_PSD], Simulated_HE3_PSD]",
+            "description": "Diffraction detector or detectors to read",
+            "devices": {
+              "Simulated_HE3_PSD": [
+                "sim_he3psd0",
+                "sim_he3psd1"
+              ]
+            },
+            "convert_device_names": true
+          },
+          "motor": {
+            "annotation": "typing.Union[str, Motors]",
+            "description": "Motor to scan through the requested positions",
+            "devices": {
+              "Motors": [
+                "EpicsSignal",
+                "EpicsMotor",
+                "SimulatedFocusMotor",
+                "sim_motor",
+                "sim_focus_motor"
+              ]
+            },
+            "convert_device_names": true
+          }
+        }
+      },
+      "doc": "General scan for the imaging detector system."
+    },
+    "scan2D_he3": {
+      "name": "scan2D_he3psd",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "title",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "sample",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "gauge_volume",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "detectors",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "motor_outer",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "start_pos_outer",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "stop_pos_outer",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "step_size_outer",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "motor_inner",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "start_pos_inner",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "stop_pos_inner",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "step_size_inner",
+          "kind": "KEYWORD_ONLY",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "acquire_time",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "return_to_original_positions",
+          "kind": "KEYWORD_ONLY",
+          "default": true,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "md",
+          "kind": "KEYWORD_ONLY",
+          "default": null,
+          "annotation": "builtins.dict"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "detectors": {
+            "annotation": "typing.Union[typing.List[Simulated_HE3_PSD], Simulated_HE3_PSD]",
+            "description": "Diffraction detector or detectors to read",
+            "devices": {
+              "Simulated_HE3_PSD": [
+                "sim_he3psd0",
+                "sim_he3psd1"
+              ]
+            },
+            "convert_device_names": true
+          },
+          "motor_outer": {
+            "annotation": "typing.Union[str, Motors]",
+            "description": "Outer motor for the 2D scan",
+            "devices": {
+              "Motors": [
+                "EpicsSignal",
+                "EpicsMotor",
+                "SimulatedFocusMotor",
+                "sim_motor",
+                "sim_focus_motor"
+              ]
+            },
+            "convert_device_names": true
+          },
+          "motor_inner": {
+            "annotation": "typing.Union[str, Motors]",
+            "description": "Inner motor for the 2D scan",
+            "devices": {
+              "Motors": [
+                "EpicsSignal",
+                "EpicsMotor",
+                "SimulatedFocusMotor",
+                "sim_motor",
+                "sim_focus_motor"
+              ]
+            },
+            "convert_device_names": true
+          }
+        }
+      },
+      "doc": "General scan for the imaging detector system."
+    },
+    "tomo_scan": {
+      "name": "tomo_scan",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "file_name",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "file_dir",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "motor",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "detector",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": {
+            "device": "cam1"
+          },
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "exposure_time",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "num_projections",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "angle_step_size",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "start_angle",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": 0,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "stop_angle",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": 180,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "num_exposures",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": 1,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "include_stop_angle",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": true,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "tilt_correction_projections",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": 0,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "full_360_scan",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": false,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "return_to_start",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": true,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "check_temperature",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": true,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "md",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.dict"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "detector": {
+            "annotation": "ImagingDetectors",
+            "default": "cam1",
+            "description": "Imaging detector (default: cam1)",
+            "devices": {
+              "ImagingDetectors": [
+                "cam1",
+                "sim_focus_cam"
+              ]
+            },
+            "convert_device_names": true
+          },
+          "motor": {
+            "annotation": "typing.Union[str, Motors]",
+            "description": "Motor to scan (must be movable)",
+            "devices": {
+              "Motors": []
+            },
+            "convert_device_names": true
+          }
+        }
+      },
+      "doc": "Acquire an inclusive 0\u2013180\u00b0 tomography base set by default.\n\n``num_projections`` describes the base set, including both endpoints.\n``tilt_correction_projections`` adds a sparse set of exact 180\u00b0 pairs in\nthe second half and always includes 360\u00b0. ``full_360_scan`` instead adds\nevery second-half pair at the same angular density as the base set."
+    },
+    "imaging": {
+      "name": "imaging",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "file_name",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "file_dir",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "detector",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": {
+            "device": "cam1"
+          },
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "exposure_time",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "num_exposures",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": 1,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "gain",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "offset",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "check_temperature",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": true,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "md",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.dict"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "detector": {
+            "annotation": "ImagingDetectors",
+            "default": "cam1",
+            "description": "Imaging detector (default: cam1)",
+            "devices": {
+              "ImagingDetectors": [
+                "cam1",
+                "sim_focus_cam"
+              ]
+            },
+            "convert_device_names": true
+          }
+        }
+      },
+      "doc": "Tomography scan that performs dark field scans, flat field scans, and then the actual tomography scan."
+    },
+    "imaging_scan": {
+      "name": "imaging_scan",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "file_name",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "file_dir",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "motor",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "start_pos",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "stop_pos",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "step_size",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "num_steps",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "detector",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": {
+            "device": "cam1"
+          },
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "exposure_time",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "num_exposures",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": 1,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "gain",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "offset",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "return_to_original_position",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": true,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "check_temperature",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": true,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "md",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.dict"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "detector": {
+            "annotation": "ImagingDetectors",
+            "default": "cam1",
+            "description": "Imaging detector (default: cam1)",
+            "devices": {
+              "ImagingDetectors": [
+                "cam1",
+                "sim_focus_cam"
+              ]
+            },
+            "convert_device_names": true
+          },
+          "motor": {
+            "annotation": "typing.Union[str, Motors, Cam_advanced]",
+            "description": "Motor or supported camera setting to scan",
+            "devices": {
+              "Motors": [
+                "EpicsSignal",
+                "EpicsMotor",
+                "SimulatedFocusMotor",
+                "sim_motor",
+                "sim_focus_motor"
+              ],
+              "Cam_advanced": [
+                "cam1_acquire_time",
+                "cam1_gain",
+                "cam1_offset",
+                "sim_focus_cam_acquire_time"
+              ]
+            },
+            "convert_device_names": true
+          }
+        }
+      },
+      "doc": "Image at inclusive absolute positions along a motor or camera setting."
+    },
+    "imaging_scan_discrete": {
+      "name": "imaging_scan_discrete",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "file_name",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "file_dir",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "motor",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "positions",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "list[float]"
+        },
+        {
+          "name": "detector",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": {
+            "device": "cam1"
+          },
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "exposure_time",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "num_exposures",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": 1,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "gain",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "offset",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "return_to_original_position",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": true,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "check_temperature",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": true,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "md",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.dict"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "detector": {
+            "annotation": "ImagingDetectors",
+            "default": "cam1",
+            "description": "Imaging detector (default: cam1)",
+            "devices": {
+              "ImagingDetectors": [
+                "cam1",
+                "sim_focus_cam"
+              ]
+            },
+            "convert_device_names": true
+          },
+          "motor": {
+            "annotation": "typing.Union[str, Motors, Cam_advanced]",
+            "description": "Motor or supported camera setting to scan",
+            "devices": {
+              "Motors": [
+                "EpicsSignal",
+                "EpicsMotor",
+                "SimulatedFocusMotor",
+                "sim_motor",
+                "sim_focus_motor"
+              ],
+              "Cam_advanced": [
+                "cam1_acquire_time",
+                "cam1_gain",
+                "cam1_offset",
+                "sim_focus_cam_acquire_time"
+              ]
+            },
+            "convert_device_names": true
+          }
+        }
+      },
+      "doc": "Image at the exact, ordered values in ``positions``."
+    },
+    "imaging_scan_rel": {
+      "name": "imaging_scan_rel",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "file_name",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "file_dir",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "motor",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "start_relative",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "stop_relative",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "step_size",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "num_steps",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "detector",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": {
+            "device": "cam1"
+          },
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "exposure_time",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "num_exposures",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": 1,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "gain",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "offset",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "return_to_original_position",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": true,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "check_temperature",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": true,
+          "annotation": "builtins.bool"
+        },
+        {
+          "name": "md",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.dict"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "detector": {
+            "annotation": "ImagingDetectors",
+            "default": "cam1",
+            "description": "Imaging detector (default: cam1)",
+            "devices": {
+              "ImagingDetectors": [
+                "cam1",
+                "sim_focus_cam"
+              ]
+            },
+            "convert_device_names": true
+          },
+          "motor": {
+            "annotation": "typing.Union[str, Motors, Cam_advanced]",
+            "description": "Motor or supported camera setting to scan",
+            "devices": {
+              "Motors": [
+                "EpicsSignal",
+                "EpicsMotor",
+                "SimulatedFocusMotor",
+                "sim_motor",
+                "sim_focus_motor"
+              ],
+              "Cam_advanced": [
+                "cam1_acquire_time",
+                "cam1_gain",
+                "cam1_offset",
+                "sim_focus_cam_acquire_time"
+              ]
+            },
+            "convert_device_names": true
+          }
+        }
+      },
+      "doc": "Image over offsets from the axis value measured when the run begins."
+    },
+    "adaptive_imaging_focus_scan": {
+      "name": "adaptive_imaging_focus_scan",
+      "generator": true,
+      "parameters": [
+        {
+          "name": "file_name",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "file_dir",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "motor",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": {
+            "device": "test_focus"
+          },
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "focus_guess",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "scan_half_range",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "num_steps",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": 15,
+          "annotation": "builtins.int"
+        },
+        {
+          "name": "detector",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": {
+            "device": "cam1"
+          },
+          "annotation": "inspect._empty"
+        },
+        {
+          "name": "start_pos",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "stop_pos",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "exposure_time",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "command_idle_timeout_s",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": 900.0,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "viewer_start_timeout_s",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": 15.0,
+          "annotation": "builtins.float"
+        },
+        {
+          "name": "md",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.dict"
+        }
+      ],
+      "annotations": {
+        "parameters": {
+          "detector": {
+            "annotation": "ImagingDetectors",
+            "default": "cam1",
+            "description": "Imaging detector (default: cam1)",
+            "devices": {
+              "ImagingDetectors": [
+                "cam1",
+                "sim_focus_cam"
+              ]
+            },
+            "convert_device_names": true
+          },
+          "motor": {
+            "annotation": "typing.Union[str, Motors]",
+            "default": "cam1.focus",
+            "description": "Focus motor to scan (must be movable)",
+            "devices": {
+              "Motors": [
+                "EpicsSignal",
+                "EpicsMotor",
+                "SimulatedFocusMotor",
+                "sim_motor",
+                "sim_focus_motor"
+              ]
+            },
+            "convert_device_names": true
+          }
+        }
+      },
+      "doc": "Adaptive imaging focus plan.\n\nRuns an initial coarse focus scan, then waits for external GUI/analysis\ncommands that request additional focus measurements or terminate the run."
+    },
+    "adaptive_focus_submit_command": {
+      "name": "adaptive_focus_submit_command",
+      "generator": false,
+      "parameters": [
+        {
+          "name": "session_id",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "command",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        },
+        {
+          "name": "payload",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": null,
+          "annotation": "builtins.dict"
+        }
+      ],
+      "annotations": null,
+      "doc": "Submit a command to a running adaptive focus session.\n\nIntended for external GUI/process integration (e.g. function_execute)."
+    },
+    "adaptive_focus_get_session": {
+      "name": "adaptive_focus_get_session",
+      "generator": false,
+      "parameters": [
+        {
+          "name": "session_id",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "default": "inspect._empty",
+          "annotation": "builtins.str"
+        }
+      ],
+      "annotations": null,
+      "doc": "Return snapshot state for one adaptive focus session."
+    }
+  }
+}

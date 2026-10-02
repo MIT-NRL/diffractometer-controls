@@ -1,3 +1,9 @@
+# QueueServer executes these files rather than importing an installed package.
+import sys
+from pathlib import Path
+_checkout_root = Path(__file__).resolve().parents[2]
+if str(_checkout_root) not in sys.path:
+    sys.path.insert(0, str(_checkout_root))
 
 import os
 import importlib.util
@@ -7,17 +13,8 @@ from bluesky.callbacks.zmq import Publisher
 
 from pathlib import Path
 
-def _load_bluesky_mode_helpers():
-    module_path = Path(__file__).resolve().parents[2] / "bluesky_mode.py"
-    spec = importlib.util.spec_from_file_location("mitr_bluesky_mode", module_path)
-    if spec is None or spec.loader is None:
-        raise ModuleNotFoundError(f"Unable to load bluesky mode helper from {module_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+from diffractometer_controls.site.mitr import bluesky_mode as _bluesky_mode
 
-
-_bluesky_mode = _load_bluesky_mode_helpers()
 BLUESKY_MODE_TEST = _bluesky_mode.BLUESKY_MODE_TEST
 get_bluesky_history_path = _bluesky_mode.get_bluesky_history_path
 get_bluesky_mode = _bluesky_mode.get_bluesky_mode
@@ -38,7 +35,6 @@ print(f"Bluesky startup mode: {BLUESKY_MODE} (scan history: {BLUESKY_HISTORY_PAT
 # Add default metadata
 RE.md['facility'] = 'MITR'
 RE.md['beamline_id'] = '4DH4'
-
 
 from bluesky import SupplementalData
 sd = SupplementalData()
@@ -76,13 +72,11 @@ def _catalog_exists(container, name):
         return False
     return True
 
-
 def _resolve_catalog_name(container, preferred_names):
     for name in preferred_names:
         if _catalog_exists(container, name):
             return name
     return preferred_names[0]
-
 
 if BLUESKY_MODE == BLUESKY_MODE_TEST:
     BLUESKY_CATALOG_PREFERRED_NAMES = ["testdb"]
@@ -111,19 +105,16 @@ if BLUESKY_CATALOG_NAME != BLUESKY_CATALOG_PREFERRED_NAMES[0]:
         f"using {BLUESKY_CATALOG_NAME!r} instead."
     )
 
-
 # from bluesky.magics import BlueskyMagics
 # get_ipython().register_magics(BlueskyMagics)
 
-
-# Use BestEffortCallback 
+# Use BestEffortCallback
 # TODO: Retire our use of BestEffortCallback, using a table from
 # bluesky_widgets once one is available.
 from bluesky.callbacks.best_effort import BestEffortCallback
 bec = BestEffortCallback()
 bec.disable_plots()
 RE.subscribe(bec)
-
 
 import matplotlib.pyplot as plt
 # Make plots update live while scans run.

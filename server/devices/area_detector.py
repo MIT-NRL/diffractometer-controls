@@ -1,20 +1,32 @@
+"""Device definitions only; importing this module does not construct EPICS devices."""
 import numpy as np
+
 from ophyd import (Device, Component as Cpt,
                    EpicsSignal, EpicsSignalRO, EpicsMotor, Signal,
                    cam)
+
 from ophyd.device import DeviceStatus, do_not_wait_for_lazy_connection
+
 from ophyd.status import Status, SubscriptionStatus
 
-from ophyd.areadetector import (AreaDetector, SingleTrigger, SimDetector, 
+from ophyd.areadetector import (AreaDetector, SingleTrigger, SimDetector,
                                 ImagePlugin, StatsPlugin, TIFFPlugin, HDF5Plugin, TransformPlugin,
                                 CamBase, ADComponent as ADCpt, EpicsSignalWithRBV as SignalWithRBV,
                                 DetectorBase)
+
 from ophyd.areadetector.filestore_mixins import FileStoreTIFFIterativeWrite, FileStoreHDF5IterativeWrite
+
 from ophyd import cam
+
 from bluesky_queueserver import register_device
+
 from epics import caput, caget, cainfo
+
 import uuid
+
 from datetime import datetime, timedelta
+
+from server.devices.motors import EpicsMotorCustom
 
 class ZWODetectorCam(CamBase):
     # This ZWO IOC exposes ``Acquire`` as a single control/status PV; it does
@@ -36,7 +48,6 @@ class ZWODetector(DetectorBase):
 class QHYDetector(DetectorBase):
     cam = ADCpt(QHYDetectorCam, "cam1:")
 
-
 class MyTIFFPlugin(FileStoreTIFFIterativeWrite,TIFFPlugin):
     folder_name = Cpt(Signal, value="", kind="config")  # Add a folder_name component
     create_directory = Cpt(EpicsSignal, "CreateDirectory", kind="config")  # Add the CreateDirectory PV
@@ -53,14 +64,13 @@ class MyTIFFPlugin(FileStoreTIFFIterativeWrite,TIFFPlugin):
         self.stage_sigs.update(
             [("file_template","%s%s_%4.4d.tif"),
              ("auto_save", 1),
-                
+
             ]
         )
-        
+
     def stage(self):
         self.create_directory.set(-3).wait()
         return super().stage()
-    # pass
 
 class MyHDF5Plugin(FileStoreHDF5IterativeWrite,HDF5Plugin):
     layout_filename = Cpt(EpicsSignal, "XMLFileName", kind="config", string=True)
@@ -204,7 +214,6 @@ class SingleTriggerPause(SingleTrigger):
             pass
         return stop_ret
 
-
 class MyZWODetector(SingleTriggerPause, ZWODetector):
     cam = Cpt(ZWODetectorCam, "cam1:")
     image = Cpt(ImagePlugin, suffix='image1:')
@@ -224,14 +233,6 @@ class MyZWODetector(SingleTriggerPause, ZWODetector):
         read_path_template="/home/mitr_4dh4/Data/Imaging/%Y/",
     )
 
-    
-    # hdf1 = Cpt(
-    #     MyHDF5Plugin,
-    #     "HDF1:",
-    #     write_path_template="/home/mitr_4dh4/Data/TestData/HDF/%Y/%m/%d/",
-    #     read_path_template="/home/mitr_4dh4/Data/TestData/HDF/%Y/%m/%d/",        
-    # )
-
 class MyQHYDetector(SingleTriggerPause, QHYDetector):
     cam = Cpt(ZWODetectorCam, "cam1:")
     image = Cpt(ImagePlugin, suffix='image1:')
@@ -245,12 +246,6 @@ class MyQHYDetector(SingleTriggerPause, QHYDetector):
         write_path_template="/home/mitr_4dh4/Data/Imaging/%Y/",
         read_path_template="/home/mitr_4dh4/Data/Imaging/%Y/",
     )
-    # hdf1 = Cpt(
-    #     MyHDF5Plugin,
-    #     "HDF1:",
-    #     write_path_template="/home/mitr_4dh4/Data/TestData/HDF/%Y/%m/%d/",
-    #     read_path_template="/home/mitr_4dh4/Data/TestData/HDF/%Y/%m/%d/",        
-    # )
 
 class SimAreaDetector(SingleTriggerPause, SimDetector):
     cam = Cpt(cam.SimDetectorCam, "cam1:")
@@ -263,129 +258,5 @@ class SimAreaDetector(SingleTriggerPause, SimDetector):
         write_path_template="/home/mitr_4dh4/Data/TestData/%Y/%m/%d/",
         read_path_template="/home/mitr_4dh4/Data/TestData/%Y/%m/%d/",
     )
-    # hdf1 = Cpt(
-    #     MyHDF5Plugin,
-    #     "HDF1:",
-    #     write_path_template="/home/mitr_4dh4/Data/TestData/HDF/%Y/%m/%d/",
-    #     read_path_template="/home/mitr_4dh4/Data/TestData/HDF/%Y/%m/%d/",        
-    # )
 
-
-_CAMERA_ADVANCED_AXIS_ATTRS = ("acquire_time", "gain", "offset")
-
-
-def _register_camera_advanced_axes(detector_name, detector):
-    """Register only the camera controls deliberately supported as scan axes.
-
-    Registering the complete AreaDetector tree at depth 3 makes Queue Server
-    instantiate every lazy camera signal while it builds its device inventory.
-    Some of the ZWO driver's optional ``*_RBV`` records are not present, so
-    that eager discovery aborts startup.  Top-level aliases keep the supported
-    controls addressable by Queue Server without traversing the camera tree.
-    """
-    camera = detector.cam
-    with do_not_wait_for_lazy_connection(camera):
-        for attr in _CAMERA_ADVANCED_AXIS_ATTRS:
-            axis_name = f"{detector_name}_{attr}"
-            axis = getattr(camera, attr)
-            # BestEffortCallback uses hinted fields for its live table.  The
-            # selected camera control is read at every scan point, so expose
-            # it just like a conventional motor readback.
-            axis.kind = "hinted"
-            # This alias is a scan axis, not an experiment detector.
-            axis.scalar_plan_hidden = True
-            globals()[axis_name] = axis
-            register_device(axis_name, depth=1)
-
-# Enable when using the ZWO camera
-if 1:
-    cam1 = MyZWODetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total','focus','x'])
-    cam1.stats1.total.kind = "hinted"
-    cam1.focus.user_readback.kind = "normal"
-    cam1.x.user_readback.kind = "normal"
-    # Keep the detector shallow: selected camera controls are registered as
-    # explicit aliases below, avoiding Queue Server's eager depth-3 traversal.
-    register_device("cam1", depth=2)
-    _register_camera_advanced_axes("cam1", cam1)
-    cam1.cam.nd_attributes_file.set("/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml") 
-    # caput("4dh4:TIFF1:CreateDirectory", -3)
-    caput("4dh4:TIFF1:AutoSave", 0) #Ensure the TIFF plugin does not auto save to prevent overwriting
-
-    def _abort_detector_acquire(det):
-        """Best-effort abort used by RunEngine pause hook."""
-        # Call device stop() first so it can handle interrupt cleanup.
-        try:
-            if hasattr(det, "stop"):
-                det.stop(success=False)
-        except Exception:
-            pass
-        try:
-            if hasattr(det, "tiff1") and hasattr(det.tiff1, "capture"):
-                det.tiff1.capture.put(0, wait=False)
-        except Exception:
-            pass
-        try:
-            if hasattr(det, "cam") and hasattr(det.cam, "abort"):
-                det.cam.abort.put(1, wait=False)
-        except Exception:
-            pass
-        try:
-            if hasattr(det, "cam") and hasattr(det.cam, "acquire"):
-                det.cam.acquire.put(0, wait=False)
-        except Exception:
-            pass
-
-    # In Queue Server, immediate pause can occur while RE waits on trigger
-    # status. Hook RE state changes so pausing or suspending always aborts
-    # detector exposure.
-    try:
-        _existing_state_hook = RE.state_hook
-        if getattr(_existing_state_hook, "_detector_abort_wrapper", False):
-            _previous_state_hook = getattr(_existing_state_hook, "_detector_abort_previous", None)
-        else:
-            _previous_state_hook = _existing_state_hook
-
-        def _state_hook_with_detector_abort(*args, _previous_hook=_previous_state_hook, **kwargs):
-            state = kwargs.get("new_state", kwargs.get("state", None))
-            str_args = [a for a in args if isinstance(a, str)]
-            if state is None and str_args:
-                # RunEngine state_hook signature is (new_state, old_state).
-                state = str_args[0]
-            if isinstance(state, str):
-                state = state.strip().lower()
-
-            if state in ("pausing", "paused", "suspending", "suspended"):
-                _abort_detector_acquire(cam1)
-
-            if callable(_previous_hook):
-                return _previous_hook(*args, **kwargs)
-            return None
-
-        _state_hook_with_detector_abort._detector_abort_wrapper = True
-        _state_hook_with_detector_abort._detector_abort_previous = _previous_state_hook
-        RE.state_hook = _state_hook_with_detector_abort
-    except Exception:
-        pass
-
-# Enable when using the QHY camera
-if 0:
-    cam1 = MyQHYDetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total'])
-    cam1.cam.nd_attributes_file.set("/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml") 
-    # caput("4dh4:TIFF1:CreateDirectory", -3)
-
-sd.baseline.append(cam1.focus)
-sd.baseline.append(cam1.x)
-
-# cam_zwo.stage_sigs["cam.num_images"] = 1
-
-# Need to add stage sigs for create directory depth
-# cam_zwo.tiff1.stage_sigs[""]
-
-# cam_zwo.cam.temperature.set(-20).wait()
-# cam_zwo.hdf1.stage_sigs["layout_filename"] = "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoLayoutDX.xml"
-# cam_zwo.cam.stage_sigs["nd_attributes_file"] = "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml"
-# cam_zwo.hdf1.stage_sigs["store_attr"] = "Yes"
-
-# cam_sim = SimAreaDetector(prefix='4dh4:',name='cam1',read_attrs=['hdf1','stats1.total'])
-# cam_sim.hdf1.stage_sigs["layout_filename"] = "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoLayoutDX.xml"
-# cam_sim.cam.stage_sigs["nd_attributes_file"] = "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls/diffractometer_controls/areaDetectorConfigXML/tomoDetectorAttributes.xml"
+__all__ = ['ADCpt', 'AreaDetector', 'CamBase', 'Cpt', 'DetectorBase', 'Device', 'DeviceStatus', 'EpicsMotor', 'EpicsMotorCustom', 'EpicsSignal', 'EpicsSignalRO', 'FileStoreHDF5IterativeWrite', 'FileStoreTIFFIterativeWrite', 'HDF5Plugin', 'ImagePlugin', 'MyHDF5Plugin', 'MyQHYDetector', 'MyTIFFPlugin', 'MyZWODetector', 'QHYDetector', 'QHYDetectorCam', 'Signal', 'SignalWithRBV', 'SimAreaDetector', 'SimDetector', 'SingleTrigger', 'SingleTriggerPause', 'StatsPlugin', 'Status', 'SubscriptionStatus', 'TIFFPlugin', 'TransformPlugin', 'ZWODetector', 'ZWODetectorCam', 'caget', 'cainfo', 'cam', 'caput', 'datetime', 'do_not_wait_for_lazy_connection', 'np', 'register_device', 'timedelta', 'uuid']

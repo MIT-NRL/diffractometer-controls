@@ -1,3 +1,4 @@
+"""Writer definitions; startup owns construction and RunEngine subscriptions."""
 import datetime as dt
 import pathlib
 import re
@@ -357,11 +358,3 @@ class HE3DiffractionNXWriter(NXWriter):
         if axes:
             nxdata.attrs["axes"] = axes
         return nxdata
-
-
-he3_nexus_writer = None
-he3_nexus_writer_subscription = None
-
-if "RE" in globals():
-    he3_nexus_writer = HE3DiffractionNXWriter()
-    he3_nexus_writer_subscription = RE.subscribe(he3_nexus_writer.receiver)
