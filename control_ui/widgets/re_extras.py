@@ -36,18 +36,13 @@ class REPlans(ServiceDisplay):
     def prepare_for_detach(self):
         console = getattr(self, "_re_console", None)
         if console is not None:
-            console._dc_console_stop_requested = True
+            console._dc_shutdown_console()
 
     def deactivate_display(self):
-        self.prepare_for_detach()
+        self._re_console._dc_pause_console()
 
     def activate_display(self):
-        console = self._re_console
-        console._dc_console_stop_requested = False
-        thread = getattr(console, "_thread", None)
-        if not getattr(thread, "is_running", False):
-            console._start_thread()
-        console._start_timer()
+        self._re_console._dc_resume_console()
         self._re_queue_history.slot_plan_history_changed(
             list(getattr(self.services.re_client, "_plan_history_items", []) or []),
             list(self.services.re_client.selected_history_item_pos or []),

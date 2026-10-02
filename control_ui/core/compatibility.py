@@ -150,7 +150,10 @@ class BlueskyCompatibility:
 
         def _patched_init(self, *args, **kwargs):
             self._dc_console_stop_requested = False
+            self._dc_console_closed = False
+            self._dc_console_worker_pending = False
             original_init(self, *args, **kwargs)
+            self.destroyed.connect(lambda *_args: _mark_console_closed(self))
             _apply_console_palette(self)
 
         def _patched_change_event(self, event):
@@ -186,14 +189,18 @@ class BlueskyCompatibility:
             return None
 
         def _patched_start_thread(self):
-            if getattr(getattr(self, "_thread", None), "is_running", False):
+            # FunctionWorker.is_running stays True after finished in the
+            # installed version. Track queued/running work until its signal.
+            if self._dc_console_stop_requested or self._dc_console_worker_pending:
                 return
+            self._dc_console_worker_pending = True
             self._thread = bw_run_engine_client.FunctionWorker(lambda: _poll_console_once(self))
             self._thread.returned.connect(self._process_new_console_output)
             self._thread.finished.connect(self._finished_receiving_console_output)
             self._thread.start()
 
         def _patched_finished_receiving_console_output(self):
+            self._dc_console_worker_pending = False
             if getattr(self, "_dc_console_stop_requested", False):
                 return
             if callable(original_finished):
@@ -205,8 +212,40 @@ class BlueskyCompatibility:
             if callable(original_process):
                 original_process(self, result)
 
-        def _patched_del(self):
+        def _mark_console_closed(self):
+            self._dc_console_closed = True
             self._dc_console_stop_requested = True
+
+        def _pause_console(self):
+            self._dc_console_stop_requested = True
+            timer = getattr(self, "_dc_console_update_timer", None)
+            if timer is not None:
+                timer.stop()
+            self._text_edit.setUpdatesEnabled(True)
+
+        def _resume_console(self):
+            if self._dc_console_closed:
+                return
+            self._dc_console_stop_requested = False
+            self._text_edit.setUpdatesEnabled(True)
+            self._start_thread()
+            self._start_timer()
+
+        def _shutdown_console(self):
+            _mark_console_closed(self)
+            _pause_console(self)
+
+        def _patched_start_timer(self):
+            if self._dc_console_stop_requested:
+                return
+            timer = getattr(self, "_dc_console_update_timer", None)
+            if timer is None:
+                timer = QtCore.QTimer(self)
+                timer.setSingleShot(True)
+                timer.timeout.connect(self._update_console_output)
+                self._dc_console_update_timer = timer
+            if not timer.isActive():
+                timer.start(195)
 
         def _patched_update_console_output(self):
             if not getattr(self, "_dc_console_stop_requested", False):
@@ -227,9 +266,9 @@ class BlueskyCompatibility:
             timer.setSingleShot(True)
 
             def restore_scroll():
+                self._text_edit.setUpdatesEnabled(True)
                 if not getattr(self, "_dc_console_stop_requested", False):
                     maximum = self._text_edit.verticalScrollBar().maximum()
-                    self._text_edit.setUpdatesEnabled(True)
                     self._text_edit.verticalScrollBar().setValue(maximum if self._te_scrolled_to_bottom else value)
                 timer.deleteLater()
 
@@ -239,11 +278,15 @@ class BlueskyCompatibility:
         console_cls.__init__ = _patched_init
         console_cls.changeEvent = _patched_change_event
         console_cls._start_thread = _patched_start_thread
+        console_cls._start_timer = _patched_start_timer
         console_cls._finished_receiving_console_output = _patched_finished_receiving_console_output
         console_cls._process_new_console_output = _patched_process_new_console_output
         console_cls._update_console_output = _patched_update_console_output
         console_cls._display_text = _patched_display_text
-        console_cls.__del__ = _patched_del
+        console_cls.__del__ = _mark_console_closed
+        console_cls._dc_pause_console = _pause_console
+        console_cls._dc_resume_console = _resume_console
+        console_cls._dc_shutdown_console = _shutdown_console
         console_cls._dc_apply_console_palette = _apply_console_palette
         console_cls._dc_theme_refresh_patch_applied = True
 

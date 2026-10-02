@@ -4,16 +4,47 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import sys
+import queue
 import threading
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from qtpy import QtCore, QtTest, QtWidgets
 from bluesky_widgets.models.run_engine_client import RunEngineClient
 from bluesky_widgets.qt import run_engine_client as rec
 from control_ui.core.compatibility import install_bluesky_compatibility
 from control_ui.core.options import PlanEditorOptions
+from control_ui.core.lifecycle import DisplayOwner
+from control_ui.core.services import ControlServices
 from control_ui.widgets.re_plan_editor_widget import RePlanEditorWidget
 from control_ui.widgets.re_queue_widget import QtRePlanQueueEstimated
+from control_ui.widgets.re_extras import REPlans as ConsoleHistory
+
+
+class FakeConsoleTransport:
+    """Real worker reads from a local queue instead of a QueueServer socket."""
+
+    def __init__(self):
+        self.messages = queue.Queue()
+        self.lock = threading.Lock()
+        self.active_reads = 0
+        self.max_active_reads = 0
+
+    def enable(self):
+        pass
+
+    def next_msg(self, *, timeout):
+        with self.lock:
+            self.active_reads += 1
+            self.max_active_reads = max(self.max_active_reads, self.active_reads)
+        try:
+            return self.messages.get(timeout=timeout)
+        finally:
+            with self.lock:
+                self.active_reads -= 1
+
+    def send(self, text):
+        self.messages.put({"time": 1.0, "msg": text})
 
 
 class SharedWidgetOwnershipTests(unittest.TestCase):
@@ -24,6 +55,60 @@ class SharedWidgetOwnershipTests(unittest.TestCase):
 
     def setUp(self):
         self.model = RunEngineClient(zmq_control_addr="tcp://127.0.0.1:1", zmq_info_addr="tcp://127.0.0.1:2")
+
+    def wait_for(self, predicate, timeout_ms=1500):
+        for _ in range(timeout_ms // 10):
+            if predicate():
+                return
+            QtTest.QTest.qWait(10)
+        self.assertTrue(predicate(), "Console update did not arrive")
+
+    def console_owner(self):
+        transport = FakeConsoleTransport()
+        self.model._client = SimpleNamespace(console_monitor=transport, RequestTimeoutError=queue.Empty)
+        services = ControlServices(self.model, None, None)
+        owner = DisplayOwner(lambda: ConsoleHistory(services=services), services)
+
+        def cleanup():
+            owner.shutdown()
+            self.wait_for(lambda: transport.active_reads == 0)
+            QtTest.QTest.qWait(50)
+            owner.widget.deleteLater()
+            QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+
+        self.addCleanup(cleanup)
+        return owner, owner.widget._re_console, transport
+
+    def test_console_continues_receiving_after_the_first_message(self):
+        _owner, console, transport = self.console_owner()
+        for line in ("First output\n", "Second output\n", "Third output\n"):
+            transport.send(line)
+            self.wait_for(lambda: line.strip() in console._text_edit.toPlainText())
+        self.assertEqual(transport.max_active_reads, 1)
+
+    def test_fast_console_navigation_keeps_one_render_timer(self):
+        owner, console, transport = self.console_owner()
+        with patch.object(console, "_start_timer", wraps=console._start_timer) as schedule:
+            for _ in range(10):
+                owner.deactivate()
+                owner.activate()
+            schedule.reset_mock()
+            QtTest.QTest.qWait(650)
+            self.assertGreaterEqual(schedule.call_count, 2)
+            self.assertLessEqual(schedule.call_count, 5)
+        self.assertEqual(transport.max_active_reads, 1)
+
+    def test_console_resumes_after_its_paused_worker_has_finished(self):
+        owner, console, transport = self.console_owner()
+        for index in range(3):
+            owner.deactivate()
+            self.wait_for(lambda: transport.active_reads == 0)
+            QtTest.QTest.qWait(30)
+            owner.activate()
+            line = f"Output after activation {index}"
+            transport.send(line + "\n")
+            self.wait_for(lambda: line in console._text_edit.toPlainText())
+        self.assertEqual(transport.max_active_reads, 1)
 
     def test_editor_uses_injected_api_and_releases_model_callbacks_on_destruction(self):
         api = Mock()
