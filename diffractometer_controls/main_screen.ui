@@ -55,7 +55,7 @@
      </property>
      <property name="icon">
       <iconset>
-       <normaloff>icons/camera.svg</normaloff>icons/camera.svg</iconset>
+       <normaloff>assets/icons/camera.svg</normaloff>assets/icons/camera.svg</iconset>
      </property>
      <property name="iconSize">
       <size>
@@ -65,7 +65,7 @@
      </property>
      <property name="filenames" stdset="0">
       <stringlist>
-       <string>tomography_gui.py</string>
+       <string>screens/tomography/tomography_gui.py</string>
       </stringlist>
      </property>
      <property name="macros" stdset="0">
@@ -94,7 +94,7 @@
      </property>
      <property name="icon">
       <iconset>
-       <normaloff>icons/diffraction_peak_sharp.svg</normaloff>icons/diffraction_peak_sharp.svg</iconset>
+       <normaloff>assets/icons/diffraction_peak_sharp.svg</normaloff>assets/icons/diffraction_peak_sharp.svg</iconset>
       </property>
      <property name="iconSize">
       <size>
@@ -104,7 +104,7 @@
      </property>
      <property name="filenames" stdset="0">
       <stringlist>
-       <string>diffractometer_gui.py</string>
+       <string>screens/diffraction/diffractometer_gui.py</string>
       </stringlist>
      </property>
     </widget>

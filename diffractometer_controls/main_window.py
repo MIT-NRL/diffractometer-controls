@@ -1,3 +1,4 @@
+from diffractometer_controls.site.mitr import profile
 import logging
 import subprocess
 import time
@@ -30,53 +31,17 @@ from qtpy.QtWidgets import (
 from bluesky_widgets.qt.run_engine_client import (
     QtReManagerConnection,
 )
-try:
-    from diffractometer_controls.re_plan_editor_widget import RePlanEditorWidget
-except Exception:
-    from re_plan_editor_widget import RePlanEditorWidget
-try:
-    from diffractometer_controls.bluesky_environment_update_dialog import (
-        BlueskyEnvironmentUpdateDialog,
-    )
-except Exception:
-    from bluesky_environment_update_dialog import BlueskyEnvironmentUpdateDialog
-try:
-    from diffractometer_controls.local_maintenance import (
-        LOCAL_MAINTENANCE_DISABLED_MESSAGE,
-        local_maintenance_allowed,
-    )
-except Exception:
-    from local_maintenance import (
-        LOCAL_MAINTENANCE_DISABLED_MESSAGE,
-        local_maintenance_allowed,
-    )
-try:
-    from diffractometer_controls.focus_processing_defaults import (
-        DEFAULT_FOCUS_BULK_WORKERS,
-        DEFAULT_FOCUS_FULL_WORKERS,
-        DEFAULT_FOCUS_MAX_WORKERS_TOTAL,
-    )
-except Exception:
-    from focus_processing_defaults import (
-        DEFAULT_FOCUS_BULK_WORKERS,
-        DEFAULT_FOCUS_FULL_WORKERS,
-        DEFAULT_FOCUS_MAX_WORKERS_TOTAL,
-    )
+from control_ui.widgets.re_plan_editor_widget import RePlanEditorWidget
+from diffractometer_controls.maintenance.bluesky_environment_update_dialog import BlueskyEnvironmentUpdateDialog
+from diffractometer_controls.maintenance.local_maintenance import LOCAL_MAINTENANCE_DISABLED_MESSAGE, local_maintenance_allowed
+from diffractometer_controls.analysis.focus_processing_defaults import DEFAULT_FOCUS_BULK_WORKERS, DEFAULT_FOCUS_FULL_WORKERS, DEFAULT_FOCUS_MAX_WORKERS_TOTAL
 from pydm.widgets import PyDMByteIndicator
 from bluesky_queueserver_api.zmq import REManagerAPI
 from pydm.widgets.channel import PyDMChannel
 
-def _load_bluesky_mode_helpers():
-    module_path = Path(__file__).resolve().with_name("bluesky_mode.py")
-    spec = importlib.util.spec_from_file_location("mitr_bluesky_mode", module_path)
-    if spec is None or spec.loader is None:
-        raise ModuleNotFoundError(f"Unable to load bluesky mode helper from {module_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+from diffractometer_controls.site.mitr import bluesky_mode as _bluesky_mode
 
 
-_bluesky_mode = _load_bluesky_mode_helpers()
 BLUESKY_MODE_PRODUCTION = _bluesky_mode.BLUESKY_MODE_PRODUCTION
 BLUESKY_MODE_TEST = _bluesky_mode.BLUESKY_MODE_TEST
 get_bluesky_mode = _bluesky_mode.get_bluesky_mode
@@ -162,7 +127,7 @@ class MITRMainWindow(PyDMMainWindow):
         self._focus_qs_control_addr = "tcp://localhost:60615"
         self._focus_qs_info_addr = "tcp://localhost:60625"
         self._focus_launched_sessions = set()
-        from application import MITRApplication
+        from diffractometer_controls.application import MITRApplication
         app = MITRApplication.instance()
         self.re_manager_api = app.re_manager_api
         self.adaptive_focus_plan_started.connect(
@@ -176,7 +141,7 @@ class MITRMainWindow(PyDMMainWindow):
     def customize_ui(self):
         # from application import MITRApplication
         # app = MITRApplication.instance()
-        icon_path = str(Path("./NRL_Logo.png").resolve())
+        icon_path = str(profile.ASSETS / "NRL_Logo.png")
         self.setWindowIcon(QtGui.QIcon(icon_path))
         re_manager_api = self.re_manager_api
 
@@ -211,7 +176,7 @@ class MITRMainWindow(PyDMMainWindow):
 
         # Connect the button to the load_file function
         controlsAll.clicked.connect(lambda: load_file(
-            file="extra_ui/4dh4All.ui",
+            file=str(profile.APPLICATION_ROOT / "site/mitr/4dh4All.ui"),
             macros=self.macros,
         ))
 
@@ -240,7 +205,7 @@ class MITRMainWindow(PyDMMainWindow):
 
         # controlsAll = CustomRelatedDisplayButtonWrapper(
         #     parent=self,
-        #     filename="extra_ui/4dh4All.ui",
+        #     filename=str(profile.APPLICATION_ROOT / "site/mitr/4dh4All.ui"),
         #     macros=self.macros_str,
         #     icon=gear_icon,
         #     text="All Controls",
@@ -490,7 +455,7 @@ class MITRMainWindow(PyDMMainWindow):
 
         # Add vscode editor of the bluesky directory
         bluesky_vscode = bluesky_menu.addAction("Edit Bluesky Files")
-        bluesky_vscode.triggered.connect(lambda: subprocess.Popen(["code", "-n", "/home/mitr_4dh4/Documents/GitHub/diffractometer-controls"]))
+        bluesky_vscode.triggered.connect(lambda: subprocess.Popen(["code", "-n", str(profile.CHECKOUT_ROOT)]))
         self._set_themed_action_icon(bluesky_vscode, 'fa6.file-code')
         bluesky_vscode.setToolTip("Edit the Bluesky files in VSCode")
         bluesky_menu.addAction(bluesky_vscode)
@@ -581,13 +546,13 @@ class MITRMainWindow(PyDMMainWindow):
 
         # Add vscode editor of the EPICS directory
         epics_vscode = epics_menu.addAction("Edit EPICS IOC Files")
-        epics_vscode.triggered.connect(lambda: subprocess.Popen(["code", "-n", "/home/mitr_4dh4/EPICS/IOCs/4dh4"]))
+        epics_vscode.triggered.connect(lambda: subprocess.Popen(["code", "-n", str(profile.ioc_root())]))
         self._set_themed_action_icon(epics_vscode, 'fa6.file-code')
         epics_vscode.setToolTip("Edit the EPICS IOC files in VSCode")
         epics_menu.addAction(epics_vscode)
 
         epics_top_vscode = epics_menu.addAction("Edit EPICS Files")
-        epics_top_vscode.triggered.connect(lambda: subprocess.Popen(["code", "-n", "/home/mitr_4dh4/EPICS"]))
+        epics_top_vscode.triggered.connect(lambda: subprocess.Popen(["code", "-n", str(profile.epics_root())]))
         self._set_themed_action_icon(epics_top_vscode, 'fa6.file-code')
         epics_top_vscode.setToolTip("Edit the EPICS files in VSCode")
         epics_menu.addAction(epics_top_vscode)
@@ -603,7 +568,7 @@ class MITRMainWindow(PyDMMainWindow):
         # Add the "Controls" action to the menu bar
         controls_action = QAction(gear_icon, "Old Control Menu", self)
         controls_action.triggered.connect(lambda: load_file(
-            file="/home/mitr_4dh4/EPICS/IOCs/4dh4/4dh4App/op/adl/ioc_motors.adl",
+            file=str(profile.ioc_root() / "4dh4App/op/adl/ioc_motors.adl"),
             macros=self.macros,
             # open_in_new_window=True
         ))
@@ -870,7 +835,7 @@ class MITRMainWindow(PyDMMainWindow):
 
     @staticmethod
     def _theme_mode_from_app(app):
-        from application import get_app_settings
+        from diffractometer_controls.application import get_app_settings
 
         settings = get_app_settings()
         getter = getattr(app, "theme_mode", None)
@@ -899,7 +864,7 @@ class MITRMainWindow(PyDMMainWindow):
             return False
 
     def _set_theme_mode(self, mode):
-        from application import THEME_MODE_SETTINGS_KEY, MITRApplication, get_app_settings
+        from diffractometer_controls.application import THEME_MODE_SETTINGS_KEY, MITRApplication, get_app_settings
 
         mode = str(mode).strip().lower()
         if mode not in {"light", "dark", "system"}:
@@ -1257,7 +1222,7 @@ class MITRMainWindow(PyDMMainWindow):
         if self._focus_doc_subscription is not None:
             return
         try:
-            from application import MITRApplication
+            from diffractometer_controls.application import MITRApplication
 
             app = MITRApplication.instance()
             client = getattr(self.re_manager_api, "_client", None)
@@ -1280,7 +1245,7 @@ class MITRMainWindow(PyDMMainWindow):
         if token is None:
             return
         try:
-            from application import MITRApplication
+            from diffractometer_controls.application import MITRApplication
 
             MITRApplication.instance().document_dispatcher.unsubscribe(token)
         except Exception:
@@ -1353,7 +1318,7 @@ class MITRMainWindow(PyDMMainWindow):
 
     @staticmethod
     def _load_camera_icon():
-        base_dir = Path(__file__).resolve().parent
+        base_dir = profile.ASSETS
         icon = QtGui.QIcon()
         for candidate in (
             base_dir / "icons" / "camera.svg",
@@ -1367,7 +1332,7 @@ class MITRMainWindow(PyDMMainWindow):
 
     @staticmethod
     def _load_focus_program_icon():
-        base_dir = Path(__file__).resolve().parent
+        base_dir = profile.ASSETS
         icon = QtGui.QIcon()
         for candidate in (
             base_dir / "icons" / "focus_program.svg",
@@ -1436,7 +1401,7 @@ class MITRMainWindow(PyDMMainWindow):
         return env
 
     def launch_camera_viewer(self):
-        from application import MITRApplication
+        from diffractometer_controls.application import MITRApplication
 
         app = MITRApplication.instance()
         macros = dict(self.macros)
@@ -1445,11 +1410,11 @@ class MITRMainWindow(PyDMMainWindow):
         try:
             if app is not None:
                 app.new_pydm_process(
-                    "extra_ui/reolink_cameras.py", macros=macros
+                    str(profile.APPLICATION_ROOT / "../control_ui/panels/reolink_cameras.py"), macros=macros
                 )
             else:
                 load_file(
-                    "extra_ui/reolink_cameras.py",
+                    str(profile.APPLICATION_ROOT / "../control_ui/panels/reolink_cameras.py"),
                     macros=macros,
                     target=ScreenTarget.NEW_PROCESS,
                 )
@@ -1468,7 +1433,7 @@ class MITRMainWindow(PyDMMainWindow):
                 return
 
             panel = load_file(
-                "extra_ui/ioc_control_panel.py",
+                str(profile.APPLICATION_ROOT / "site/mitr/ioc_control_panel.py"),
                 macros=self.macros,
                 target=ScreenTarget.DIALOG,
             )
@@ -1487,7 +1452,7 @@ class MITRMainWindow(PyDMMainWindow):
         self._ioc_control_panel = None
 
     def launch_focus_program(self):
-        viewer_script = Path(__file__).resolve().parent / "focus_offline_viewer.py"
+        viewer_script = profile.APPLICATION_ROOT / "analysis/focus_offline_viewer.py"
         if not viewer_script.exists():
             msg = f"Focus program not found: {viewer_script}"
             log.warning(msg)
@@ -1495,11 +1460,11 @@ class MITRMainWindow(PyDMMainWindow):
             return
 
         viewer_python = self._resolve_focus_python_executable()
-        cmd = [str(viewer_python), str(viewer_script)]
+        cmd = [str(viewer_python), "-m", "diffractometer_controls.analysis.focus_offline_viewer"]
         try:
             proc = subprocess.Popen(
                 cmd,
-                cwd=str(viewer_script.parent),
+                cwd=str(profile.CHECKOUT_ROOT),
                 env=MITRMainWindow._analysis_launcher_environment(),
             )
             self.statusBar().showMessage(
@@ -1592,7 +1557,7 @@ class MITRMainWindow(PyDMMainWindow):
         ):
             return
         self._stop_focus_online_viewer()
-        viewer_script = Path(__file__).resolve().parent / "focus_online_viewer.py"
+        viewer_script = profile.APPLICATION_ROOT / "analysis/focus_online_viewer.py"
         if not viewer_script.exists():
             log.warning("Focus online viewer script not found: %s", viewer_script)
             with _FOCUS_LAUNCH_GUARD:
@@ -1625,7 +1590,7 @@ class MITRMainWindow(PyDMMainWindow):
         file_wait_interval_ms = _env_int("FOCUS_VIEWER_FILE_WAIT_INTERVAL_MS", 250, min_val=50)
         cmd = [
             str(viewer_python),
-            str(viewer_script),
+            "-m", "diffractometer_controls.analysis.focus_online_viewer",
             "--zmq-address",
             str(self._focus_data_addr or "localhost:5568"),
             "--stream-name",
@@ -1670,7 +1635,7 @@ class MITRMainWindow(PyDMMainWindow):
             child_env = MITRMainWindow._analysis_launcher_environment()
             proc = subprocess.Popen(
                 cmd,
-                cwd=str(viewer_script.parent),
+                cwd=str(profile.CHECKOUT_ROOT),
                 env=child_env,
             )
             self._focus_online_proc = proc

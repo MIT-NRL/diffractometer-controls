@@ -36,9 +36,32 @@ class FakeDocuments:
         self.callbacks.pop(token, None)
 
 
+def scalar_gauge_documents(controller):
+    """Feed two document-only counters; this cannot open a live EPICS channel."""
+    fields = {
+        "sim_usbctr_he3_tube": {"label": "Sim USBCTR: HE3 Tube", "role": "signal", "units": "counts", "transport": "document"},
+        "sim_usbctr_beam_monitor": {"label": "Sim USBCTR: Beam Monitor", "role": "signal", "units": "counts", "transport": "document"},
+        "sim_usbctr_time": {"label": "Elapsed Time", "role": "elapsed_time", "units": "s", "transport": "document"},
+    }
+    controller.on_document("start", {
+        "uid": "reference-scalar-run", "title": "Simulated scalar reference", "plan_name": "count_scalar",
+        "experiment_type": "diffraction", "data_type": "scalar",
+        "detectors": ["sim_usbctr.he3_tube", "sim_usbctr.beam_monitor"], "motors": [],
+        "live_plot_fields": fields, "plan_args": {"acquire_time": 5.0},
+    })
+    controller.on_document("descriptor", {
+        "uid": "reference-primary", "run_start": "reference-scalar-run", "name": "primary",
+        "data_keys": {key: {"dtype": "number", "shape": []} for key in fields},
+    })
+    controller.on_document("event", {
+        "descriptor": "reference-primary", "seq_num": 1,
+        "data": {"sim_usbctr_he3_tube": 1250.0, "sim_usbctr_beam_monitor": 3800.0, "sim_usbctr_time": 2.0},
+    })
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", default="artifacts/reference_layouts/baseline")
+    parser.add_argument("--output", default="artifacts/reference_layouts/current")
     parser.add_argument("--width", type=int, default=2200)
     parser.add_argument("--height", type=int, default=1400)
     parser.add_argument("--platform", default="windows" if sys.platform == "win32" else "offscreen")
@@ -47,9 +70,8 @@ def main():
     os.environ.setdefault("MITR_FILE_DIR_QUERY_MODE", "local")
     output = ROOT / args.output
     output.mkdir(parents=True, exist_ok=True)
-    os.environ["PYDM_DISPLAYS_PATH"] = os.pathsep.join(
-        [str(UI_DIR), str(UI_DIR / "extra_ui")]
-    )
+    from diffractometer_controls.site.mitr.profile import display_directories
+    os.environ["PYDM_DISPLAYS_PATH"] = os.pathsep.join(map(str, display_directories()))
 
     from qtpy import QtCore, QtGui, QtWidgets
     from pydm.application import PyDMApplication
@@ -65,7 +87,7 @@ def main():
          patch.object(PyDMChannel, "disconnect", lambda self, **kwargs: None), \
          patch.object(rec.QtReManagerConnection, "_start_thread", lambda self: None), \
          patch.object(rec.QtReConsoleMonitor, "_start_thread", lambda self: None):
-        from application import MITRApplication, _build_dark_palette
+        from diffractometer_controls.application import MITRApplication, _build_dark_palette
         app = PyDMApplication(use_main_window=False, command_line_args=[], read_only=True)
         app.setStyle("Fusion")
         app.setFont(QtGui.QFont("Segoe UI" if sys.platform == "win32" else "DejaVu Sans", 10))
@@ -85,16 +107,13 @@ def main():
         guards = ExitStack()
         guards.enter_context(patch.object(rec.QtReConsoleMonitor, "_start_thread", lambda self: None))
         guards.enter_context(patch.object(rec.QtReConsoleMonitor, "_start_timer", lambda self: None))
-        try:
-            from control_ui.core.services import ControlServices
-            app.control_services = ControlServices(
-                app.re_client, app.document_dispatcher, app.re_manager_api
-            )
-        except ModuleNotFoundError:
-            pass  # The same capture command also runs before extraction.
+        from control_ui.core.services import ControlServices
+        app.control_services = ControlServices(
+            app.re_client, app.document_dispatcher, app.re_manager_api
+        )
 
-        from diffractometer_controls.diffractometer_gui import MainScreen as Diffraction
-        from diffractometer_controls.tomography_gui import MainScreen as Tomography
+        from diffractometer_controls.screens.diffraction.diffractometer_gui import MainScreen as Diffraction
+        from diffractometer_controls.screens.tomography.tomography_gui import MainScreen as Tomography
 
         light_palette = QtGui.QPalette(app.palette())
         captures = []
@@ -135,6 +154,19 @@ def main():
                     captures[-1]["requested_fonts"] = sorted({w.font().family() for w in screen.findChildren(QtWidgets.QLabel)})
                     captures[-1]["app_font"] = app.font().toString()
                     captures[-1]["screen_font"] = screen.font().toString()
+                    if name == "diffraction":
+                        controller = getattr(screen, "_diffraction_live_plot", None)
+                        if controller is None:
+                            raise RuntimeError("Scalar reference requires the real diffraction plotting backend")
+                        scalar_gauge_documents(controller)
+                        for _ in range(12):
+                            app.processEvents()
+                            time.sleep(0.025)
+                        scalar_filename = f"diffraction_scalar_{theme}.png"
+                        if not screen.grab().save(str(output / scalar_filename)):
+                            raise RuntimeError(f"Unable to save {scalar_filename}")
+                        captures.append({**captures[-1], "file": scalar_filename, "screen": "diffraction_scalar",
+                                         "input": "two simulated document-only count sources"})
                     screen.cleanup_before_navigation()
                     screen.close()
                     app.processEvents()
@@ -150,8 +182,8 @@ def main():
                 "source_sha256": {
                     str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
                     for path in [
-                        UI_DIR / "diffractometer_gui.py", UI_DIR / "diffractometer_gui.ui",
-                        UI_DIR / "tomography_gui.py", UI_DIR / "tomography_gui.ui",
+                        UI_DIR / "screens/diffraction/diffractometer_gui.py", UI_DIR / "screens/diffraction/diffractometer_gui.ui",
+                        UI_DIR / "screens/tomography/tomography_gui.py", UI_DIR / "screens/tomography/tomography_gui.ui",
                         ROOT / "control_ui" / "layouts" / "experiment_workspace.py",
                         ROOT / "control_ui" / "layouts" / "experiment_workspace.ui",
                     ] if path.exists()

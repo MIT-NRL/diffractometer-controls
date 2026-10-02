@@ -1,5 +1,8 @@
+from diffractometer_controls.site.mitr import profile as mitr_profile
+from control_ui.core.compatibility import _patch_bluesky_status_reload_shutdown
 import argparse
 import cProfile
+import importlib
 import inspect
 import logging
 import os
@@ -22,6 +25,16 @@ def _append_unique_addresses(existing, addresses):
     return " ".join(values)
 
 
+def _port_qualified_addresses(addresses):
+    """Return address-list entries that explicitly include a numeric port."""
+    qualified = []
+    for address in addresses:
+        host, separator, port = str(address).rpartition(":")
+        if host and separator and port.isdigit():
+            qualified.append(address)
+    return qualified
+
+
 def _configure_epics_search_addresses(host):
     """Enable LAN discovery and add privately configured production endpoints."""
     requested_host = str(host or "localhost").strip()
@@ -40,10 +53,19 @@ def _configure_epics_search_addresses(host):
         os.environ.get("EPICS_CA_ADDR_LIST"),
         local_addresses + private_ca_addresses,
     )
-    os.environ["EPICS_PVA_ADDR_LIST"] = _append_unique_addresses(
-        os.environ.get("EPICS_PVA_ADDR_LIST"),
-        local_addresses + private_pva_addresses,
-    )
+    # p4p 4.2.2 on Windows aborts while creating a PVA context if this list
+    # contains a bare hostname (including ``localhost``).  PVA automatic
+    # discovery remains enabled, while explicit endpoints must include ports.
+    existing_pva_addresses = os.environ.get("EPICS_PVA_ADDR_LIST", "").split()
+    if platform.system() == "Windows":
+        existing_pva_addresses = _port_qualified_addresses(existing_pva_addresses)
+        pva_addresses = existing_pva_addresses + private_pva_addresses
+        os.environ["EPICS_PVA_ADDR_LIST"] = _append_unique_addresses(None, pva_addresses)
+    else:
+        os.environ["EPICS_PVA_ADDR_LIST"] = _append_unique_addresses(
+            existing_pva_addresses,
+            local_addresses + private_pva_addresses,
+        )
 
 
 def _load_simple_env_file(path):
@@ -66,6 +88,29 @@ def _load_simple_env_file(path):
         os.environ.setdefault(key, value)
 
 
+def _preload_p4p():
+    """Load P4P before PyDM/Qt starts loading EPICS plugins on Windows.
+
+    The conda-forge P4P build used by the Windows control GUI can fail with
+    ``DLL load failed`` when its native extension is first imported after PyDM
+    application startup.  Loading it here fixes the DLL load order.  P4P is
+    optional for displays that use Channel Access only.
+    """
+    try:
+        importlib.import_module("p4p._p4p")
+    except ImportError:
+        return False
+    return True
+
+
+def _github_root():
+    """Return the local GitHub checkout root used for custom PyDM displays."""
+    configured = os.environ.get("MITR_GITHUB_ROOT")
+    if configured:
+        return Path(configured).expanduser()
+    return Path(__file__).resolve().parents[2]
+
+
 def _configure_qt_highdpi():
     if hasattr(QtCore.Qt, "AA_EnableHighDpiScaling"):
         QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
@@ -77,38 +122,6 @@ def _configure_qt_highdpi():
         set_rounding_policy(rounding_policy_enum.PassThrough)
 
 
-def _patch_bluesky_status_reload_shutdown(cls):
-    """Make shared Queue Server polling safe to stop during navigation."""
-    if getattr(cls, "_dc_status_reload_shutdown_patch_applied", False):
-        return
-
-    def _patched_reload_status(self):
-        self.model.load_re_manager_status()
-        remaining = max(float(getattr(self, "update_period", 0) or 0), 0.0)
-        while remaining > 0:
-            if getattr(self, "_deactivate_updates", False):
-                break
-            delay = min(0.05, remaining)
-            time.sleep(delay)
-            remaining -= delay
-
-    def _patched_reload_complete(self):
-        if not self._deactivate_updates:
-            self._start_thread()
-            return
-        # The RunEngineClient model is shared by all screens. A worker from a
-        # detached screen must not clear state after another screen attaches.
-        detaching = bool(getattr(self, "_dc_detaching", False))
-        self._dc_detaching = False
-        if not detaching:
-            self.model.clear_connection_status()
-        self.updates_activated = False
-        self._deactivate_updates = False
-        self._update_widget_states()
-
-    cls._reload_status = _patched_reload_status
-    cls._reload_complete = _patched_reload_complete
-    cls._dc_status_reload_shutdown_patch_applied = True
 
 
 def main():
@@ -124,6 +137,12 @@ def main():
     _load_simple_env_file("~/.config/diffractometer-controls/control.env")
     _load_simple_env_file("~/.config/epics/network.env")
     _load_simple_env_file("~/.config/bluesky-queueserver/client-zmq.env")
+    _preload_p4p()
+
+    # Camera ArrayData PVs are much larger than Channel Access's small default
+    # array limit.  Configure this before PyDM initializes its CA client, while
+    # allowing a site/user environment setting to take precedence.
+    os.environ.setdefault("EPICS_CA_MAX_ARRAY_BYTES", "100000000")
 
     from pydm import config
 
@@ -135,10 +154,10 @@ def main():
         separator = ';'
     else:
         separator = ':'
-    path_list = [dirs.as_posix() for dirs in [Path('./extra_ui').absolute(),Path('./extra_ui/autoconvert').absolute()]]
-    EPICS_SUPPORT = Path('/home/mitr_4dh4/EPICS/synApps-6-3/support')
+    path_list = [str(path) for path in mitr_profile.display_directories()]
+    EPICS_SUPPORT = mitr_profile.epics_support()
     DISPLAY_PATH = os.getenv("PYDM_DISPLAYS_PATH",None)
-    GITHUB = Path('/home/mitr_4dh4/Documents/GitHub')
+    GITHUB = _github_root()
     if DISPLAY_PATH is None:
         path_list_adl = [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*op/adl*')] + [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*opi/medm*')]
         path_list_custom = [
@@ -156,7 +175,8 @@ def main():
         if len(path_list_custom) != 0:
             path_list.extend(path_list_custom)
         DISPLAY_PATH = separator.join(path_list)
-    os.environ['PYDM_DISPLAYS_PATH'] = DISPLAY_PATH
+    # Checkout resources are always available; custom search paths retain precedence.
+    os.environ["PYDM_DISPLAYS_PATH"] = separator.join([DISPLAY_PATH] + path_list)
 
     from pydm.utilities import setup_renderer
 
@@ -173,7 +193,7 @@ def main():
         logger.debug("QtWebEngine is not supported.")
 
     import pydm
-    from application import MITRApplication
+    from diffractometer_controls.application import MITRApplication
     from pydm.utilities.macro import parse_macro_string
 
     from bluesky_widgets.qt import threading as bw_threading
@@ -236,7 +256,7 @@ def main():
     parser.add_argument(
         "--displayfile",
         help="A PyDM file to display in the launched window.",
-        default="main_screen.ui",
+        default=str(mitr_profile.APPLICATION_ROOT / "main_screen.ui"),
     )
     parser.add_argument(
         "--perfmon",
@@ -310,7 +330,7 @@ def main():
 
     # Set default macros to connect to the 4dh4 IOC
     if macros is None:
-        macros = dict(P='4dh4:',ioc='4dh4')
+        macros = dict(mitr_profile.PANEL_MACROS)
 
     # Use ordinary LAN discovery for demo IOCs and private configuration for
     # production endpoints that do not listen on standard discovery ports.
@@ -333,7 +353,7 @@ def main():
         # home_file=pydm_args.homefile,
     )
 
-    base_path = os.path.dirname(os.path.realpath(__file__))
+    base_path = str(mitr_profile.ASSETS)
     icon_path_mask = os.path.join(base_path, "icons", "pydm_{}.png")
 
     app_icon = QtGui.QIcon()

@@ -35,6 +35,33 @@ class ExperimentWorkspace(QtWidgets.QWidget):
         self._install(self.consoleSlot, console_history)
         self.plan_editor = plan_editor
 
+    def install_bluesky_controls(self, *, source_status_factory, editor_options=None,
+                                 estimation_context=None, macros=None):
+        """Install and own the reusable Run Engine, editor, queue and console."""
+        from control_ui.core.lifecycle import DisplayOwner
+        from control_ui.widgets.re_control_panel import REControlPanel
+        from control_ui.widgets.re_plans import REPlans
+        from control_ui.widgets.re_extras import REPlans as ConsoleHistory
+
+        factories = (
+            source_status_factory,
+            lambda: REControlPanel(services=self.services, macros=macros),
+            lambda: REPlans(services=self.services, macros=macros,
+                            editor_options=editor_options, estimation_context=estimation_context),
+            lambda: ConsoleHistory(services=self.services, macros=macros),
+        )
+        owners = [DisplayOwner(factory, self.services) for factory in factories]
+        source, self.run_engine_controls, self.plan_controls, self.console_history = (
+            owner.widget for owner in owners
+        )
+        self.install_shared_controls(
+            source_status=source, run_engine=self.run_engine_controls,
+            plans=self.plan_controls, console_history=self.console_history,
+            plan_editor=self.plan_controls.re_plan_editor,
+        )
+        for owner in owners:
+            self.register_component(owner)
+
     def install_experiment(self, *, viewer, controls, acquisition):
         self._install(self.viewerSlot, viewer)
         self._install(self.controlsSlot, controls)

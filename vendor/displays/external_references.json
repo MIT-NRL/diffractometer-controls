@@ -1,0 +1,298 @@
+{
+  "baseline_revision": "806496621ba808f7c9c5994030f71788a3350cb1",
+  "references": {
+    "ADCompVision.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "ADEpicsShutter.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADShutter.ui"
+    ],
+    "ADQHY.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "ADZWO.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDBadPixel.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDCircularBuff.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDCodec.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDColorConvert.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDFFT.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDFile.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADDriverFile.ui"
+    ],
+    "NDFileHDF5.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDFileJPEG.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDFileMagick.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDFileNetCDF.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDFileNexus.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDFileNull.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDFileTIFF.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDGather8.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDOverlay.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDOverlay8.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDPlot.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/NDStats.ui"
+    ],
+    "NDPlotXY.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/NDStats.ui"
+    ],
+    "NDPluginAttribute.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDPluginBaseFull.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/NDPluginBase.ui"
+    ],
+    "NDPluginEdge.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDPluginTimeSeries.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/NDStats.ui",
+      "diffractometer_controls/extra_ui/autoconvert/NDStatsTimeSeriesBasicAll.ui"
+    ],
+    "NDPva.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDROI.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDROI4.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDROIStat.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDScatter.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDStatsTimeSeriesCentroidAll.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/NDStats.ui"
+    ],
+    "NDStatsTimeSeriesPlot.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/NDStats.ui"
+    ],
+    "NDStdArrays.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "NDTransform.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "ProgressBar.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "URLDriverSetup.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui",
+      "diffractometer_controls/extra_ui/autoconvert/URLDriver.ui"
+    ],
+    "USB2408_module.adl": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "USBCTR.adl": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "arrayTest.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "asynOctet.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "asynRecord.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADSetup.ui",
+      "diffractometer_controls/extra_ui/autoconvert/NDPluginBase.ui"
+    ],
+    "commonPlugins.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "configMenu.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui",
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "editSseq.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "he3_detector_config.ui": [
+      "diffractometer_controls/diffractometer_gui.ui",
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "he3_detector_viewer.ui": [
+      "diffractometer_controls/diffractometer_gui.ui",
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "interp.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "interpNew.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "ioc_stats_epics_env.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ioc_stats_soft.ui"
+    ],
+    "ioc_stats_limits.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ioc_stats_soft.ui"
+    ],
+    "ioc_stats_reboot_confirm.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ioc_stats_soft.ui"
+    ],
+    "ioc_stats_reloadacf_confirm.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ioc_stats_soft.ui"
+    ],
+    "motorx.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/motorx_all.ui",
+      "diffractometer_controls/extra_ui/autoconvert/motorx_more.ui",
+      "diffractometer_controls/extra_ui/autoconvert/motorx_setup.ui"
+    ],
+    "motorx_msta_detail.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/motorx_all.ui"
+    ],
+    "motorx_tiny.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/motorx_all.ui",
+      "diffractometer_controls/extra_ui/autoconvert/motorx_more.ui",
+      "diffractometer_controls/extra_ui/autoconvert/motorx_setup.ui"
+    ],
+    "pvHistory.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "save_restoreStatus_more.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADSetup.ui"
+    ],
+    "scan.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "scanAux.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "scanParms.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/motorx_all.ui",
+      "diffractometer_controls/extra_ui/autoconvert/motorx_more.ui",
+      "diffractometer_controls/extra_ui/autoconvert/motorx_setup.ui"
+    ],
+    "scanParms2Pos.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "scan_more.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui",
+      "diffractometer_controls/extra_ui/tomo_scan_screen.ui"
+    ],
+    "scan_saveData.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "softMotors10.adl": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "userArrayCalcs10.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "userArrayCalcs10more.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "userAve10.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "userAve10more.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "userCalcOuts10.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "userCalcOuts10more.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "userCalcs10.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "userCalcs10more.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "userCalcsGlobalEnable.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "userStringCalcs10.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "userStringCalcs10more.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "userStringSeqs10.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "userStringSeqs10more.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "userTransforms10.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "userTransforms10more.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "xxBusyRecord.ui": [
+      "diffractometer_controls/extra_ui/4dh4All.ui"
+    ],
+    "yySseq.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/ADPlugins.ui",
+      "diffractometer_controls/extra_ui/tomo_cam_controls.ui"
+    ],
+    "yySseq_full.ui": [
+      "diffractometer_controls/extra_ui/autoconvert/NDStats.ui"
+    ]
+  }
+}

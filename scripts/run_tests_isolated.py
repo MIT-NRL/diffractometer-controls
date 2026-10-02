@@ -26,8 +26,13 @@ def main():
     environment["MITR_FILE_DIR_QUERY_MODE"] = "local"
     environment["PYTHONPATH"] = os.pathsep.join([str(checkout), str(checkout / "diffractometer_controls")])
     results = []
-    for file in sorted((checkout / "diffractometer_controls" / "tests").glob("test_*.py")):
-        module = f"diffractometer_controls.tests.{file.stem}"
+    test_root = checkout / "tests"
+    package = "tests"
+    if not test_root.exists():
+        test_root = checkout / "diffractometer_controls" / "tests"
+        package = "diffractometer_controls.tests"
+    for file in sorted(test_root.glob("test_*.py")):
+        module = f"{package}.{file.stem}"
         with (output / f"{file.stem}.log").open("w", encoding="utf8") as log:
             try:
                 result = subprocess.run(
@@ -47,7 +52,7 @@ def main():
         results.append(item)
         print(json.dumps(item), flush=True)
     (output / "summary.json").write_text(json.dumps(results, indent=2) + "\n")
-    return int(any(item["exit_code"] != 0 for item in results))
+    return int(any(item["exit_code"] != 0 or item["skipped"] for item in results))
 
 
 if __name__ == "__main__":
