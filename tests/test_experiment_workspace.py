@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import sys
 import unittest
+import warnings
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -18,7 +19,9 @@ from qtpy import QtCore, QtWidgets
 from bluesky_widgets.models.run_engine_client import RunEngineClient
 from bluesky_widgets.qt import run_engine_client as rec
 from pydm.widgets.channel import PyDMChannel
+from pydm.display import load_file, ScreenTarget
 
+from control_ui.core.compatibility import install_bluesky_compatibility
 from control_ui.core.services import ControlServices
 from control_ui.layouts.experiment_workspace import ExperimentWorkspace
 from diffractometer_controls.screens.diffraction import diffractometer_gui
@@ -94,6 +97,7 @@ class ExperimentScreenIntegrationTests(unittest.TestCase):
         cls.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
     def setUp(self):
+        install_bluesky_compatibility()
         self.guards = [
             patch.object(PyDMChannel, "connect", lambda *args, **kwargs: None),
             patch.object(PyDMChannel, "disconnect", lambda *args, **kwargs: None),
@@ -147,6 +151,31 @@ class ExperimentScreenIntegrationTests(unittest.TestCase):
         self.assertEqual(tomography.workspace.viewerTabs.tabText(1), "Tomo Calculator")
         self.assertIsNotNone(tomography.ui.cameraImage)
         self.assertIsNotNone(diffraction._diffraction_live_plot)
+
+    def _load_mode_through_pydm(self, mode, filename):
+        path = ROOT / "diffractometer_controls" / "screens" / mode / filename
+        with patch.object(self.app, "control_services", self.services, create=True), \
+             warnings.catch_warnings():
+            warnings.filterwarnings("error", message="More than one Display class", category=RuntimeWarning)
+            screen = load_file(str(path), macros={"P": "4dh4:", "R": ""}, target=ScreenTarget.HOME)
+        self.screens.append(screen)
+        self.app.processEvents()
+        self.assertEqual(type(screen).__name__, "MainScreen")
+        self.assertEqual(screen.loaded_file(), str(path))
+        self.assertEqual(Path(screen.ui_filepath()), path.with_suffix(".ui"))
+        self.assertIs(screen.workspace.services, self.services)
+        self.assertIsNotNone(screen.workspace.plan_editor)
+        return screen
+
+    def test_diffraction_file_loads_its_main_screen_through_pydm(self):
+        screen = self._load_mode_through_pydm("diffraction", "diffractometer_gui.py")
+        self.assertIsNotNone(screen._diffraction_live_plot)
+        self.assertEqual(screen.workspace.viewerTabs.tabText(2), "Analyzer calculations")
+
+    def test_tomography_file_loads_its_main_screen_through_pydm(self):
+        screen = self._load_mode_through_pydm("tomography", "tomography_gui.py")
+        self.assertIsNotNone(screen.ui.cameraImage)
+        self.assertEqual(screen.workspace.viewerTabs.tabText(1), "Tomo Calculator")
 
     def test_calculator_transfers_directly_to_the_installed_editor(self):
         tomography = self.screen(TomographyScreen)

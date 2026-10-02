@@ -589,3 +589,7 @@ class MainScreen(ExperimentScreen):
             self.time_remaining_progress.setValue(0)
 
         self.time_remaining_progress.setFormat(f"{remaining:.1f} s remaining")
+
+
+# PyDM must open the concrete screen, rather than an imported Display base.
+intelclass = MainScreen

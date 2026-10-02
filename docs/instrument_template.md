@@ -50,6 +50,17 @@ adapter can supply PV mappings, macros, branding, endpoints and screen factories
 following `diffractometer_controls/site/mitr/profile.py`. Application actions
 and site metadata belong in that adapter.
 
+For a Python display opened through PyDM's file loader, declare the concrete
+entry class at the end of its module:
+
+```python
+intelclass = YourInstrumentScreen
+```
+
+PyDM otherwise scans all imported `Display` subclasses and can select a base
+class alphabetically. Test new screens with `pydm.display.load_file`, as well as
+direct construction, to verify entry-class selection and source-relative UI paths.
+
 Send proposed plans through the explicit editor interface:
 
 ```python

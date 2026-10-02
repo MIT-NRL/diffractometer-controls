@@ -3483,3 +3483,7 @@ class MainScreen(ExperimentScreen):
             self._schedule_live_filter_for_current()
             return
         self._render_current_frame()
+
+
+# PyDM must open the concrete screen, rather than an imported Display base.
+intelclass = MainScreen
