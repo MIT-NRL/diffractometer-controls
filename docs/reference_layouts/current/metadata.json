@@ -1,0 +1,120 @@
+{
+  "git_revision": "6de16bcbfddd7dfce3e8e117102b2d24fc51998e",
+  "qt": "5.15.15",
+  "platform": "windows",
+  "mode": "disconnected; channel I/O and QueueServer polling disabled",
+  "captures": [
+    {
+      "file": "diffraction_light.png",
+      "theme": "light",
+      "screen": "diffraction",
+      "width": 2200,
+      "height": 1400,
+      "text_fonts": [
+        "Segoe UI"
+      ],
+      "requested_fonts": [
+        "Segoe UI"
+      ],
+      "app_font": "Segoe UI,10,-1,5,50,0,0,0,0,0",
+      "screen_font": "Segoe UI,10,-1,5,50,0,0,0,0,0"
+    },
+    {
+      "file": "diffraction_scalar_light.png",
+      "theme": "light",
+      "screen": "diffraction_scalar",
+      "width": 2200,
+      "height": 1400,
+      "text_fonts": [
+        "Segoe UI"
+      ],
+      "requested_fonts": [
+        "Segoe UI"
+      ],
+      "app_font": "Segoe UI,10,-1,5,50,0,0,0,0,0",
+      "screen_font": "Segoe UI,10,-1,5,50,0,0,0,0,0",
+      "input": "two simulated document-only count sources"
+    },
+    {
+      "file": "tomography_light.png",
+      "theme": "light",
+      "screen": "tomography",
+      "width": 2200,
+      "height": 1400,
+      "text_fonts": [
+        "Courier New",
+        "Segoe UI"
+      ],
+      "requested_fonts": [
+        "Courier New",
+        "Segoe UI"
+      ],
+      "app_font": "Segoe UI,10,-1,5,50,0,0,0,0,0",
+      "screen_font": "Segoe UI,10,-1,5,50,0,0,0,0,0"
+    },
+    {
+      "file": "diffraction_dark.png",
+      "theme": "dark",
+      "screen": "diffraction",
+      "width": 2200,
+      "height": 1400,
+      "text_fonts": [
+        "Segoe UI"
+      ],
+      "requested_fonts": [
+        "Segoe UI"
+      ],
+      "app_font": "Segoe UI,10,-1,5,50,0,0,0,0,0",
+      "screen_font": "Segoe UI,10,-1,5,50,0,0,0,0,0"
+    },
+    {
+      "file": "diffraction_scalar_dark.png",
+      "theme": "dark",
+      "screen": "diffraction_scalar",
+      "width": 2200,
+      "height": 1400,
+      "text_fonts": [
+        "Segoe UI"
+      ],
+      "requested_fonts": [
+        "Segoe UI"
+      ],
+      "app_font": "Segoe UI,10,-1,5,50,0,0,0,0,0",
+      "screen_font": "Segoe UI,10,-1,5,50,0,0,0,0,0",
+      "input": "two simulated document-only count sources"
+    },
+    {
+      "file": "tomography_dark.png",
+      "theme": "dark",
+      "screen": "tomography",
+      "width": 2200,
+      "height": 1400,
+      "text_fonts": [
+        "Courier New",
+        "Segoe UI"
+      ],
+      "requested_fonts": [
+        "Courier New",
+        "Segoe UI"
+      ],
+      "app_font": "Segoe UI,10,-1,5,50,0,0,0,0,0",
+      "screen_font": "Segoe UI,10,-1,5,50,0,0,0,0,0"
+    }
+  ],
+  "source_sha256": {
+    "diffractometer_controls/screens/diffraction/diffractometer_gui.py": "ba5abcea62e80358cdf5f2c057a8c2d574fbf06b100022637737998f8c7333bb",
+    "diffractometer_controls/screens/diffraction/diffractometer_gui.ui": "3314df0de17d0934536c428daedaff7c1a387adf3d15379254d7755401799969",
+    "diffractometer_controls/screens/tomography/tomography_gui.py": "df9f7c9100f6d9a51ce30f7089635cfdc00260c1abbb82e3cb5f11e5ae3fbdd9",
+    "diffractometer_controls/screens/tomography/tomography_gui.ui": "0b8166db67042608a3c5b6448fcaaf8481052bbbd3ca0f4d98fcfa0128cf6e33",
+    "control_ui/layouts/experiment_workspace.py": "00fde34347f0a31488a8fdc64d22cd718064ef08c015503814d7b78fd5f123b9",
+    "control_ui/layouts/experiment_workspace.ui": "4ac477131eda29793d99b685bb529cdde303781618bf474e7bfe0ef25cf8cbcd"
+  },
+  "image_sha256": {
+    "diffraction_dark.png": "a07484dafa619f8bd1b4f2e7441b6eb607331dd3efadd1236b5d0ff892fdd4e6",
+    "diffraction_light.png": "948db5efa769c45b451c96a441f9b040a91533d785b81752f32e5f2ef092ac51",
+    "diffraction_scalar_dark.png": "01cc23139113c6cd32752afa55f994f231713e090bb731bc74fefe78b549760a",
+    "diffraction_scalar_light.png": "42f9e1b5243383fb7ad0bf956bee1776ef9082cc88da058b6e0ee6f2130b4036",
+    "tomography_dark.png": "4ce12ffdeaa222a0d74e6fa41de56650ea13ec732598ed8bb8dd98f71367dd3a",
+    "tomography_light.png": "18144faf8eb06b2dc37d8c1cc001b29c641069d03021529c34aaa53ea932ca05"
+  }
+}

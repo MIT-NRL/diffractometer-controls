@@ -1,0 +1,119 @@
+{
+  "git_revision": "806496621ba808f7c9c5994030f71788a3350cb1",
+  "qt": "5.15.15",
+  "platform": "windows",
+  "mode": "disconnected; channel I/O and QueueServer polling disabled",
+  "captures": [
+    {
+      "file": "diffraction_light.png",
+      "theme": "light",
+      "screen": "diffraction",
+      "width": 2200,
+      "height": 1400,
+      "text_fonts": [
+        "Segoe UI"
+      ],
+      "requested_fonts": [
+        "Segoe UI"
+      ],
+      "app_font": "Segoe UI,10,-1,5,50,0,0,0,0,0",
+      "screen_font": "Segoe UI,10,-1,5,50,0,0,0,0,0"
+    },
+    {
+      "file": "tomography_light.png",
+      "theme": "light",
+      "screen": "tomography",
+      "width": 2200,
+      "height": 1400,
+      "text_fonts": [
+        "Courier New",
+        "Segoe UI"
+      ],
+      "requested_fonts": [
+        "Courier New",
+        "Segoe UI"
+      ],
+      "app_font": "Segoe UI,10,-1,5,50,0,0,0,0,0",
+      "screen_font": "Segoe UI,10,-1,5,50,0,0,0,0,0"
+    },
+    {
+      "file": "diffraction_dark.png",
+      "theme": "dark",
+      "screen": "diffraction",
+      "width": 2200,
+      "height": 1400,
+      "text_fonts": [
+        "Segoe UI"
+      ],
+      "requested_fonts": [
+        "Segoe UI"
+      ],
+      "app_font": "Segoe UI,10,-1,5,50,0,0,0,0,0",
+      "screen_font": "Segoe UI,10,-1,5,50,0,0,0,0,0"
+    },
+    {
+      "file": "tomography_dark.png",
+      "theme": "dark",
+      "screen": "tomography",
+      "width": 2200,
+      "height": 1400,
+      "text_fonts": [
+        "Courier New",
+        "Segoe UI"
+      ],
+      "requested_fonts": [
+        "Courier New",
+        "Segoe UI"
+      ],
+      "app_font": "Segoe UI,10,-1,5,50,0,0,0,0,0",
+      "screen_font": "Segoe UI,10,-1,5,50,0,0,0,0,0"
+    },
+    {
+      "file": "diffraction_scalar_light.png",
+      "theme": "light",
+      "screen": "diffraction_scalar",
+      "width": 2200,
+      "height": 1400,
+      "text_fonts": [
+        "Segoe UI"
+      ],
+      "requested_fonts": [
+        "Segoe UI"
+      ],
+      "app_font": "Segoe UI,10,-1,5,50,0,0,0,0,0",
+      "screen_font": "Segoe UI,10,-1,5,50,0,0,0,0,0",
+      "input": "two simulated document-only count sources"
+    },
+    {
+      "file": "diffraction_scalar_dark.png",
+      "theme": "dark",
+      "screen": "diffraction_scalar",
+      "width": 2200,
+      "height": 1400,
+      "text_fonts": [
+        "Segoe UI"
+      ],
+      "requested_fonts": [
+        "Segoe UI"
+      ],
+      "app_font": "Segoe UI,10,-1,5,50,0,0,0,0,0",
+      "screen_font": "Segoe UI,10,-1,5,50,0,0,0,0,0",
+      "input": "two simulated document-only count sources"
+    }
+  ],
+  "source_sha256": {
+    "diffractometer_controls/diffractometer_gui.py": "88bc55a96161a598f9209b3231e555a066207cc9aa35a3a14db15b7b05adf7dd",
+    "diffractometer_controls/diffractometer_gui.ui": "a738a9dd5a7e0d0cadcdd72928237911738e82af457f68d55e44398df72dfe6f",
+    "diffractometer_controls/tomography_gui.py": "ffc57a2a57a2bc495b98adddd7de51ed87d7a7a34768df96b48719ec83409ed1",
+    "diffractometer_controls/tomography_gui.ui": "d8575804ca18c41f4472466a7aaa5aef752dbba50cdf705860ef4692c79dc7a3"
+  },
+  "scalar_recapture_note": "Archived source, simulated document-only counters. Images and metadata saved; original GUI process exited 5 during teardown. Final current capture exits cleanly.",
+  "image_sha256": {
+    "diffraction_dark.png": "4a4ac13415fed6d0327b65c1d121971321d08c96545397507391bc4dd6dd3c5d",
+    "diffraction_light.png": "5659b04cbe44ef6ce3942f3349c5b3a6bf205511835df871c8905d0894329acc",
+    "diffraction_scalar_dark.png": "d739ab0527418cbe2d712cc0b4fb398c587eb6f3a989da833c785bc1d37da741",
+    "diffraction_scalar_light.png": "41a62f47971896cd33a23bbb698cfe7ee0b2ad1b1fefa6ab116754c79929bcee",
+    "tomography_dark.png": "bc4982be653fb388ce985e4a0fa8fb576bf1672358b077e774ccca39e698afc6",
+    "tomography_light.png": "d9159da9e97ffc9b938cae97c03241a9f24d7ff9e5f6476618d3a8c53a0a01ed"
+  }
+}

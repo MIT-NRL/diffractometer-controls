@@ -1,0 +1,282 @@
+{
+  "baseline": [
+    {
+      "module": "diffractometer_controls.tests.test_adaptive_focus",
+      "exit_code": 0,
+      "tests": 14,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_bluesky_environment_update",
+      "exit_code": 1,
+      "tests": 32,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_diffraction_acquisition_status",
+      "exit_code": 0,
+      "tests": 3,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_diffraction_scalar_plot",
+      "exit_code": 0,
+      "tests": 10,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_document_dispatcher",
+      "exit_code": 0,
+      "tests": 5,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_focus_viewer_lifecycle",
+      "exit_code": 3228369023,
+      "tests": null,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_he3_nexus_writer",
+      "exit_code": 1,
+      "tests": 0,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_image_filtering",
+      "exit_code": 0,
+      "tests": 13,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_ioc_control_panel",
+      "exit_code": 0,
+      "tests": 14,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_launcher_lifecycle",
+      "exit_code": 0,
+      "tests": 3,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_local_maintenance",
+      "exit_code": 0,
+      "tests": 4,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_mitr_operations",
+      "exit_code": 0,
+      "tests": 6,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_re_plan_workflows",
+      "exit_code": 0,
+      "tests": 14,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_reolink_viewer",
+      "exit_code": 1,
+      "tests": 9,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_scalar_data_writer",
+      "exit_code": 1,
+      "tests": 0,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_scalar_plans",
+      "exit_code": 0,
+      "tests": 11,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_sim_focus",
+      "exit_code": 0,
+      "tests": 10,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_tomography_scan_calculator",
+      "exit_code": 0,
+      "tests": 30,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_tomography_startup_levels",
+      "exit_code": 0,
+      "tests": 4,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_usbctr_device",
+      "exit_code": 0,
+      "tests": 2,
+      "skipped": 0
+    },
+    {
+      "module": "diffractometer_controls.tests.test_usbctr_displays",
+      "exit_code": 0,
+      "tests": 10,
+      "skipped": 0
+    }
+  ],
+  "final": [
+    {
+      "module": "tests.test_adaptive_focus",
+      "exit_code": 0,
+      "tests": 14,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_bluesky_environment_update",
+      "exit_code": 1,
+      "tests": 32,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_diffraction_acquisition_status",
+      "exit_code": 0,
+      "tests": 3,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_diffraction_scalar_plot",
+      "exit_code": 0,
+      "tests": 10,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_document_dispatcher",
+      "exit_code": 0,
+      "tests": 5,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_experiment_workspace",
+      "exit_code": 0,
+      "tests": 10,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_focus_viewer_lifecycle",
+      "exit_code": 3228369023,
+      "tests": null,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_he3_nexus_writer",
+      "exit_code": 1,
+      "tests": 0,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_image_filtering",
+      "exit_code": 0,
+      "tests": 13,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_ioc_control_panel",
+      "exit_code": 0,
+      "tests": 14,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_launcher_lifecycle",
+      "exit_code": 0,
+      "tests": 3,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_local_maintenance",
+      "exit_code": 0,
+      "tests": 4,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_mitr_operations",
+      "exit_code": 0,
+      "tests": 6,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_re_plan_workflows",
+      "exit_code": 0,
+      "tests": 14,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_reolink_viewer",
+      "exit_code": 0,
+      "tests": 9,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_repository_structure",
+      "exit_code": 0,
+      "tests": 3,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_scalar_data_writer",
+      "exit_code": 1,
+      "tests": 0,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_scalar_plans",
+      "exit_code": 0,
+      "tests": 11,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_server_startup",
+      "exit_code": 0,
+      "tests": 3,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_sim_focus",
+      "exit_code": 0,
+      "tests": 10,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_tomography_scan_calculator",
+      "exit_code": 0,
+      "tests": 30,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_tomography_startup_levels",
+      "exit_code": 0,
+      "tests": 4,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_usbctr_device",
+      "exit_code": 0,
+      "tests": 2,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_usbctr_displays",
+      "exit_code": 0,
+      "tests": 10,
+      "skipped": 0
+    },
+    {
+      "module": "tests.test_widget_ownership",
+      "exit_code": 0,
+      "tests": 3,
+      "skipped": 0
+    }
+  ]
+}
