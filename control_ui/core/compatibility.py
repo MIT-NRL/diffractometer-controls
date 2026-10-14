@@ -1,5 +1,6 @@
 """Compatibility adaptations for the installed Bluesky widgets; explicitly installed."""
 import time
+import re
 from qtpy import QtCore, QtGui, QtWidgets
 from bluesky_widgets.qt import run_engine_client as bw_run_engine_client
 
@@ -129,7 +130,6 @@ class BlueskyCompatibility:
         original_init = console_cls.__init__
         original_change_event = getattr(console_cls, "changeEvent", None)
         original_finished = getattr(console_cls, "_finished_receiving_console_output", None)
-        original_process = getattr(console_cls, "_process_new_console_output", None)
         original_update = console_cls._update_console_output
 
         def _apply_console_palette(self):
@@ -209,8 +209,32 @@ class BlueskyCompatibility:
         def _patched_process_new_console_output(self, result):
             if result is None or getattr(self, "_dc_console_stop_requested", False):
                 return
-            if callable(original_process):
-                original_process(self, result)
+            _timestamp, message = result
+            message = getattr(self, "_dc_terminal_tail", "") + str(message or "")
+            self._dc_terminal_tail = ""
+            for suffix in ("\x1b[", "\x1b"):
+                if message.endswith(suffix):
+                    message, self._dc_terminal_tail = message[:-len(suffix)], suffix
+                    break
+            for token in re.split(r"(\n|\r|\x1b\[A)", message):
+                if not self._text_list:
+                    self._text_list = [""]
+                    self._text_line = self._text_ind = 0
+                if token == "\n":
+                    self._text_line += 1
+                    if self._text_line >= len(self._text_list):
+                        self._text_list.append("")
+                    self._text_ind = 0
+                elif token == "\r":
+                    self._text_ind = 0
+                elif token == "\x1b[A":
+                    self._text_line = max(0, self._text_line - 1)
+                elif token:
+                    line = self._text_list[self._text_line]
+                    line += " " * max(0, self._text_ind - len(line))
+                    self._text_list[self._text_line] = line[:self._text_ind] + token + line[self._text_ind + len(token):]
+                    self._text_ind += len(token)
+            self._text_updated = True
 
         def _mark_console_closed(self):
             self._dc_console_closed = True
@@ -260,7 +284,7 @@ class BlueskyCompatibility:
             lines = self._text_list[:-1] if self._text_list and self._text_list[-1] == "" else self._text_list
             self._text = "\n".join(lines)
             self._text_edit.setUpdatesEnabled(False)
-            self._text_edit.setText(self._text)
+            self._text_edit.setPlainText(self._text)
             self._text_edit.verticalScrollBar().setValue(value)
             timer = QtCore.QTimer(self._text_edit)
             timer.setSingleShot(True)
@@ -296,6 +320,18 @@ def _patch_bluesky_status_reload_shutdown(cls):
     if getattr(cls, "_dc_status_reload_shutdown_patch_applied", False):
         return
 
+    original_start = cls._start_thread
+
+    def _start_once(self):
+        if getattr(self, "_dc_status_worker_pending", False):
+            return
+        self._dc_status_worker_pending = True
+        try:
+            original_start(self)
+        except Exception:
+            self._dc_status_worker_pending = False
+            raise
+
     def _patched_reload_status(self):
         self.model.load_re_manager_status()
         remaining = max(float(getattr(self, "update_period", 0) or 0), 0.0)
@@ -307,6 +343,7 @@ def _patch_bluesky_status_reload_shutdown(cls):
             remaining -= delay
 
     def _patched_reload_complete(self):
+        self._dc_status_worker_pending = False
         if not self._deactivate_updates:
             self._start_thread()
             return
@@ -321,6 +358,7 @@ def _patch_bluesky_status_reload_shutdown(cls):
         self._update_widget_states()
 
     cls._reload_status = _patched_reload_status
+    cls._start_thread = _start_once
     cls._reload_complete = _patched_reload_complete
     cls._dc_status_reload_shutdown_patch_applied = True
 

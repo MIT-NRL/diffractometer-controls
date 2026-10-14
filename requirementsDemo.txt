@@ -1,0 +1,4 @@
+# Optional disconnected-demo dependencies; existing Bluesky/Qt packages remain unchanged.
+caproto>=1.1,<2
+fakeredis>=2.31,<3
+sortedcontainers>=2.4,<3

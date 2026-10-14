@@ -87,6 +87,7 @@ class MITRMainWindow(PyDMMainWindow):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.demo_mode = profile.demo_active()
         self.macros = kwargs.get('macros', {})
         self.macros_str = ','.join(['='.join(items) for items in self.macros.items()])
         self._run_state = "IDLE"
@@ -110,8 +111,8 @@ class MITRMainWindow(PyDMMainWindow):
         self._themed_icon_targets = []
         self._bluesky_mode_actions = {}
         self._bluesky_mode_label = None
-        self._bluesky_mode_requested = get_bluesky_mode()
-        self._bluesky_mode_active = get_bluesky_active_mode()
+        self._bluesky_mode_requested = BLUESKY_MODE_PRODUCTION if self.demo_mode else get_bluesky_mode()
+        self._bluesky_mode_active = BLUESKY_MODE_PRODUCTION if self.demo_mode else get_bluesky_active_mode()
         self._bluesky_mode_channels = []
         self._focus_online_proc = None
         self._focus_online_session_id = None
@@ -145,15 +146,22 @@ class MITRMainWindow(PyDMMainWindow):
         icon_path = str(profile.ASSETS / "NRL_Logo.png")
         self.setWindowIcon(QtGui.QIcon(icon_path))
         re_manager_api = self.re_manager_api
+        if self.demo_mode:
+            banner = QLabel("DEMO — Simulated hardware · Storage disabled", self)
+            banner.setObjectName("demoModeBanner")
+            banner.setStyleSheet("background:#9b1c1c; color:white; font-weight:bold; padding:7px;")
+            self.ui.navbar.addWidget(banner)
 
         if self._should_show_heartbeat_indicator():
             bar = self.statusBar()
             heartbeat_indicator = PyDMByteIndicator(init_channel=f"ca://{self.macros['P']}HEARTBEAT")
             heartbeat_indicator.labels = ['IOC Heartbeat']
             heartbeat_indicator.labelPosition = 2
-            self._setup_bluesky_mode_indicator(bar)
+            if not self.demo_mode:
+                self._setup_bluesky_mode_indicator(bar)
             bar.addPermanentWidget(heartbeat_indicator)
-            self._setup_bluesky_mode_channels()
+            if not self.demo_mode:
+                self._setup_bluesky_mode_channels()
 
         gear_icon = self._make_themed_icon('fa6s.gear')
         # controls = PyDMRelatedDisplayButton(filename="/home/mitr_4dh4/EPICS/IOCs/4dh4/4dh4App/op/adl/ioc_motors.adl")
@@ -207,10 +215,20 @@ class MITRMainWindow(PyDMMainWindow):
         self._register_themed_icon(bluesky_button, 'fa6s.network-wired')
 
         # Add the button to the navbar
-        self.ui.navbar.addWidget(controlsAll)
-        self.ui.navbar.addWidget(camera_button)
-        self.ui.navbar.addWidget(ioc_button)
-        self.ui.navbar.addWidget(bluesky_button)
+        if not self.demo_mode:
+            self.ui.navbar.addWidget(controlsAll)
+            self.ui.navbar.addWidget(camera_button)
+            self.ui.navbar.addWidget(ioc_button)
+            self.ui.navbar.addWidget(bluesky_button)
+        else:
+            for title, filename in (("Scalar count", "usbctr_count.py"), ("Count rate", "usbctr_rate.py")):
+                button = QToolButton(self)
+                button.setText(title)
+                button.clicked.connect(lambda _=False, f=filename: QApplication.instance().new_pydm_process(
+                    str(profile.CHECKOUT_ROOT / "control_ui/panels" / f),
+                    macros={"P": profile.pv_prefix() + "USBCTR:", "S": "scaler1", "MP": profile.pv_prefix() + "USBCTR:MCS:"},
+                ))
+                self.ui.navbar.addWidget(button)
         self._setup_run_status_widget(self.ui.navbar)
 
         # controlsAll = CustomRelatedDisplayButtonWrapper(
@@ -446,10 +464,12 @@ class MITRMainWindow(PyDMMainWindow):
             "is inherited automatically."
         )
         launch_focus_program_action.triggered.connect(self.launch_focus_program)
+        launch_focus_program_action.setVisible(not self.demo_mode)
 
         launch_neutron_imaging_action = analysis_menu.addAction(
             "Launch Neutron Imaging GUI"
         )
+        launch_neutron_imaging_action.setVisible(not self.demo_mode)
         self._set_themed_action_icon(launch_neutron_imaging_action, "fa6s.images")
         launch_neutron_imaging_action.setToolTip(
             "Open Neutron Imaging GUI for radiography reduction, white/dark "
@@ -569,6 +589,8 @@ class MITRMainWindow(PyDMMainWindow):
         ))
         self._register_themed_icon(controls_action, 'fa6s.gear')
         control_system_menu.addAction(controls_action)
+        if self.demo_mode:
+            control_system_menu.menuAction().setVisible(False)
 
     def _should_show_heartbeat_indicator(self):
         app = QApplication.instance()
@@ -788,7 +810,9 @@ class MITRMainWindow(PyDMMainWindow):
             pass
 
     def _sync_bluesky_mode_actions(self):
-        current_mode = getattr(self, "_bluesky_mode_requested", get_bluesky_mode())
+        current_mode = getattr(self, "_bluesky_mode_requested", None)
+        if current_mode is None:
+            current_mode = get_bluesky_mode()
         for mode, action in getattr(self, "_bluesky_mode_actions", {}).items():
             was_blocked = action.blockSignals(True)
             action.setChecked(mode == current_mode)
@@ -894,7 +918,7 @@ class MITRMainWindow(PyDMMainWindow):
             self._refresh_bluesky_mode_indicator()
 
     def _setup_run_status_widget(self, toolbar):
-        prefix = f"{self.macros.get('P', '')}Bluesky:Run:"
+        prefix = f"{profile.pv_prefix() if self.demo_mode else self.macros.get('P', '')}Bluesky:Run:"
         panel = QWidget(self)
         self._run_status_panel = panel
         layout = QHBoxLayout(panel)
@@ -1214,6 +1238,8 @@ class MITRMainWindow(PyDMMainWindow):
             self._run_progress.setFormat("No active run")
 
     def _start_adaptive_focus_listener(self):
+        if getattr(self, "demo_mode", False) and os.environ.get("MITR_DEMO_STACK_OWNER") == "0":
+            return
         if self._focus_doc_subscription is not None:
             return
         try:
@@ -1225,7 +1251,7 @@ class MITRMainWindow(PyDMMainWindow):
             info_addr = getattr(self.re_manager_api, "_zmq_info_addr", f"tcp://{app._ipaddress}:60625")
             self._focus_qs_control_addr = str(control_addr)
             self._focus_qs_info_addr = str(info_addr)
-            self._focus_data_addr = f"{app._ipaddress}:5568"
+            self._focus_data_addr = app.document_addr
             self._focus_doc_subscription = app.document_dispatcher.subscribe(
                 self._on_focus_bluesky_doc,
                 name="start",
@@ -1485,7 +1511,7 @@ class MITRMainWindow(PyDMMainWindow):
             QMessageBox.warning(self, "Focus Program", msg)
             return
 
-        viewer_python = self._resolve_focus_python_executable()
+        viewer_python = sys.executable if self.demo_mode else self._resolve_focus_python_executable()
         cmd = [str(viewer_python), "-m", "diffractometer_controls.analysis.focus_offline_viewer"]
         try:
             proc = subprocess.Popen(
@@ -1590,7 +1616,7 @@ class MITRMainWindow(PyDMMainWindow):
                 _FOCUS_LAUNCHED_SESSIONS.discard(str(session_id).strip())
             self._focus_launched_sessions.discard(str(session_id).strip())
             return
-        viewer_python = self._resolve_focus_python_executable()
+        viewer_python = sys.executable if self.demo_mode else self._resolve_focus_python_executable()
         def _env_int(name: str, default: int, min_val: int = 1) -> int:
             try:
                 return max(min_val, int(str(os.environ.get(name, default)).strip()))
@@ -1616,7 +1642,7 @@ class MITRMainWindow(PyDMMainWindow):
         file_wait_interval_ms = _env_int("FOCUS_VIEWER_FILE_WAIT_INTERVAL_MS", 250, min_val=50)
         cmd = [
             str(viewer_python),
-            "-m", "diffractometer_controls.analysis.focus_online_viewer",
+            "-m", "diffractometer_controls.demo.focus_viewer" if self.demo_mode else "diffractometer_controls.analysis.focus_online_viewer",
             "--zmq-address",
             str(self._focus_data_addr or "localhost:5568"),
             "--stream-name",
@@ -1778,7 +1804,7 @@ class MITRMainWindow(PyDMMainWindow):
 
     def _configure_local_maintenance_action(self, action):
         """Disable a host-management action unless this is the control host."""
-        if local_maintenance_allowed():
+        if not getattr(self, "demo_mode", False) and local_maintenance_allowed():
             return
         action.setEnabled(False)
         existing = action.toolTip().strip()
@@ -1787,7 +1813,7 @@ class MITRMainWindow(PyDMMainWindow):
 
     def _require_local_maintenance(self, operation):
         """Protect handlers as well as their normally-disabled menu actions."""
-        if local_maintenance_allowed():
+        if not getattr(self, "demo_mode", False) and local_maintenance_allowed():
             return True
         QMessageBox.warning(
             self,

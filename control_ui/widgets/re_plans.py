@@ -1,4 +1,5 @@
 from control_ui.core.display import ServiceDisplay
+from control_ui.core.lifecycle import schedule_owned
 import sys
 from pydm.display import Display
 from qtpy import QtCore, QtGui
@@ -235,15 +236,15 @@ class REPlans(ServiceDisplay):
         self.ui.RE_Plan_Editor.layout().addWidget(re_plan_editor)
 
         # Rebuild queue toolbar into grouped two-row controls.
-        QtCore.QTimer.singleShot(0, lambda: self._reorganize_queue_toolbar(re_queue))
-        QtCore.QTimer.singleShot(0, lambda: self._style_queue_widget(re_queue))
+        schedule_owned(self, 0, lambda: self._reorganize_queue_toolbar(re_queue))
+        schedule_owned(self, 0, lambda: self._style_queue_widget(re_queue))
         re_queue.signal_plan_queue_changed.connect(lambda *_: self._refresh_queue_table_layout(re_queue))
-        QtCore.QTimer.singleShot(0, lambda: re_queue.slot_update_widgets(bool(re_client.re_manager_connected)))
-        QtCore.QTimer.singleShot(
-            0,
+        schedule_owned(self, 0, lambda: re_queue.slot_update_widgets(bool(re_client.re_manager_connected)))
+        schedule_owned(
+            self, 0,
             lambda: re_queue.slot_plan_queue_changed(
                 list(getattr(re_client, "_plan_queue_items", []) or []),
                 list(getattr(re_client, "selected_queue_item_uids", []) or []),
             ),
         )
-        QtCore.QTimer.singleShot(0, lambda: self._refresh_queue_table_layout(re_queue))
+        schedule_owned(self, 0, lambda: self._refresh_queue_table_layout(re_queue))

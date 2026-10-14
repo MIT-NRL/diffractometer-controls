@@ -26,10 +26,17 @@ class _ExperimentOwner:
 class ExperimentScreen(MITRDisplay):
     def build_workspace(self, *, viewer_title="Viewer", additional_tabs=()):
         from diffractometer_controls.site.mitr.reactor_power import ReactorPowerDisplay
+        from control_ui.widgets.source_status import SourceStatusIndicator
         macros = self.macros()
         self.workspace = ExperimentWorkspace(self.services, self)
+        def source_status():
+            if profile.demo_active():
+                indicator = SourceStatusIndicator(units="demo")
+                indicator.setText("DEMO\nStorage disabled")
+                return indicator
+            return ReactorPowerDisplay(macros=macros, services=self.services)
         self.workspace.install_bluesky_controls(
-            source_status_factory=lambda: ReactorPowerDisplay(macros=macros, services=self.services),
+            source_status_factory=source_status,
             editor_options=profile.editor_options(), estimation_context=profile.estimation_context,
             macros=macros,
         )

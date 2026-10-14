@@ -1,4 +1,6 @@
 import argparse
+import atexit
+import signal
 import cProfile
 import importlib
 import inspect
@@ -148,9 +150,15 @@ def main():
     handler.setLevel("INFO")
     _configure_qt_highdpi()
     os.environ["QT_STYLE_OVERRIDE"] = "Fusion"
-    _load_simple_env_file("~/.config/diffractometer-controls/control.env")
-    _load_simple_env_file("~/.config/epics/network.env")
-    _load_simple_env_file("~/.config/bluesky-queueserver/client-zmq.env")
+    demo_requested = "--demo" in sys.argv[1:]
+    demo_active = demo_requested or mitr_profile.demo_active()
+    if demo_requested:
+        from diffractometer_controls.demo.runtime import demo_environment
+        os.environ.update(demo_environment())
+    if not demo_active:
+        _load_simple_env_file("~/.config/diffractometer-controls/control.env")
+        _load_simple_env_file("~/.config/epics/network.env")
+        _load_simple_env_file("~/.config/bluesky-queueserver/client-zmq.env")
     from control_ui.core.logging_config import configure_http_logging
     configure_http_logging()
     _preload_p4p()
@@ -230,6 +238,7 @@ def main():
     )
 
     parser = argparse.ArgumentParser(description="Python Display Manager")
+    parser.add_argument("--demo", action="store_true", help="Start the isolated simulated IOC and QueueServer; storage disabled.")
     parser.add_argument(
         "--ip-addr",
         help="Specify the IP Address of the RE Manager to connect to.",
@@ -301,6 +310,14 @@ def main():
     )
 
     pydm_args = parser.parse_args()
+    demo_runtime = None
+    if pydm_args.demo:
+        from diffractometer_controls.demo.runtime import DemoRuntime
+        try:
+            demo_runtime = DemoRuntime().start()
+        except Exception as exc:
+            logger.error("Demo startup failed: %s", exc)
+            raise SystemExit(2) from exc
     if not (os.environ.get("TILED_URI") or os.environ.get("MITR_TILED_URI")):
         os.environ["MITR_CONTROL_HOST"] = str(pydm_args.ip_addr)
 
@@ -321,11 +338,14 @@ def main():
 
     # Set default macros to connect to the 4dh4 IOC
     if macros is None:
-        macros = dict(mitr_profile.PANEL_MACROS)
+        macros = mitr_profile.panel_macros()
+    if demo_active and not str(macros.get("P", "")).startswith(mitr_profile.pv_prefix()):
+        parser.error("Demo macros must use the isolated demo PV prefix")
 
     # Use ordinary LAN discovery for demo IOCs and private configuration for
     # production endpoints that do not listen on standard discovery ports.
-    _configure_epics_search_addresses(pydm_args.ip_addr)
+    if not demo_active:
+        _configure_epics_search_addresses(pydm_args.ip_addr)
 
     # ic(macros)
 
@@ -425,6 +445,8 @@ def main():
         except Exception:
             epics_ca = None
         if epics_ca is not None:
+            epics_ca.AUTO_CLEANUP = False
+            atexit.unregister(epics_ca.finalize_libca)
             try:
                 epics_ca.disable_ca_messages()
             except Exception:
@@ -453,15 +475,43 @@ def main():
             except Exception:
                 pass
 
+        # Disconnect displays while PyDM's plugin/rules QObjects still exist,
+        # including detached displays cached for navigation.
+        from pydm.utilities.connection import close_widget_connections
+        from pydm import Display
+        cached_displays = [widget for widget in app.topLevelWidgets() if isinstance(widget, Display)]
+        for widget in [main_window, *cached_displays]:
+            if widget is None:
+                continue
+            close_widget_connections(widget)
+        app.stop_demo_windows()
+
         t0 = time.monotonic()
         workers_done = _wait_for_workers_bounded(timeout_ms=750)
         elapsed_ms = (time.monotonic() - t0) * 1000.0
         if (not workers_done) or elapsed_ms > 900:
             print(f"Worker shutdown exceeded target timeout ({elapsed_ms:.0f} ms).")
+        for widget in [main_window, *cached_displays]:
+            if widget is not None:
+                widget.deleteLater()
+        QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+        if demo_runtime is not None:
+            demo_runtime.stop()
 
     app.aboutToQuit.connect(_on_about_to_quit)
+    if demo_runtime is not None:
+        signal.signal(signal.SIGINT, lambda *_: app.quit())
+        signal.signal(signal.SIGTERM, lambda *_: app.quit())
+    if demo_active and os.environ.get("MITR_DEMO_PARENT_PID"):
+        import psutil
+        parent_pid = int(os.environ["MITR_DEMO_PARENT_PID"])
+        parent_timer = QtCore.QTimer(app)
+        parent_timer.timeout.connect(lambda: None if psutil.pid_exists(parent_pid) else app.quit())
+        parent_timer.start(1000)
 
     exit_code = app.exec_()
+    if demo_runtime is not None:
+        demo_runtime.stop()
 
     try:
         import epics.ca as epics_ca
@@ -473,10 +523,8 @@ def main():
             epics_ca.disable_ca_messages()
         except Exception:
             pass
-        try:
-            epics_ca.finalize_libca(maxtime=1.0)
-        except Exception:
-            pass
+        epics_ca.AUTO_CLEANUP = False
+        atexit.unregister(epics_ca.finalize_libca)
 
     if pydm_args.profile:
         profile.disable()

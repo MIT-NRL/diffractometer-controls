@@ -18,6 +18,22 @@ ESTIMATION_PVS = {
 }
 DEFAULT_IMAGING_ROOTS = ("/home/mitr_4dh4/Data/%Y", "~/Data/%Y")
 PANEL_MACROS = {"P": PV_PREFIX, "R": "", "ioc": "4dh4"}
+
+
+def demo_active():
+    return os.environ.get("MITR_DEMO_ACTIVE") == "1"
+
+
+def pv_prefix():
+    return os.environ.get("MITR_DEMO_EPICS_PREFIX", "demo4dh4:") if demo_active() else PV_PREFIX
+
+
+def estimation_pvs():
+    return {key: value.replace(PV_PREFIX, pv_prefix(), 1) for key, value in ESTIMATION_PVS.items()}
+
+
+def panel_macros():
+    return {"P": pv_prefix(), "R": "", "ioc": "demo4dh4" if demo_active() else "4dh4"}
 SCREEN_PATHS = {
     "diffraction": APPLICATION_ROOT / "screens/diffraction/diffractometer_gui.py",
     "tomography": APPLICATION_ROOT / "screens/tomography/tomography_gui.py",
@@ -115,6 +131,8 @@ def screen_factory(mode):
 
 
 def editor_options():
+    if demo_active():
+        return PlanEditorOptions(query_mode="local", local_roots=())
     def number(name, default, convert):
         try:
             return convert(os.environ.get(name, default))
@@ -137,7 +155,7 @@ def editor_options():
 def estimation_context(**overrides):
     from epics import caget
     from control_ui.widgets.plan_time_estimation import build_estimation_context
-    return build_estimation_context(caget_func=caget, pv_mapping=ESTIMATION_PVS, **overrides)
+    return build_estimation_context(caget_func=caget, pv_mapping=estimation_pvs(), **overrides)
 
 
 @dataclass(frozen=True)
@@ -148,4 +166,7 @@ class Endpoints:
 
 
 def endpoints(host="localhost"):
+    if demo_active():
+        return Endpoints(os.environ["MITR_QSERVER_CONTROL_ADDR"], os.environ["MITR_QSERVER_INFO_ADDR"],
+                         os.environ["MITR_DOCUMENT_ADDR"].removeprefix("tcp://"))
     return Endpoints(f"tcp://{host}:60615", f"tcp://{host}:60625", f"{host}:5568")

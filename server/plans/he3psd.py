@@ -62,7 +62,7 @@ def create_plans(context):
     _set_scan_motor_metadata = context.optional('_set_scan_motor_metadata')
     _stage_devices_once = context.optional('_stage_devices_once')
     _step_size_positions = context.optional('_step_size_positions')
-    from diffractometer_controls.site.mitr.profile import ESTIMATION_PVS
+    from diffractometer_controls.site.mitr.profile import estimation_pvs
     import os
 
     import bluesky.plan_patterns
@@ -160,7 +160,7 @@ def create_plans(context):
 
 
     def _plan_estimation_context():
-        return build_estimation_context(caget_func=caget, pv_mapping=ESTIMATION_PVS)
+        return build_estimation_context(caget_func=caget, pv_mapping=estimation_pvs())
 
 
     def _he3psd_plot_metadata(detectors):

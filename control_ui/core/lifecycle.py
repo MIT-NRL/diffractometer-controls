@@ -1,6 +1,23 @@
 """Registered ownership for model subscriptions, Qt timers and component hooks."""
 from qtpy import QtCore
 
+
+def schedule_owned(owner, delay_ms, callback):
+    """Cancel delayed UI work when its owner is deleted or deactivated."""
+    timer = QtCore.QTimer(owner)
+    timer.setSingleShot(True)
+    timer.setProperty("dc_discard_on_deactivate", True)
+
+    def deliver():
+        try:
+            callback()
+        finally:
+            timer.deleteLater()
+
+    timer.timeout.connect(deliver)
+    timer.start(delay_ms)
+    return timer
+
 class DisplayOwner:
     """Own the callbacks/timers introduced by one shared display factory."""
 
@@ -24,9 +41,13 @@ class DisplayOwner:
         hook = getattr(self.widget, "deactivate_display", None)
         if callable(hook):
             hook()
-        self._timers = [(timer, timer.interval())
-                        for timer in self.widget.findChildren(QtCore.QTimer)
-                        if timer.isActive()]
+        timers = self.widget.findChildren(QtCore.QTimer)
+        self._timers = [(timer, timer.interval()) for timer in timers
+                        if timer.isActive() and not timer.property("dc_discard_on_deactivate")]
+        for timer in timers:
+            if timer.property("dc_discard_on_deactivate"):
+                timer.stop()
+                timer.deleteLater()
         for timer, _ in self._timers:
             timer.stop()
         for emitter, callback in self._connections:

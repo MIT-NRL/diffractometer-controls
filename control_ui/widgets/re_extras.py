@@ -1,4 +1,5 @@
 from control_ui.core.display import ServiceDisplay
+from control_ui.core.lifecycle import schedule_owned
 import sys
 
 from pydm.display import Display
@@ -47,6 +48,7 @@ class REPlans(ServiceDisplay):
             list(getattr(self.services.re_client, "_plan_history_items", []) or []),
             list(self.services.re_client.selected_history_item_pos or []),
         )
+        self._re_queue_history.slot_update_widgets()
         self._apply_console_theme()
 
     def _console_text_edit(self):
@@ -136,7 +138,7 @@ class REPlans(ServiceDisplay):
         console._autoscroll_enabled = enabled
         console._te_scrolled_to_bottom = enabled
         if enabled:
-            QtCore.QTimer.singleShot(0, self._scroll_console_to_bottom)
+            schedule_owned(self, 0, self._scroll_console_to_bottom)
 
     def changeEvent(self, event):
         super().changeEvent(event)

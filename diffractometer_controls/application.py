@@ -65,7 +65,10 @@ class MITRApplication(BlueskyCompatibility, PyDMApplication):
         # Create the RunEngineClient as part of the application attributes
         # These attributes need to be defined before the super().__init__ call so that the main window can access them
         zmq_public_key = os.environ.get("QSERVER_ZMQ_PUBLIC_KEY") or None
+        self.demo_mode = profile.demo_active()
+        self._demo_child_processes = []
         endpoints = profile.endpoints(ipaddress)
+        self.qserver_control_addr, self.qserver_info_addr, self.document_addr = endpoints.control, endpoints.info, endpoints.documents
         self.re_client = RunEngineClient(zmq_control_addr=endpoints.control, zmq_info_addr=endpoints.info)
         self.re_dispatcher = RemoteDispatcher(endpoints.documents)
         self.document_dispatcher = DocumentDispatcherService(self.re_dispatcher, receive_partial_runs=True)
@@ -189,7 +192,27 @@ class MITRApplication(BlueskyCompatibility, PyDMApplication):
             args.append("--")
             args.extend(extra_args)
 
-        subprocess.Popen(args, shell=False, cwd=str(profile.CHECKOUT_ROOT))
+        child_env = dict(os.environ)
+        if self.demo_mode:
+            child_env["MITR_DEMO_STACK_OWNER"] = "0"
+            child_env["MITR_DEMO_PARENT_PID"] = str(os.getpid())
+        process = subprocess.Popen(args, shell=False, cwd=str(profile.CHECKOUT_ROOT), env=child_env,
+                                   **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}))
+        if self.demo_mode:
+            self._demo_child_processes.append(process)
+
+    def stop_demo_windows(self):
+        """Close only additional GUI processes created by this demo window."""
+        for process in self._demo_child_processes:
+            if process.poll() is None:
+                process.terminate()
+        for process in self._demo_child_processes:
+            try:
+                process.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=1.0)
+        self._demo_child_processes.clear()
 
 
     # Redefine the make_main_window method to use the MITRMainWindow class

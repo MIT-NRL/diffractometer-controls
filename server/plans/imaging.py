@@ -73,7 +73,7 @@ def create_plans(context):
     functools = context.optional('functools')
     operator = context.optional('operator')
     partition = context.optional('partition')
-    from diffractometer_controls.site.mitr.profile import ESTIMATION_PVS
+    from diffractometer_controls.site.mitr.profile import estimation_pvs, pv_prefix
     from bluesky.protocols import Readable, Movable
 
     from bluesky_queueserver import parameter_annotation_decorator
@@ -111,7 +111,7 @@ def create_plans(context):
     caput = context.runtime.get('caput', caput)
     def _plan_estimation_context():
         return build_estimation_context(
-            caget_func=caget, pv_mapping=ESTIMATION_PVS,
+            caget_func=caget, pv_mapping=estimation_pvs(),
             transfer_time_per_bytes=transfer_time_per_bytes,
         )
 
@@ -531,10 +531,10 @@ def create_plans(context):
         print(f"and finish at {datetime.now() + timedelta(seconds=total_time)}.")
         print("#===============#")
 
-        caput("4dh4:TS:RotationStart",start_angle)
-        caput("4dh4:TS:RotationStop",actual_stop_angle)
-        caput("4dh4:TS:NumAngles",num_projections_calc)
-        caput("4dh4:TS:RotationStep", angle_step_size_calc)
+        caput(f"{pv_prefix()}TS:RotationStart",start_angle)
+        caput(f"{pv_prefix()}TS:RotationStop",actual_stop_angle)
+        caput(f"{pv_prefix()}TS:NumAngles",num_projections_calc)
+        caput(f"{pv_prefix()}TS:RotationStep", angle_step_size_calc)
 
 
         # md_args = list(chain(*((repr(motor), start, stop) for motor, start_angle, stop_angle)))

@@ -2,8 +2,11 @@ from control_ui.core.display import ServiceDisplay
 import re
 import textwrap
 import types
+import logging
 
 from qtpy import QtCore
+from control_ui.core.lifecycle import schedule_owned
+from bluesky_widgets.qt.threading import FunctionWorker
 from qtpy.QtGui import QPalette
 from qtpy.QtWidgets import QApplication, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QSizePolicy, QTextEdit, QPushButton, QToolTip
 from bluesky_widgets.qt.run_engine_client import (
@@ -101,7 +104,7 @@ class REControlPanel(ServiceDisplay):
         if self._restyle_flush_scheduled:
             return
         self._restyle_flush_scheduled = True
-        QtCore.QTimer.singleShot(0, self._flush_scheduled_restyles)
+        schedule_owned(self, 0, self._flush_scheduled_restyles)
 
     def _flush_scheduled_restyles(self):
         self._restyle_flush_scheduled = False
@@ -561,13 +564,13 @@ class REControlPanel(ServiceDisplay):
         self.prepare_for_detach()
 
     def activate_display(self):
+        self._restyle_flush_scheduled = False
         manager = self._re_manager
         manager._dc_detaching = False
         manager._deactivate_updates = False
-        thread = getattr(manager, "_thread", None)
         if getattr(self, "_resume_updates", False):
             manager.updates_activated = True
-            if not getattr(thread, "is_running", False):
+            if not getattr(manager, "_dc_status_worker_pending", False):
                 manager._start_thread()
         self._sync_from_model()
 
@@ -601,7 +604,7 @@ class REControlPanel(ServiceDisplay):
                 re_manager.slot_update_widgets(True)
                 re_manager._start_thread()
 
-            QtCore.QTimer.singleShot(0, _resume_status_updates)
+            schedule_owned(self, 0, _resume_status_updates)
 
     def customize_ui(self):
         # button = self.ui.pushButton
@@ -673,6 +676,7 @@ class _NonBlockingQtReEnvironmentControls(QtReEnvironmentControls):
     """Issue env open/close/destroy requests without blocking the GUI thread."""
 
     def __init__(self, model, parent=None):
+        self._request_pending = False
         super().__init__(model, parent=parent)
         self._pb_env_open.clicked.disconnect()
         self._pb_env_open.clicked.connect(self._pb_env_open_clicked)
@@ -682,21 +686,53 @@ class _NonBlockingQtReEnvironmentControls(QtReEnvironmentControls):
         self._pb_env_destroy.clicked.connect(self._pb_env_destroy_clicked)
 
     def _refresh_status_soon(self):
-        QtCore.QTimer.singleShot(0, lambda: self.model.load_re_manager_status(unbuffered=True))
-        QtCore.QTimer.singleShot(250, lambda: self.model.load_re_manager_status(unbuffered=True))
+        # The shared manager poller will observe the resulting transition.
+        # Never perform a synchronous status request on the GUI thread.
+        self.signal_update_widget.emit(bool(self.model.re_manager_connected), self.model.re_manager_status)
+
+    def slot_update_widgets(self, is_connected, status):
+        super().slot_update_widgets(is_connected, status)
+        if self._request_pending:
+            for button in (self._pb_env_open, self._pb_env_close, self._pb_env_destroy):
+                button.setEnabled(False)
+
+    def _submit_request(self, operation):
+        if self._request_pending:
+            return
+        self._request_pending = True
+        for button in (self._pb_env_open, self._pb_env_close, self._pb_env_destroy):
+            button.setEnabled(False)
+        client = self.model._client
+        worker = FunctionWorker(lambda: getattr(client, operation)())
+        self._request_worker = worker
+        worker.returned.connect(self._request_succeeded)
+        worker.errored.connect(self._request_failed)
+        worker.finished.connect(self._request_finished)
+        worker.start()
+
+    def _request_succeeded(self, response):
+        if isinstance(response, dict) and response.get("success") is False:
+            self._request_failed(RuntimeError(response.get("msg", "Environment request failed")))
+            return
+        self.model.activate_env_destroy(False)
+
+    def _request_failed(self, error):
+        logging.getLogger(__name__).error("QueueServer environment request failed: %s", error)
+        self.setToolTip(str(error))
+
+    def _request_finished(self):
+        self._request_pending = False
+        self._refresh_status_soon()
 
     def _pb_env_open_clicked(self):
         try:
-            self.model._client.environment_open()
-            self.model.activate_env_destroy(False)
-            self._refresh_status_soon()
+            self._submit_request("environment_open")
         except Exception as ex:
             print(f"Exception: {ex}")
 
     def _pb_env_close_clicked(self):
         try:
-            self.model._client.environment_close()
-            self._refresh_status_soon()
+            self._submit_request("environment_close")
         except Exception as ex:
             print(f"Exception: {ex}")
 
@@ -704,9 +740,7 @@ class _NonBlockingQtReEnvironmentControls(QtReEnvironmentControls):
         try:
             if not self.model.env_destroy_activated:
                 raise RuntimeError("'Destroy Environment' operation is not activated and can not be executed")
-            self.model._client.environment_destroy()
-            self.model.activate_env_destroy(False)
-            self._refresh_status_soon()
+            self._submit_request("environment_destroy")
         except Exception as ex:
             print(f"Exception: {ex}")
 

@@ -1,3 +1,4 @@
+from diffractometer_controls.site.mitr.profile import demo_active, pv_prefix
 import math
 import ast
 import concurrent.futures
@@ -101,8 +102,8 @@ except Exception:
 
 
 TILED_URI = get_tiled_uri()
-RUN_UID_STATUS_PV = "4dh4:Bluesky:Run:RunUID"
-RUN_STATE_STATUS_PV = "4dh4:Bluesky:Run:State"
+RUN_UID_STATUS_PV = f"{pv_prefix()}Bluesky:Run:RunUID"
+RUN_STATE_STATUS_PV = f"{pv_prefix()}Bluesky:Run:State"
 DEFAULT_HISTORY_LIMIT = 100
 matplotlib = None
 FigureCanvas = None
@@ -1523,7 +1524,7 @@ class DiffractionLivePlot(QtCore.QObject):
             QtCore.QTimer.singleShot(0, self._connect_local_history_async)
 
     def _connect_local_history_async(self):
-        if not self._active or self._history_executor is None:
+        if demo_active() or not self._active or self._history_executor is None:
             return
         from diffractometer_controls.analysis.tiled_auth import build_tiled_client_from_local_reader
 
@@ -1610,6 +1611,9 @@ class DiffractionLivePlot(QtCore.QObject):
 
     def open_analysis_viewer(self):
         """Open an independent, read-only diffraction browser without pausing live plots."""
+        if demo_active():
+            self._emit_history_state(status_text="Storage disabled in demo mode")
+            return
         if self._analysis_viewer is not None:
             self._analysis_viewer.show()
             self._analysis_viewer.raise_()
@@ -2066,6 +2070,10 @@ class DiffractionLivePlot(QtCore.QObject):
 
     def _on_tiled_enabled_toggled(self, enabled):
         self._history_access_changed = True
+        if demo_active():
+            self._tiled_enabled = False
+            self._emit_history_state(status_text="Storage disabled in demo mode")
+            return
         enabled = bool(enabled)
         if enabled == self._tiled_enabled:
             return
@@ -3122,16 +3130,16 @@ class DiffractionLivePlot(QtCore.QObject):
     @staticmethod
     def _get_live_counts_pv(detector_name):
         mapping = {
-            "he3psd0": "4dh4:he3PSD:Det0:LiveCounts",
-            "he3psd7": "4dh4:he3PSD:Det7:LiveCounts",
+            "he3psd0": f"{pv_prefix()}he3PSD:Det0:LiveCounts",
+            "he3psd7": f"{pv_prefix()}he3PSD:Det7:LiveCounts",
         }
         return mapping.get(str(detector_name))
 
     @staticmethod
     def _get_live_total_counts_pv(detector_name):
         mapping = {
-            "he3psd0": "4dh4:he3PSD:Det0:LiveTotalCounts",
-            "he3psd7": "4dh4:he3PSD:Det7:LiveTotalCounts",
+            "he3psd0": f"{pv_prefix()}he3PSD:Det0:LiveTotalCounts",
+            "he3psd7": f"{pv_prefix()}he3PSD:Det7:LiveTotalCounts",
         }
         return mapping.get(str(detector_name))
 

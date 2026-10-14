@@ -52,7 +52,7 @@ class QtRePlanQueueEstimated(QtRePlanQueue):
         self._completion_refresh_timer.timeout.connect(self._refresh_completion_label)
         self._completion_refresh_timer.start()
         self.signal_estimates_ready.connect(self._on_estimates_ready)
-        self.destroyed.connect(self.shutdown)
+        self.destroyed.connect(lambda *_args: self.shutdown(destroyed=True))
 
         self._footer_widget = QWidget(self)
         self._total_time_label = QLabel("Total Est. Time: --", self._footer_widget)
@@ -84,12 +84,26 @@ class QtRePlanQueueEstimated(QtRePlanQueue):
                     status_changed.connect(self._on_model_status_changed)
                 except Exception:
                     pass
+            events.allowed_plans_changed.connect(self._on_allowed_plans_changed)
 
-    def shutdown(self, *_args):
+    def _on_allowed_plans_changed(self, *_args):
+        self._allowed_param_names_cache.clear()
+        self._estimate_cache.clear()
+        self._schedule_estimate_update(getattr(self, "_plan_queue_items", []) or [])
+
+    def shutdown(self, *_args, destroyed=False):
         self._estimate_stop.set()
         self._estimate_request_id += 1
-        self._estimate_timer.stop()
-        self._completion_refresh_timer.stop()
+        events = self.model.events
+        for name, callback in (
+            ("running_item_changed", self._on_model_running_item_changed),
+            ("status_changed", self._on_model_status_changed),
+            ("allowed_plans_changed", self._on_allowed_plans_changed),
+        ):
+            getattr(events, name).disconnect(callback)
+        if not destroyed:
+            self._estimate_timer.stop()
+            self._completion_refresh_timer.stop()
         thread = self._estimate_thread
         if thread is not None and thread.is_alive():
             thread.join(timeout=0.25)
@@ -97,6 +111,10 @@ class QtRePlanQueueEstimated(QtRePlanQueue):
     def activate(self):
         # Allocate a new cancellation flag so an old finishing worker stays stopped.
         self._estimate_stop = threading.Event()
+        self.model.events.running_item_changed.connect(self._on_model_running_item_changed)
+        self.model.events.status_changed.connect(self._on_model_status_changed)
+        self.model.events.allowed_plans_changed.connect(self._on_allowed_plans_changed)
+        self._allowed_param_names_cache.clear()
         self._completion_refresh_timer.start()
         self._schedule_estimate_update(getattr(self, "_plan_queue_items", []) or [])
 
@@ -129,8 +147,6 @@ class QtRePlanQueueEstimated(QtRePlanQueue):
         plan_name = str(plan_name or "")
         if not plan_name:
             return ()
-        if plan_name in self._allowed_param_names_cache:
-            return self._allowed_param_names_cache[plan_name]
 
         param_names = []
         try:
@@ -170,6 +186,9 @@ class QtRePlanQueueEstimated(QtRePlanQueue):
     def _schedule_estimate_update(self, plan_queue_items):
         self._pending_estimate_items = copy.deepcopy(list(plan_queue_items or []))
         self._pending_running_item = copy.deepcopy(self._current_running_item())
+        for item in self._pending_estimate_items + [self._pending_running_item]:
+            if isinstance(item, dict):
+                item["_dc_estimate_kwargs"] = self._normalize_plan_kwargs(item)
         self._estimate_request_id += 1
         if not self._estimate_stop.is_set():
             self._estimate_timer.start(75)
@@ -275,7 +294,7 @@ class QtRePlanQueueEstimated(QtRePlanQueue):
                 item_dict = self._normalize_item(item)
                 estimate = estimate_plan_runtime(
                     str(item_dict.get("name", "")),
-                    kwargs=self._normalize_plan_kwargs(item_dict),
+                    kwargs=item_dict.get("_dc_estimate_kwargs", {}),
                     context=context,
                 )
                 queue_results.append(
@@ -289,7 +308,7 @@ class QtRePlanQueueEstimated(QtRePlanQueue):
             if isinstance(running_item, dict) and str(running_item.get("item_type", "") or "plan") == "plan":
                 running_result = estimate_plan_runtime(
                     str(running_item.get("name", "")),
-                    kwargs=self._normalize_plan_kwargs(running_item),
+                    kwargs=running_item.get("_dc_estimate_kwargs", {}),
                     context=context,
                 )
             if stop.is_set():
@@ -321,7 +340,7 @@ class QtRePlanQueueEstimated(QtRePlanQueue):
             return
 
         self._completion_label.setText(
-            f"Est. Completion: {self._format_completion_time(time.time() + float(self._completion_total_s))}"
+            f"Est. Completion: {self._format_completion_time(getattr(self, '_completion_deadline', None) or (time.time() + float(self._completion_total_s)))}"
         )
         self._completion_label.setToolTip(
             "Estimated finish based on queued items"
@@ -359,8 +378,10 @@ class QtRePlanQueueEstimated(QtRePlanQueue):
                 total_estimate += float(time_s)
                 valid_estimates += 1
 
+        all_known = valid_estimates == len(self._plan_queue_items)
         if valid_estimates:
-            self._total_time_label.setText(f"Total Est. Time: {format_estimated_time(total_estimate)}")
+            label = "Total Est. Time" if all_known else "Known subtotal (incomplete)"
+            self._total_time_label.setText(f"{label}: {format_estimated_time(total_estimate)}")
         else:
             self._total_time_label.setText("Total Est. Time: --")
 
@@ -370,10 +391,22 @@ class QtRePlanQueueEstimated(QtRePlanQueue):
             running_time_s = running_estimate.get("estimated_total_time_s", None)
 
         completion_total_s = total_estimate
-        has_completion_estimate = valid_estimates > 0
+        has_completion_estimate = valid_estimates > 0 and all_known
+        self._completion_deadline = None
+        running = self._current_running_item()
+        status = self.model.re_manager_status or {}
         if running_time_s is not None:
-            completion_total_s += float(running_time_s)
-            has_completion_estimate = True
+            started = (running.get("properties") or {}).get("time_start")
+            if started is not None:
+                completion_total_s += max(0.0, float(running_time_s) - max(0.0, time.time() - float(started)))
+                self._completion_deadline = time.time() + completion_total_s
+                has_completion_estimate = all_known
+            else:
+                has_completion_estimate = False
+        elif running:
+            has_completion_estimate = False
+        if status.get("manager_state") == "paused" or (status.get("plan_queue_mode") or {}).get("loop"):
+            has_completion_estimate = False
 
         if has_completion_estimate:
             self._completion_total_s = float(completion_total_s)

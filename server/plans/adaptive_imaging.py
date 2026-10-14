@@ -34,7 +34,7 @@ def create_plans(context):
     _deduplicate_stage_devices = context.optional('_deduplicate_stage_devices')
     _set_scan_motor_metadata = context.optional('_set_scan_motor_metadata')
     cam1 = context.optional('cam1')
-    from diffractometer_controls.site.mitr.profile import ESTIMATION_PVS
+    from diffractometer_controls.site.mitr.profile import estimation_pvs
     import numpy as np
 
     import bluesky.plan_stubs as bps
@@ -97,7 +97,7 @@ def create_plans(context):
     def _plan_estimation_context():
         transfer_rate = float(context.namespace.get("transfer_time_per_bytes", 4.1203007518796994e-08))
         return build_estimation_context(
-            caget_func=caget, pv_mapping=ESTIMATION_PVS,
+            caget_func=caget, pv_mapping=estimation_pvs(),
             transfer_time_per_bytes=transfer_rate,
         )
 

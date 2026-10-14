@@ -406,7 +406,7 @@ class RePlanWorkflowTests(unittest.TestCase):
         combo._set_value_checked("temperature", True)
         self.assertEqual(
             combo.checked_items(),
-            ["temperature", "usbctr.he3_tube"],
+            ["usbctr.he3_tube", "temperature"],
         )
 
     def test_enum_parameter_is_rendered_as_a_dropdown(self):

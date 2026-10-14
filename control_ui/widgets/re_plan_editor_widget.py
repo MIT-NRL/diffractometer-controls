@@ -11,6 +11,8 @@ import weakref
 from datetime import datetime
 from pathlib import Path
 from control_ui.core.options import PlanEditorOptions
+from control_ui.core.lifecycle import schedule_owned as _schedule_owned
+from bluesky_queueserver import validate_plan
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy.QtWidgets import QComboBox, QLabel, QMenu, QShortcut, QTableWidgetItem
@@ -233,7 +235,10 @@ class _GroupedChoicesComboBox(_DynamicChoicesComboBox):
 
         _add_submenus(menu, self._choice_groups)
         execute_menu = getattr(menu, "exec_", None) or menu.exec
-        execute_menu(self.mapToGlobal(self.rect().bottomLeft()))
+        try:
+            execute_menu(self.mapToGlobal(self.rect().bottomLeft()))
+        finally:
+            menu.deleteLater()
 
 
 class _PersistentCheckableMenu(QMenu):
@@ -262,6 +267,8 @@ class _CheckableChoicesComboBox(_DynamicChoicesComboBox):
         self._block_popup_hide = False
         self._choice_groups = {}
         self._root_choices = []
+        self._selection_order = []
+        self._unavailable_choices = []
         self.view().viewport().installEventFilter(self)
         self._refresh_display_text()
 
@@ -295,13 +302,16 @@ class _CheckableChoicesComboBox(_DynamicChoicesComboBox):
                 continue
             if item.checkState() == QtCore.Qt.Checked:
                 items.append(str(item.text()))
-        return items
+        self._selection_order = [value for value in self._selection_order if value in items]
+        self._selection_order.extend(value for value in items if value not in self._selection_order)
+        return list(self._selection_order)
 
     def set_choices(self, choices):
         current = self.checked_items()
         blocker = QtCore.QSignalBlocker(self.model())
         try:
             self.clear()
+            self._unavailable_choices = []
             for choice in list(choices or []):
                 self.addItem(str(choice))
                 item = self.model().item(self.count() - 1)
@@ -350,9 +360,10 @@ class _CheckableChoicesComboBox(_DynamicChoicesComboBox):
                 )
             )
 
-        for value in self._root_choices:
+        root_choices = list(dict.fromkeys(self._root_choices + self._unavailable_choices))
+        for value in root_choices:
             _add_checkable_action(menu, value, value)
-        if self._root_choices and self._choice_groups:
+        if root_choices and self._choice_groups:
             menu.addSeparator()
 
         def _add_submenus(parent_menu, entries):
@@ -367,10 +378,22 @@ class _CheckableChoicesComboBox(_DynamicChoicesComboBox):
 
         _add_submenus(menu, self._choice_groups)
         execute_menu = getattr(menu, "exec_", None) or menu.exec
-        execute_menu(self.mapToGlobal(self.rect().bottomLeft()))
+        try:
+            execute_menu(self.mapToGlobal(self.rect().bottomLeft()))
+        finally:
+            menu.deleteLater()
 
     def set_checked_items(self, values, *, emit_signal=True):
-        selected = {str(v) for v in list(values or [])}
+        ordered = list(dict.fromkeys(str(v) for v in list(values or [])))
+        selected = set(ordered)
+        for value in ordered:
+            if self.findText(value) < 0:
+                self._unavailable_choices.append(value)
+                self.addItem(value)
+                item = self.model().item(self.count() - 1)
+                item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsUserCheckable | QtCore.Qt.ItemIsSelectable)
+                item.setToolTip("Not in the current suggested choices; verify this device before submitting.")
+        self._selection_order = ordered
         blocker = QtCore.QSignalBlocker(self.model())
         try:
             for row in range(self.model().rowCount()):
@@ -1148,8 +1171,6 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             return
         if error:
             self._file_dir_snapshot_warning_logged = False
-        if not choices:
-            return
         self._file_dir_snapshot_warning_logged = False
         self._file_dir_cached_choices = list(choices)
         self._file_dir_cache_ts = time.monotonic()
@@ -1321,6 +1342,7 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         )
 
         def _emit_modified_deferred():
+            self._validate_cell_values()
             def _emit():
                 if self._enable_signal_cell_modified:
                     self.signal_cell_modified.emit()
@@ -1510,30 +1532,17 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         choice_groups = {}
 
         def _filter_device_choices(raw_choices):
-            """Keep Queue Server device names and prefer dotted aliases."""
+            """Keep valid device names without conflating distinct aliases."""
             def _is_device_name(s):
                 if not isinstance(s, str):
                     return False
                 s = s.strip()
-                if not s or len(s) < 2:
+                if not s:
                     return False
-                bad_tokens = ("typing", "union", "name", "annotation", "__movable__")
-                if any(token in s.lower() for token in bad_tokens):
-                    return False
-                return bool(re.match(r"^[A-Za-z][_A-Za-z0-9\.\_]*$", s))
+                return all(part.isidentifier() for part in s.split("."))
 
             filtered = [str(choice) for choice in raw_choices if _is_device_name(choice)]
-            choice_set = set(filtered)
-            return list(
-                dict.fromkeys(
-                    choice
-                    for choice in filtered
-                    if not (
-                        "_" in choice
-                        and choice.replace("_", ".", 1) in choice_set
-                    )
-                )
-            )
+            return list(dict.fromkeys(filtered))
 
         # Build choices preferentially from explicit 'values', then enum values,
         # then declared devices. Preserve named device groups so the GUI can
@@ -1959,6 +1968,11 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
             data_valid = True
             for n, p_index in enumerate(self._params_indices):
                 p = self._params[p_index]
+                if not p["is_value_set"] and p["parameters"].default is inspect.Parameter.empty and p["parameters"].kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                    data_valid = False
+                    widget = self.cellWidget(n, 2)
+                    if isinstance(widget, QComboBox):
+                        self._set_combo_invalid_style(widget)
                 if p["is_value_set"]:
                     widget = self.cellWidget(n, 2)
                     if widget is not None:
@@ -1992,6 +2006,10 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                                 )
                                 is_file_dir = self._is_file_dir_param(p.get("name", ""))
                                 if not str(txt).strip():
+                                    if is_file_dir:
+                                        p["value"] = ""
+                                        self._set_combo_implicit_style(widget, False)
+                                        continue
                                     # Empty entry is invalid for required params
                                     is_required = (
                                         p["parameters"].default == inspect.Parameter.empty
@@ -2119,6 +2137,18 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
                             finally:
                                 del blocker
 
+            self.validation_error = ""
+            if data_valid and self._queue_item is not None:
+                try:
+                    data_valid, self.validation_error = validate_plan(
+                        self.get_modified_item(), allowed_plans=self.model._allowed_plans,
+                        allowed_devices=self.model._allowed_devices,
+                    )
+                except (TypeError, ValueError) as exc:
+                    data_valid, self.validation_error = False, str(exc)
+            if not data_valid and not self.validation_error:
+                self.validation_error = "Complete the required parameters and correct invalid values."
+            self.setToolTip(self.validation_error)
             if self._validity_emit_in_progress:
                 return
             self._validity_emit_in_progress = True
@@ -2211,16 +2241,6 @@ class RePlanEditorTable(rec._QtRePlanEditorTable):
         except Exception:
             pass
         return item
-
-
-def _schedule_owned(owner, delay_ms, callback):
-    timer = QtCore.QTimer(owner)
-    timer.setSingleShot(True)
-    def deliver():
-        callback()
-        timer.deleteLater()
-    timer.timeout.connect(deliver)
-    timer.start(delay_ms)
 
 
 class RePlanEditorWidget(rec.QtRePlanEditor):
@@ -2456,8 +2476,28 @@ class RePlanEditorWidget(rec.QtRePlanEditor):
 
     def activate(self):
         self.model.events.plan_queue_changed.connect(self._on_plan_queue_changed)
+        self._parameters_valid_update_scheduled = False
         for owner in (self._plan_viewer, self._plan_editor):
             owner._wd_editor.activate()
+        self.refresh_inventory()
+
+    def refresh_inventory(self):
+        """Refresh suggestions after navigation without discarding an active edit."""
+        table = self._plan_editor._wd_editor
+        editing = bool(self._plan_editor._edit_mode_enabled)
+        item = copy.deepcopy(table.get_modified_item()) if editing and table.queue_item else None
+        self._plan_editor._ignore_combo_item_list_sel_changed = True
+        try:
+            self._plan_editor._set_allowed_item_list()
+        finally:
+            self._plan_editor._ignore_combo_item_list_sel_changed = False
+        if item is not None:
+            table.show_item(item=item, editable=True)
+        else:
+            self._plan_editor._show_item_preview()
+        self._revalidate_loaded_plan_item()
+        self._plan_viewer.slot_update_widgets()
+        self._plan_editor.slot_update_widgets()
 
     def _replace_internal_table(
         self,
@@ -2469,7 +2509,7 @@ class RePlanEditorWidget(rec.QtRePlanEditor):
     ):
         old = getattr(owner, "_wd_editor", None)
         if old is None:
-            return
+            raise AttributeError("Upstream plan editor has no replaceable table")
 
         new = RePlanEditorTable(self.model, editable=old.editable, detailed=old.detailed,
                                 options=self.options, re_manager_api=self.re_manager_api)

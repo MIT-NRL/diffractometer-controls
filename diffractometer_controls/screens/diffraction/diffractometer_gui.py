@@ -1,3 +1,4 @@
+from diffractometer_controls.site.mitr.profile import pv_prefix
 import subprocess
 import sys
 import time
@@ -32,9 +33,9 @@ def _acquisition_monitor_from_start_doc(start_doc):
         duration = dict(start_doc.get("plan_args", {}) or {}).get("acquire_time")
         return {
             "device": "he3psd",
-            "active_pv": "4dh4:he3PSD:Acquire_RBV",
-            "duration_pv": "4dh4:he3PSD:AcquireTime_RBV",
-            "remaining_pv": "4dh4:he3PSD:AcquireTimeRemaining_RBV",
+            "active_pv": f"{pv_prefix()}he3PSD:Acquire_RBV",
+            "duration_pv": f"{pv_prefix()}he3PSD:AcquireTime_RBV",
+            "remaining_pv": f"{pv_prefix()}he3PSD:AcquireTimeRemaining_RBV",
             "duration": duration,
         }
     return {}

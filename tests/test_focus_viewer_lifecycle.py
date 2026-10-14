@@ -135,7 +135,7 @@ class FocusViewerInterpreterTests(unittest.TestCase):
         popen.assert_called_once()
         self.assertEqual(
             popen.call_args.args[0],
-            ["/opt/controls-env/bin/python", "-m", "neutron_imaging_gui"],
+            [str(Path("/opt/controls-env/bin/python")), "-m", "neutron_imaging_gui"],
         )
         status_bar.showMessage.assert_called_once_with(
             "Launched Neutron Imaging GUI (pid=4321)", 3000

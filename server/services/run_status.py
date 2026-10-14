@@ -6,8 +6,9 @@ import signal
 import time
 
 from epics import caput
+from diffractometer_controls.site.mitr.profile import pv_prefix
 
-STATUS_PV_PREFIX = "4dh4:Bluesky:Run:"
+STATUS_PV_PREFIX = f"{pv_prefix()}Bluesky:Run:"
 
 def _safe_caput(suffix, value):
     try:

@@ -78,6 +78,16 @@ lookup does not require saved conversions in the checkout. Active external
 filenames are listed in
 `diffractometer_controls/site/mitr/external_displays.json`.
 
+Run the same panels and plans against a local simulated IOC with storage
+disabled:
+
+```console
+python -m pip install --no-deps -r requirementsDemo.txt
+python -m diffractometer_controls --demo
+```
+
+See [demo setup, supported workflows and verification](docs/demo_mode.md).
+
 ```text
 control_ui/                 reusable services, widgets, layout and EPICS panels
 diffractometer_controls/    application, experiment screens, analysis and MITR profile
@@ -102,7 +112,8 @@ The separate Linux control PC requires the path changes in the
 permissions, settings keys, metadata and output formats are preserved. Credentials
 and host-specific paths belong in private configuration outside Git.
 
-For offline verification in a dependency-complete environment:
+For offline verification in a dependency-complete environment (including the
+optional demo requirements above):
 
 ```console
 python scripts/run_tests_isolated.py --output artifacts/tests/local
