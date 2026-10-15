@@ -1,5 +1,3 @@
-from diffractometer_controls.site.mitr import profile as mitr_profile
-from control_ui.core.compatibility import _patch_bluesky_status_reload_shutdown
 import argparse
 import cProfile
 import importlib
@@ -13,6 +11,16 @@ import threading
 import time
 import faulthandler
 from pathlib import Path
+
+# Direct script/IDE launches put this directory, rather than the checkout root,
+# on sys.path. Make the sibling source packages available without installation.
+if __package__ in (None, ""):
+    _checkout_root = str(Path(__file__).resolve().parents[1])
+    if _checkout_root not in sys.path:
+        sys.path.insert(0, _checkout_root)
+
+from diffractometer_controls.site.mitr import profile as mitr_profile
+from control_ui.core.compatibility import _patch_bluesky_status_reload_shutdown
 from qtpy import QtCore, QtGui
 
 
@@ -63,7 +71,7 @@ def _configure_epics_search_addresses(host):
         os.environ["EPICS_PVA_ADDR_LIST"] = _append_unique_addresses(None, pva_addresses)
     else:
         os.environ["EPICS_PVA_ADDR_LIST"] = _append_unique_addresses(
-            existing_pva_addresses,
+            " ".join(existing_pva_addresses),
             local_addresses + private_pva_addresses,
         )
 

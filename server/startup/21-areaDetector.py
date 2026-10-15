@@ -1,3 +1,4 @@
+import os
 from server.config.paths import detector_xml
 from server.devices.area_detector import ZWODetectorCam, QHYDetectorCam, ZWODetector, QHYDetector, MyTIFFPlugin, MyHDF5Plugin, SingleTriggerPause, MyZWODetector, MyQHYDetector, SimAreaDetector
 import numpy as np
@@ -39,8 +40,12 @@ def _register_camera_advanced_axes(detector_name, detector):
             globals()[axis_name] = axis
             register_device(axis_name, depth=1)
 
-# Enable when using the ZWO camera
-if 1:
+# Match the imaging IOC selection in the shared, host-local control.env.
+_camera_backend = os.environ.get("MITR_CAMERA_BACKEND", "zwo").lower()
+if _camera_backend not in {"zwo", "qhy"}:
+    raise ValueError("MITR_CAMERA_BACKEND must be zwo or qhy")
+
+if _camera_backend == "zwo":
     cam1 = MyZWODetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total','focus','x'])
     cam1.stats1.total.kind = "hinted"
     cam1.focus.user_readback.kind = "normal"
@@ -101,10 +106,13 @@ if 1:
     except Exception:
         pass
 
-# Enable when using the QHY camera
-if 0:
+if _camera_backend == "qhy":
     cam1 = MyQHYDetector(prefix='4dh4:',name='cam1',read_attrs=['tiff1','stats1.total'])
+    cam1.stats1.total.kind = "hinted"
+    register_device("cam1", depth=2)
+    _register_camera_advanced_axes("cam1", cam1)
     cam1.cam.nd_attributes_file.set(detector_xml("tomoDetectorAttributes.xml"))
+    caput("4dh4:TIFF1:AutoSave", 0)
 
 sd.baseline.append(cam1.focus)
 sd.baseline.append(cam1.x)

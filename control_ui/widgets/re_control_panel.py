@@ -611,7 +611,6 @@ class REControlPanel(ServiceDisplay):
         self._ensure_neutral_tooltip_style()
         re_client = self.services.re_client
         self._apply_re_client_exception_compatibility(re_client)
-        # re_client = RunEngineClient(zmq_control_addr='tcp://192.168.0.14:60615')
         re_manager = QtReManagerConnection(re_client)
         re_environment = _NonBlockingQtReEnvironmentControls(re_client)
         re_status = _WorkerAwareQtReStatusMonitor(re_client)

@@ -124,6 +124,7 @@ class MITRMainWindow(PyDMMainWindow):
         self._focus_data_addr = None
         self._bluesky_environment_update_dialog = None
         self._ioc_control_panel = None
+        self._bluesky_servers_panel = None
         self._focus_qs_control_addr = "tcp://localhost:60615"
         self._focus_qs_info_addr = "tcp://localhost:60625"
         self._focus_launched_sessions = set()
@@ -197,10 +198,19 @@ class MITRMainWindow(PyDMMainWindow):
         ioc_button.clicked.connect(self.launch_ioc_control_panel)
         self._register_themed_icon(ioc_button, 'fa6s.server')
 
+        bluesky_button = QToolButton(self)
+        bluesky_button.setText("Bluesky Servers")
+        bluesky_button.setToolTip("Monitor Bluesky services, resource usage and live consoles")
+        bluesky_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        bluesky_button.setIconSize(QSize(24, 24))
+        bluesky_button.clicked.connect(self.launch_bluesky_servers_panel)
+        self._register_themed_icon(bluesky_button, 'fa6s.network-wired')
+
         # Add the button to the navbar
         self.ui.navbar.addWidget(controlsAll)
         self.ui.navbar.addWidget(camera_button)
         self.ui.navbar.addWidget(ioc_button)
+        self.ui.navbar.addWidget(bluesky_button)
         self._setup_run_status_widget(self.ui.navbar)
 
         # controlsAll = CustomRelatedDisplayButtonWrapper(
@@ -471,29 +481,6 @@ class MITRMainWindow(PyDMMainWindow):
         # add line to the menu
         bluesky_menu.addSeparator()
 
-        # Add actions to the "Bluesky Controls" submenu
-        bluesky_RE_reset = bluesky_menu.addAction("RE Manager Reset")
-        bluesky_RE_reset.triggered.connect(lambda: self.reset_process("queue-server"))
-        self._set_themed_action_icon(bluesky_RE_reset, 'fa5s.redo')
-        bluesky_RE_reset.setToolTip("Reset the Bluesky Run Engine Manager")
-        self._configure_local_maintenance_action(bluesky_RE_reset)
-        bluesky_menu.addAction(bluesky_RE_reset)
-
-        # Add actions to the "Bluesky Controls" submenu
-        bluesky_proxy_reset = bluesky_menu.addAction("RE Proxy Reset")
-        bluesky_proxy_reset.triggered.connect(lambda: self.reset_process("bluesky-proxy"))
-        self._set_themed_action_icon(bluesky_proxy_reset, 'fa5s.redo')
-        bluesky_proxy_reset.setToolTip("Reset the Bluesky Run Engine Proxy")
-        self._configure_local_maintenance_action(bluesky_proxy_reset)
-        bluesky_menu.addAction(bluesky_proxy_reset)
-
-        tiled_server_reset = bluesky_menu.addAction("Tiled Server Reset")
-        tiled_server_reset.triggered.connect(lambda: self.reset_process("tiled-server"))
-        self._set_themed_action_icon(tiled_server_reset, 'fa5s.redo')
-        tiled_server_reset.setToolTip("Reset the Tiled server")
-        self._configure_local_maintenance_action(tiled_server_reset)
-        bluesky_menu.addAction(tiled_server_reset)
-
         # Add Bluesky GUI reset action to the "Bluesky Controls" submenu
         bluesky_gui_reset = bluesky_menu.addAction("GUI Reset")
         bluesky_gui_reset.triggered.connect(lambda: self.control_servers("4dh4gui", "restart"))
@@ -564,6 +551,10 @@ class MITRMainWindow(PyDMMainWindow):
         ioc_panel_action.triggered.connect(self.launch_ioc_control_panel)
         self._set_themed_action_icon(ioc_panel_action, 'fa6s.server')
         ioc_panel_action.setToolTip("Control and monitor the main and camera IOCs")
+
+        bluesky_panel_action = control_system_menu.addAction("Bluesky Servers")
+        bluesky_panel_action.triggered.connect(self.launch_bluesky_servers_panel)
+        self._set_themed_action_icon(bluesky_panel_action, 'fa6s.network-wired')
 
         # Add the "Controls" action to the menu bar
         controls_action = QAction(gear_icon, "Old Control Menu", self)
@@ -1451,6 +1442,23 @@ class MITRMainWindow(PyDMMainWindow):
     def _ioc_control_panel_destroyed(self):
         self._ioc_control_panel = None
 
+    def launch_bluesky_servers_panel(self):
+        from diffractometer_controls.site.mitr.bluesky_servers import BlueskyServersPanel
+
+        panel = self._bluesky_servers_panel
+        if panel is None:
+            app = QApplication.instance()
+            panel = BlueskyServersPanel(host=getattr(app, "_ipaddress", "localhost"), parent=self)
+            self._bluesky_servers_panel = panel
+            panel.destroyed.connect(self._bluesky_servers_panel_destroyed)
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
+
+    @Slot()
+    def _bluesky_servers_panel_destroyed(self):
+        self._bluesky_servers_panel = None
+
     def launch_focus_program(self):
         viewer_script = profile.APPLICATION_ROOT / "analysis/focus_offline_viewer.py"
         if not viewer_script.exists():
@@ -1701,6 +1709,9 @@ class MITRMainWindow(PyDMMainWindow):
 
     def cleanup_before_close(self):
         """Stop local timers/channels so app shutdown is not delayed."""
+        servers = getattr(self, "_bluesky_servers_panel", None)
+        if servers is not None:
+            servers.close()
         display_widget = self.display_widget()
         cleanup_display = getattr(display_widget, "cleanup_before_navigation", None)
         if callable(cleanup_display):
@@ -1766,40 +1777,6 @@ class MITRMainWindow(PyDMMainWindow):
             f"{operation} was not run.\n\n{LOCAL_MAINTENANCE_DISABLED_MESSAGE}",
         )
         return False
-
-    def reset_process(self, process_name):
-        """
-        Resets a given process using systemctl.
-
-        Parameters:
-            process_name (str): The name of the process to reset.
-        """
-        if not self._require_local_maintenance(f"Restarting {process_name}"):
-            return
-        try:
-            # Run the systemctl command to restart the service
-            subprocess.run(
-                ["systemctl", "--user", "restart", f"{process_name}.service"],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            # Show a success message
-            QMessageBox.information(self, "Success", f"{process_name} restarted successfully.")
-        except subprocess.CalledProcessError as e:
-            # Show an error message if the command fails
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"Failed to restart {process_name}.\n\nError: {e.stderr.decode('utf-8')}",
-            )
-        except Exception as e:
-            # Catch any other exceptions
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"An unexpected error occurred while restarting {process_name}:\n\n{str(e)}",
-            )
 
     def launch_bluesky_environment_update(self):
         if not self._require_local_maintenance("The Bluesky environment updater"):

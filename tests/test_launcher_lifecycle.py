@@ -1,9 +1,54 @@
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
 import unittest
 
 try:
     from diffractometer_controls.launcher import _patch_bluesky_status_reload_shutdown
 except Exception:
     from launcher import _patch_bluesky_status_reload_shutdown
+
+
+class SourceCheckoutLaunchTests(unittest.TestCase):
+    def check_help(self, arguments, cwd):
+        environment = os.environ.copy()
+        environment.pop("PYTHONPATH", None)
+        environment["QT_QPA_PLATFORM"] = "offscreen"
+        result = subprocess.run(
+            [sys.executable, *arguments, "--help"], cwd=cwd, env=environment,
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("--displayfile", result.stdout)
+        self.assertIn("--ip-addr", result.stdout)
+
+    def test_direct_script_from_application_directory_without_installed_package(self):
+        root = Path(__file__).resolve().parents[1]
+        self.check_help(["-I", "launcher.py"], root / "diffractometer_controls")
+
+    def test_direct_script_from_an_unrelated_directory(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            self.check_help(["-I", str(root / "diffractometer_controls/launcher.py")], directory)
+
+    def test_module_entry_point_from_checkout_root(self):
+        root = Path(__file__).resolve().parents[1]
+        self.check_help(["-m", "diffractometer_controls"], root)
+
+    def test_directory_entry_point_from_checkout_root_without_installed_package(self):
+        root = Path(__file__).resolve().parents[1]
+        self.check_help(["-I", "diffractometer_controls"], root)
+
+    def test_directory_entry_point_from_an_unrelated_directory(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            self.check_help(["-I", str(root / "diffractometer_controls")], directory)
+
+    def test_main_file_entry_point_from_application_directory(self):
+        root = Path(__file__).resolve().parents[1]
+        self.check_help(["-I", "__main__.py"], root / "diffractometer_controls")
 
 
 class _Model:

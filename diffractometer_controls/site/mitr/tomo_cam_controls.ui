@@ -202,9 +202,7 @@
            <string>text_7</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">QLabel#text_7 {
-  color: rgb(0, 0, 0);
-  }</string>
+           <string notr="true">QLabel#text_7 { color: palette(window-text); }</string>
           </property>
           <property name="text">
            <string>Acquire</string>
@@ -322,9 +320,7 @@
            <string>text_16</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">QLabel#text_16 {
-  color: rgb(0, 0, 0);
-  }</string>
+           <string notr="true">QLabel#text_16 { color: palette(window-text); }</string>
           </property>
           <property name="text">
            <string>Time Remaining</string>
@@ -352,6 +348,9 @@
           </property>
           <property name="toolTip">
            <string>ca://${P}${R}TimeRemaining_RBV</string>
+          </property>
+          <property name="preserveAdlBackground" stdset="0">
+           <bool>true</bool>
           </property>
           <property name="styleSheet">
            <string notr="true">PyDMLabel#text_update_12 {
@@ -406,9 +405,7 @@
            <string>text</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">QLabel#text {
-  color: rgb(0, 0, 0);
-  }</string>
+           <string notr="true">QLabel#text { color: palette(window-text); }</string>
           </property>
           <property name="text">
            <string>Exposure time</string>
@@ -486,6 +483,9 @@
           <property name="toolTip">
            <string>PV: ${P}${R}AcquireTime_RBV</string>
           </property>
+          <property name="preserveAdlBackground" stdset="0">
+           <bool>true</bool>
+          </property>
           <property name="styleSheet">
            <string notr="true">PyDMLabel#text_update {
   color: rgb(10, 0, 184);
@@ -536,9 +536,7 @@
            <string>text_9</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">QLabel#text_9 {
-  color: rgb(0, 0, 0);
-  }</string>
+           <string notr="true">QLabel#text_9 { color: palette(window-text); }</string>
           </property>
           <property name="text">
            <string>Image mode</string>
@@ -612,6 +610,9 @@
           <property name="toolTip">
            <string>PV: ${P}${R}ImageMode_RBV</string>
           </property>
+          <property name="preserveAdlBackground" stdset="0">
+           <bool>true</bool>
+          </property>
           <property name="styleSheet">
            <string notr="true">PyDMLabel#text_update_5 {
   color: rgb(10, 0, 184);
@@ -665,9 +666,7 @@
            <string>text_2</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">QLabel#text_2 {
-  color: rgb(0, 0, 0);
-  }</string>
+           <string notr="true">QLabel#text_2 { color: palette(window-text); }</string>
           </property>
           <property name="text">
            <string># Images</string>
@@ -745,6 +744,9 @@
           <property name="toolTip">
            <string>PV: ${P}${R}NumImages_RBV</string>
           </property>
+          <property name="preserveAdlBackground" stdset="0">
+           <bool>true</bool>
+          </property>
           <property name="styleSheet">
            <string notr="true">PyDMLabel#text_update_2 {
   color: rgb(10, 0, 184);
@@ -795,9 +797,7 @@
            <string>text_3</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">QLabel#text_3 {
-  color: rgb(0, 0, 0);
-  }</string>
+           <string notr="true">QLabel#text_3 { color: palette(window-text); }</string>
           </property>
           <property name="text">
            <string># Images complete</string>
@@ -825,6 +825,9 @@
           </property>
           <property name="toolTip">
            <string>PV: ${P}${R}NumImagesCounter_RBV</string>
+          </property>
+          <property name="preserveAdlBackground" stdset="0">
+           <bool>true</bool>
           </property>
           <property name="styleSheet">
            <string notr="true">PyDMLabel#text_update_3 {
@@ -876,9 +879,7 @@
            <string>text_9</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">QLabel#text_9 {
-  color: rgb(0, 0, 0);
-  }</string>
+           <string notr="true">QLabel#text_13 { color: palette(window-text); }</string>
           </property>
           <property name="text">
            <string>Data type</string>
@@ -920,7 +921,7 @@
            <string>${P}${R}DataType</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">PyDMEnumComboBox {
+           <string notr="true">PyDMEnumComboBox#menu_2 {
   color: rgb(0, 0, 0);
   background-color: rgb(115, 223, 255);
   }</string>
@@ -951,6 +952,9 @@
           </property>
           <property name="toolTip">
            <string>PV: ${P}${R}DataType_RBV</string>
+          </property>
+          <property name="preserveAdlBackground" stdset="0">
+           <bool>true</bool>
           </property>
           <property name="styleSheet">
            <string notr="true">PyDMLabel#text_update_10 {
@@ -1051,10 +1055,7 @@
            <string>text_1</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">PyDMLabel {
-  color: rgb(10, 0, 184);
-  background-color: rgb(187, 187, 187);
-  }</string>
+           <string notr="true">QLabel#text_1 { color: palette(window-text); }</string>
           </property>
           <property name="text">
            <string>X</string>
@@ -1090,10 +1091,7 @@
            <string>text_2</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">PyDMLabel {
-  color: rgb(10, 0, 184);
-  background-color: rgb(187, 187, 187);
-  }</string>
+           <string notr="true">QLabel#text_4 { color: palette(window-text); }</string>
           </property>
           <property name="text">
            <string>Y</string>
@@ -1139,10 +1137,7 @@
            <string>text_6</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">PyDMLabel {
-  color: rgb(10, 0, 184);
-  background-color: rgb(187, 187, 187);
-  }</string>
+           <string notr="true">QLabel#text_8 { color: palette(window-text); }</string>
           </property>
           <property name="text">
            <string>Sensor size</string>
@@ -1171,8 +1166,11 @@
           <property name="toolTip">
            <string>PV: ${P}${R}MaxSizeX_RBV</string>
           </property>
+          <property name="preserveAdlBackground" stdset="0">
+           <bool>true</bool>
+          </property>
           <property name="styleSheet">
-           <string notr="true">PyDMLabel {
+           <string notr="true">PyDMLabel#text_update_6 {
   color: rgb(10, 0, 184);
   background-color: rgb(187, 187, 187);
   }</string>
@@ -1198,8 +1196,11 @@
           <property name="toolTip">
            <string>PV: ${P}${R}MaxSizeY_RBV</string>
           </property>
+          <property name="preserveAdlBackground" stdset="0">
+           <bool>true</bool>
+          </property>
           <property name="styleSheet">
-           <string notr="true">PyDMLabel {
+           <string notr="true">PyDMLabel#text_update_7 {
   color: rgb(10, 0, 184);
   background-color: rgb(187, 187, 187);
   }</string>
@@ -1242,9 +1243,7 @@
            <string>text_3</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">QLabel#text_3 {
-  color: rgb(0, 0, 0);
-  }</string>
+           <string notr="true">QLabel#text_10 { color: palette(window-text); }</string>
           </property>
           <property name="text">
            <string>Binning</string>
@@ -1286,7 +1285,7 @@
            <string>${P}${R}BinX</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">PyDMLineEdit {
+           <string notr="true">PyDMLineEdit#text_entry_3 {
   color: rgb(0, 0, 0);
   background-color: rgb(115, 223, 255);
   border: 1px solid black;
@@ -1322,8 +1321,11 @@
           <property name="toolTip">
            <string>PV: ${P}${R}BinX_RBV</string>
           </property>
+          <property name="preserveAdlBackground" stdset="0">
+           <bool>true</bool>
+          </property>
           <property name="styleSheet">
-           <string notr="true">PyDMLabel {
+           <string notr="true">PyDMLabel#text_update_4 {
   color: rgb(10, 0, 184);
   background-color: rgb(187, 187, 187);
   }</string>
@@ -1398,8 +1400,11 @@
           <property name="toolTip">
            <string>PV: ${P}${R}BinY_RBV</string>
           </property>
+          <property name="preserveAdlBackground" stdset="0">
+           <bool>true</bool>
+          </property>
           <property name="styleSheet">
-           <string notr="true">PyDMLabel {
+           <string notr="true">PyDMLabel#text_update_1 {
   color: rgb(10, 0, 184);
   background-color: rgb(187, 187, 187);
   }</string>
@@ -1442,9 +1447,7 @@
            <string>text_12</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">QLabel#text_12 {
-  color: rgb(0, 0, 0);
-  }</string>
+           <string notr="true">QLabel#text_12 { color: palette(window-text); }</string>
           </property>
           <property name="text">
            <string>Image size</string>
@@ -1473,6 +1476,9 @@
           <property name="toolTip">
            <string>PV: ${P}${R}ArraySizeX_RBV</string>
           </property>
+          <property name="preserveAdlBackground" stdset="0">
+           <bool>true</bool>
+          </property>
           <property name="styleSheet">
            <string notr="true">PyDMLabel#text_update_14 {
   color: rgb(10, 0, 184);
@@ -1499,6 +1505,9 @@
           </property>
           <property name="toolTip">
            <string>PV: ${P}${R}ArraySizeY_RBV</string>
+          </property>
+          <property name="preserveAdlBackground" stdset="0">
+           <bool>true</bool>
           </property>
           <property name="styleSheet">
            <string notr="true">PyDMLabel#text_update_15 {
@@ -1544,9 +1553,7 @@
            <string>text_8</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">QLabel#text_8 {
-  color: rgb(0, 0, 0);
-  }</string>
+           <string notr="true">QLabel#text_11 { color: palette(window-text); }</string>
           </property>
           <property name="text">
            <string>Gain</string>
@@ -1612,6 +1619,9 @@
           <property name="toolTip">
            <string>PV: ${P}${R}Gain_RBV</string>
           </property>
+          <property name="preserveAdlBackground" stdset="0">
+           <bool>true</bool>
+          </property>
           <property name="styleSheet">
            <string notr="true">PyDMLabel#text_update_9 {
   color: rgb(10, 0, 184);
@@ -1656,9 +1666,7 @@
            <string>text_8</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">QLabel {
-  color: rgb(0, 0, 0);
-  }</string>
+           <string notr="true">QLabel#text_17 { color: palette(window-text); }</string>
           </property>
           <property name="text">
            <string>Offset</string>
@@ -1694,7 +1702,7 @@
            <string>${P}${R}Offset</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">PyDMLineEdit{
+           <string notr="true">PyDMLineEdit#text_entry_7{
   color: rgb(0, 0, 0);
   background-color: rgb(115, 223, 255);
   border: 1px solid black;
@@ -1724,8 +1732,11 @@
           <property name="toolTip">
            <string>PV: ${P}${R}Offset_RBV</string>
           </property>
+          <property name="preserveAdlBackground" stdset="0">
+           <bool>true</bool>
+          </property>
           <property name="styleSheet">
-           <string notr="true">PyDMLabel {
+           <string notr="true">PyDMLabel#text_update_11 {
   color: rgb(10, 0, 184);
   background-color: rgb(187, 187, 187);
   }</string>
@@ -1807,9 +1818,7 @@
            <string>text</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">QLabel#text {
-  color: rgb(0, 0, 0);
-  }</string>
+           <string notr="true">QLabel#text_14 { color: palette(window-text); }</string>
           </property>
           <property name="text">
            <string>Set Temperature</string>
@@ -1851,7 +1860,7 @@
            <string>${P}${R}AcquireTime</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">PyDMLineEdit {
+           <string notr="true">PyDMLineEdit#text_entry_4 {
   color: rgb(0, 0, 0);
   background-color: rgb(115, 223, 255);
   border: 1px solid black;
@@ -1887,8 +1896,11 @@
           <property name="toolTip">
            <string>PV: ${P}${R}AcquireTime_RBV</string>
           </property>
+          <property name="preserveAdlBackground" stdset="0">
+           <bool>true</bool>
+          </property>
           <property name="styleSheet">
-           <string notr="true">PyDMLabel {
+           <string notr="true">PyDMLabel#text_update_8 {
   color: rgb(10, 0, 184);
   background-color: rgb(187, 187, 187);
   }</string>
@@ -1940,9 +1952,7 @@
            <string>text</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">QLabel#text {
-  color: rgb(0, 0, 0);
-  }</string>
+           <string notr="true">QLabel#text_15 { color: palette(window-text); }</string>
           </property>
           <property name="text">
            <string>Temperature</string>
@@ -1970,6 +1980,9 @@
           </property>
           <property name="toolTip">
            <string>PV: ${P}${R}TriggerMode_RBV</string>
+          </property>
+          <property name="preserveAdlBackground" stdset="0">
+           <bool>true</bool>
           </property>
           <property name="styleSheet">
            <string notr="true">PyDMLabel#text_update_13 {
@@ -2427,7 +2440,7 @@
            <string/>
           </property>
           <property name="styleSheet">
-           <string notr="true">PyDMRelatedDisplayButton{
+           <string notr="true">PyDMRelatedDisplayButton#PyDMRelatedDisplayButton_2{
   color: rgb(0, 0, 0);
   background-color: rgb(115, 223, 255);
   }</string>
@@ -2479,7 +2492,7 @@
            <string/>
           </property>
           <property name="styleSheet">
-           <string notr="true">PyDMRelatedDisplayButton{
+           <string notr="true">PyDMRelatedDisplayButton#PyDMRelatedDisplayButton_3{
   color: rgb(0, 0, 0);
   background-color: rgb(115, 223, 255);
   }</string>

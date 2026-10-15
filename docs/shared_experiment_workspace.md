@@ -38,7 +38,25 @@ installed once from `control_ui/core/compatibility.py`. Unsupported editor
 internals raise an explicit error; delayed callbacks belong to their Qt widgets,
 and model callbacks are released on destruction.
 
-Theme and plotting palettes live in `control_ui/core/themes.py`. Reactor actions
+Theme and plotting palettes live in `control_ui/core/themes.py`. The application
+installs `AdlDisplayAdapter` from `control_ui/core/adl_display.py` for live ADL
+conversions and saved converter-generated `.ui` files. It adapts literal text
+colors and neutral canvases/outlines in dark mode, preserves colored controls
+and dynamic graphics, and restores MEDM colors in light mode. Converted labels
+fit the actual Qt font metrics to their pixel boxes, retaining the authored
+horizontal alignment and centering vertically; changing readback values refits
+the text. Fitting measures visible glyphs rather than unused line spacing, and
+left-aligned static motor labels can use empty space before the next field.
+Selectable readbacks center their text document's glyphs within the padded
+content area, so PyDM alarm padding does not clip values or force smaller type.
+Embedded converted panels can grow into unused space, bounded by neighboring
+panels, when their source content is larger than the embedding rectangle (such
+as USB2408's waveform generator and its bottom control buttons).
+This avoids the converter's fixed point-to-pixel estimate clipping
+USB2408 device headers on different fonts or display DPIs. These adjustments
+apply inside the MITR GUI; standalone `pydm` and converter output are unchanged.
+
+Reactor actions
 and suspenders remain site-specific. `SourceStatusIndicator` is a reusable
 numeric source readout. See the [template guide](instrument_template.md) and
 [reference captures](reference_layouts/README.md) for extension examples,

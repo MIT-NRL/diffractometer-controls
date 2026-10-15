@@ -15,7 +15,7 @@ operation:
   console_logging_level: NORMAL
   update_existing_plans_and_devices: ENVIRONMENT_OPEN
   user_group_permissions_reload: ON_REQUEST
-  emergency_lock_key: custom_lock_key
+  # Set emergency unlock privately via QSERVER_EMERGENCY_LOCK_KEY_FOR_SERVER.
 worker:
   use_ipython_kernel: false
   # ipython_kernel_ip: None

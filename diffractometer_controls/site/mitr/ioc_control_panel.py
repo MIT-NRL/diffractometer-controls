@@ -2,109 +2,37 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import codecs
 import re
 import time
-from typing import NamedTuple
 
-from pydm import Display
+from pydm import Display, data_plugins
 from pydm.widgets import PyDMLabel
 from pydm.widgets.channel import PyDMChannel
 from qtpy import QtCore, QtGui, QtWidgets
+from control_ui.widgets.service_status import ResourceGrid, ServiceCard, StatusBadge, configure_console_font, overview_page, status_legend
 
 from diffractometer_controls.maintenance.local_maintenance import LOCAL_MAINTENANCE_DISABLED_MESSAGE, local_maintenance_allowed
-from diffractometer_controls.site.mitr import profile
 
 
-MAIN_LAUNCHER = profile.ioc_launcher()
-CAMERA_SERVICE = "reolinkioc.service"
-MAIN_SCREEN_NAME = "4dh4ioc"
-MAIN_CONSOLE_LOG_DIR = MAIN_LAUNCHER.parent / "logs" / "iocConsole"
-
-
-class IOCSpec(NamedTuple):
-    """Static IOC identity safe for PyDM's dynamic display loader."""
-
-    key: str
-    title: str
-    heartbeat: str
-    uptime: str
-    stats_prefix: str
-    transport: str
-
-
-IOC_SPECS = (
-    IOCSpec(
-        "main",
-        "Main control IOC",
-        "4dh4:HEARTBEAT",
-        "4dh4:UPTIME",
-        "4dh4",
-        "screen 4dh4ioc  •  private CA/PVA endpoints",
-    ),
-    IOCSpec(
-        "camera",
-        "Reolink camera IOC",
-        "4dh4:ReolinkIOC:HEARTBEAT",
-        "4dh4:ReolinkIOC:UPTIME",
-        "4dh4:ReolinkIOC",
-        "systemd reolinkioc.service  •  private CA/PVA endpoints",
-    ),
-)
+from diffractometer_controls.site.mitr.ioc_specs import IOCSpec, IOC_SPECS, ioc_spec
 
 
 def process_command(key: str, action: str) -> tuple[str, list[str]]:
-    """Return an argv-only control command; never invoke a shell."""
+    """Return a service action as argv, with no shell or implicit group startup."""
     if action not in {"start", "stop", "restart"}:
         raise ValueError(f"Unsupported IOC action: {action}")
-    if key == "main":
-        return str(MAIN_LAUNCHER), [action]
-    if key == "camera":
-        return "systemctl", ["--user", action, CAMERA_SERVICE]
-    raise ValueError(f"Unknown IOC: {key}")
+    return "systemctl", ["--user", action, ioc_spec(key).service]
 
 
 def status_command(key: str) -> tuple[str, list[str]]:
-    if key == "main":
-        return str(MAIN_LAUNCHER), ["status"]
-    if key == "camera":
-        return "systemctl", [
-            "--user",
-            "show",
-            CAMERA_SERVICE,
-            "--property=LoadState",
-            "--property=ActiveState",
-            "--property=SubState",
-            "--property=MainPID",
-            "--no-pager",
-        ]
-    raise ValueError(f"Unknown IOC: {key}")
+    return "systemctl", ["--user", "show", ioc_spec(key).service,
+                         "--property=LoadState,ActiveState,SubState,MainPID", "--no-pager"]
 
 
-def camera_log_command() -> tuple[str, list[str]]:
-    """Return the live systemd journal command for the camera IOC."""
-    return (
-        "journalctl",
-        [
-            "--user",
-            f"--unit={CAMERA_SERVICE}",
-            "--lines=2000",
-            "--follow",
-            "--output=cat",
-            "--no-hostname",
-        ],
-    )
-
-
-def screen_input_commands(command: str) -> tuple[tuple[str, list[str]], ...]:
-    """Return shell-free Screen operations for text followed by the Enter key."""
-    value = str(command).replace("\r", " ").replace("\n", " ").strip()
-    base_arguments = ["-S", MAIN_SCREEN_NAME, "-p", "0", "-X", "stuff"]
-    operations = []
-    if value:
-        operations.append(("screen", [*base_arguments, value]))
-    operations.append(("screen", [*base_arguments, "\r"]))
-    return tuple(operations)
+def journal_command(key: str) -> tuple[str, list[str]]:
+    return "journalctl", ["--user", "--unit=" + ioc_spec(key).service,
+                          "--lines=2000", "--follow", "--output=cat", "--no-pager"]
 
 
 _ANSI_ESCAPE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -136,10 +64,6 @@ def _dialog_button(text: str) -> QtWidgets.QPushButton:
 
 def parse_process_status(key: str, output: str, exit_code: int) -> tuple[bool, str]:
     text = str(output or "").strip()
-    if key == "main":
-        running = exit_code == 0 and " is running " in f" {text} "
-        return running, text or "No launcher status returned"
-
     fields = {}
     for line in text.splitlines():
         if "=" in line:
@@ -285,40 +209,22 @@ class _Heartbeat(QtCore.QObject):
 
 
 class IOCConsoleWindow(QtWidgets.QDialog):
-    """Scrollable GUI output viewer with optional main-IOC shell input."""
+    """Read-only systemd journal with independent find, copy and follow controls."""
 
     def __init__(self, spec: IOCSpec, parent=None):
         super().__init__(parent)
         self.spec = spec
-        self._main_log_path = None
-        self._main_log_position = 0
         self._journal_process = None
-        self._command_process = None
-        self._command_queue = []
-        self._pending_command = ""
+        self._closed = False
+        self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
         self.setWindowTitle(f"{spec.title} Console")
         self.resize(1050, 720)
-
         layout = QtWidgets.QVBoxLayout(self)
         heading = QtWidgets.QLabel(f"{spec.title} Console")
         heading.setStyleSheet("font-size: 18px; font-weight: 600;")
         layout.addWidget(heading)
-
-        if spec.key == "main":
-            explanation = (
-                "Live Screen console log. Commands entered below are sent to the "
-                "running EPICS IOC shell."
-            )
-        else:
-            explanation = (
-                "Live systemd journal with recent startup output. The camera IOC "
-                "console is read-only."
-            )
-        note = QtWidgets.QLabel(explanation)
-        note.setWordWrap(True)
-        layout.addWidget(note)
-
+        layout.addWidget(QtWidgets.QLabel(f"Live journal for {spec.service}. Console output is read-only."))
         toolbar = QtWidgets.QHBoxLayout()
         self.clear_button = _dialog_button("Clear view")
         self.clear_button.clicked.connect(self._clear_view)
@@ -332,7 +238,6 @@ class IOCConsoleWindow(QtWidgets.QDialog):
         self.follow_checkbox = QtWidgets.QCheckBox("Follow output")
         self.follow_checkbox.setChecked(True)
         toolbar.addWidget(self.follow_checkbox)
-        toolbar.addSpacing(20)
         self.find_edit = QtWidgets.QLineEdit()
         self.find_edit.setPlaceholderText("Find in output")
         self.find_edit.setClearButtonEnabled(True)
@@ -342,302 +247,140 @@ class IOCConsoleWindow(QtWidgets.QDialog):
         self.find_button.clicked.connect(self._find_next)
         toolbar.addWidget(self.find_button)
         layout.addLayout(toolbar)
-
         self.output = QtWidgets.QPlainTextEdit()
         self.output.setReadOnly(True)
         self.output.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap)
         self.output.document().setMaximumBlockCount(30000)
-        fixed_font = QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont)
-        self.output.setFont(fixed_font)
+        configure_console_font(self.output)
         layout.addWidget(self.output, 1)
-
-        self.status_label = QtWidgets.QLabel("Opening console output…")
+        self.status_label = QtWidgets.QLabel("Loading and following IOC journal…")
         layout.addWidget(self.status_label)
-
-        if spec.key == "main":
-            command_layout = QtWidgets.QHBoxLayout()
-            command_layout.addWidget(QtWidgets.QLabel("IOC command:"))
-            self.command_edit = QtWidgets.QLineEdit()
-            self.command_edit.setPlaceholderText(
-                "Enter an IOC shell command, for example: dbl"
-            )
-            self.command_edit.setMaxLength(2048)
-            self.command_edit.returnPressed.connect(self._send_main_command)
-            command_layout.addWidget(self.command_edit, 1)
-            self.send_button = _dialog_button("Send")
-            self.send_button.clicked.connect(self._send_main_command)
-            command_layout.addWidget(self.send_button)
-            layout.addLayout(command_layout)
-        else:
-            self.command_edit = None
-            self.send_button = None
-
-        if spec.key == "main":
-            self._poll_timer = QtCore.QTimer(self)
-            self._poll_timer.timeout.connect(self._poll_main_log)
-            self._poll_timer.start(500)
-            self._poll_main_log()
-        else:
-            self._poll_timer = None
-            self._start_camera_journal()
+        process = QtCore.QProcess(self)
+        process.setProcessChannelMode(QtCore.QProcess.MergedChannels)
+        process.readyReadStandardOutput.connect(self._read_journal)
+        process.finished.connect(self._journal_finished)
+        process.errorOccurred.connect(self._journal_error)
+        self._journal_process = process
+        program, arguments = journal_command(spec.key)
+        process.start(program, arguments)
 
     def _append_output(self, text):
         value = clean_console_text(text)
         if not value:
             return
-        scroll_bar = self.output.verticalScrollBar()
-        old_scroll = scroll_bar.value()
+        bar = self.output.verticalScrollBar()
+        old = bar.value()
         cursor = QtGui.QTextCursor(self.output.document())
         cursor.movePosition(QtGui.QTextCursor.End)
         cursor.insertText(value)
-        if self.follow_checkbox.isChecked():
-            self._jump_to_bottom()
-        else:
-            scroll_bar.setValue(old_scroll)
-
-    def _active_main_log(self):
-        try:
-            files = list(MAIN_CONSOLE_LOG_DIR.glob("ioc4dh4-console.log_*"))
-            return max(files, key=lambda path: path.stat().st_mtime) if files else None
-        except OSError:
-            return None
-
-    def _poll_main_log(self):
-        path = self._active_main_log()
-        if path is None:
-            self.status_label.setText(f"No console log found in {MAIN_CONSOLE_LOG_DIR}")
-            return
-        if path != self._main_log_path:
-            self._main_log_path = path
-            self._main_log_position = 0
-            self._append_output(f"\n===== {path.name} =====\n")
-        try:
-            size = path.stat().st_size
-            if size < self._main_log_position:
-                self._main_log_position = 0
-            with path.open("rb") as stream:
-                stream.seek(self._main_log_position)
-                data = stream.read()
-                self._main_log_position = stream.tell()
-        except OSError as ex:
-            self.status_label.setText(f"Unable to read console log: {ex}")
-            return
-        if data:
-            self._append_output(data.decode("utf-8", errors="replace"))
-        self.status_label.setText(f"Following {path.name}")
-
-    def _start_camera_journal(self):
-        program, arguments = camera_log_command()
-        process = QtCore.QProcess(self)
-        process.setProcessChannelMode(QtCore.QProcess.MergedChannels)
-        process.readyReadStandardOutput.connect(self._read_camera_journal)
-        process.finished.connect(self._camera_journal_finished)
-        process.errorOccurred.connect(self._camera_journal_error)
-        self._journal_process = process
-        process.start(program, arguments)
-        self.status_label.setText("Loading and following camera IOC journal…")
+        bar.setValue(bar.maximum() if self.follow_checkbox.isChecked() else old)
 
     @QtCore.Slot()
-    def _read_camera_journal(self):
-        process = self._journal_process
-        if process is None:
-            return
-        data = bytes(process.readAllStandardOutput()).decode(errors="replace")
-        self._append_output(data)
-        self.status_label.setText("Following reolinkioc.service journal (read only)")
+    def _read_journal(self):
+        if self._journal_process is not None:
+            self._append_output(self._decoder.decode(bytes(self._journal_process.readAllStandardOutput())))
+            self.status_label.setText(f"Following {self.spec.service} journal (read only)")
 
-    @QtCore.Slot(int, QtCore.QProcess.ExitStatus)
-    def _camera_journal_finished(self, exit_code, exit_status):
-        self._read_camera_journal()
-        if self.isVisible():
-            self.status_label.setText(
-                f"Camera journal stopped with exit code {int(exit_code)}"
-            )
+    def _journal_finished(self, code, state):
+        self._read_journal()
+        if not self._closed:
+            self.status_label.setText(f"Journal stopped (exit {code}). Reopen the console to reconnect.")
 
-    @QtCore.Slot(QtCore.QProcess.ProcessError)
-    def _camera_journal_error(self, error):
-        process = self._journal_process
-        detail = process.errorString() if process is not None else str(error)
-        self.status_label.setText(f"Unable to read camera journal: {detail}")
-
-    def _send_main_command(self):
-        if self.command_edit is None or self._command_process is not None:
-            return
-        command = self.command_edit.text().strip()
-        self._command_queue = list(screen_input_commands(command))
-        self._pending_command = command
-        self.send_button.setEnabled(False)
-        self.command_edit.clear()
-        display_command = command or "<Return>"
-        self.status_label.setText(f"Sending IOC command: {display_command}")
-        self._start_next_main_command_step()
-
-    def _start_next_main_command_step(self):
-        if not self._command_queue:
-            self._finish_main_command(True)
-            return
-        program, arguments = self._command_queue.pop(0)
-        process = QtCore.QProcess(self)
-        self._command_process = process
-        process.finished.connect(self._main_command_finished)
-        process.errorOccurred.connect(self._main_command_error)
-        process.start(program, arguments)
-
-    @QtCore.Slot(int, QtCore.QProcess.ExitStatus)
-    def _main_command_finished(self, exit_code, exit_status):
-        process = self._command_process
-        if process is None:
-            return
-        error = bytes(process.readAllStandardError()).decode(errors="replace").strip()
-        process.deleteLater()
-        self._command_process = None
-        if exit_code != 0:
-            self._command_queue.clear()
-            self._finish_main_command(False, error or "Unable to send IOC command")
-            return
-        self._start_next_main_command_step()
-
-    @QtCore.Slot(QtCore.QProcess.ProcessError)
-    def _main_command_error(self, error):
-        process = self._command_process
-        detail = process.errorString() if process is not None else str(error)
-        if process is not None:
-            process.deleteLater()
-        self._command_process = None
-        self._command_queue.clear()
-        self._finish_main_command(False, f"Unable to send IOC command: {detail}")
-
-    def _finish_main_command(self, success, error=""):
-        command = self._pending_command
-        self._pending_command = ""
-        self.send_button.setEnabled(True)
-        display_command = command or "<Return>"
-        self.status_label.setText(
-            f"IOC command sent: {display_command}" if success else error
-        )
-        self.command_edit.setFocus()
+    def _journal_error(self, error):
+        if not self._closed:
+            self.status_label.setText(f"Unable to read journal: {self._journal_process.errorString()}")
 
     def _clear_view(self):
         self.output.clear()
 
     def _copy_all(self):
         QtWidgets.QApplication.clipboard().setText(self.output.toPlainText())
-        self.status_label.setText("Console output copied to clipboard")
 
     def _jump_to_bottom(self):
-        scroll_bar = self.output.verticalScrollBar()
-        scroll_bar.setValue(scroll_bar.maximum())
+        bar = self.output.verticalScrollBar()
+        bar.setValue(bar.maximum())
 
     def _find_next(self):
         text = self.find_edit.text()
-        if not text:
-            return
-        if self.output.find(text):
-            return
-        cursor = self.output.textCursor()
-        cursor.movePosition(QtGui.QTextCursor.Start)
-        self.output.setTextCursor(cursor)
-        if not self.output.find(text):
-            self.status_label.setText(f'Not found: "{text}"')
+        if text and not self.output.find(text):
+            self.output.moveCursor(QtGui.QTextCursor.Start)
+            if not self.output.find(text):
+                self.status_label.setText(f"Not found: {text}")
 
     def closeEvent(self, event):
-        if self._poll_timer is not None:
-            self._poll_timer.stop()
-        for process in (self._journal_process, self._command_process):
-            if process is not None and process.state() != QtCore.QProcess.NotRunning:
-                process.terminate()
-                process.waitForFinished(500)
+        self._closed = True
+        if self._journal_process is not None and self._journal_process.state() != QtCore.QProcess.NotRunning:
+            self._journal_process.terminate()
+            self._journal_process.waitForFinished(1000)
         super().closeEvent(event)
 
 
-class _IOCRow(QtWidgets.QFrame):
+class _IOCRow(ServiceCard):
     def __init__(self, spec: IOCSpec, maintenance: bool, parent=None):
-        super().__init__(parent)
+        super().__init__(spec.title, spec.transport, parent)
         self.spec = spec
         self._maintenance = maintenance
         self._status_process = None
         self._control_process = None
         self._console_window = None
         self._resource_labels = []
-        self.setFrameShape(QtWidgets.QFrame.StyledPanel)
-
-        layout = QtWidgets.QGridLayout(self)
-        title = QtWidgets.QLabel(spec.title)
-        title.setStyleSheet("font-size: 17px; font-weight: 600;")
-        layout.addWidget(title, 0, 0, 1, 3)
-
-        identity = QtWidgets.QLabel(spec.transport)
-        identity.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        layout.addWidget(identity, 1, 0, 1, 3)
-
         self.process_label = QtWidgets.QLabel("Checking process…")
-        self.epics_label = QtWidgets.QLabel("Checking EPICS heartbeat…")
-        layout.addWidget(self.process_label, 2, 0, 1, 3)
-        layout.addWidget(self.epics_label, 3, 0, 1, 3)
+        self.process_label.setTextFormat(QtCore.Qt.PlainText)
+        self.process_label.setWordWrap(True)
+        self.epics_label = StatusBadge("Checking EPICS heartbeat…", parent=self)
+        self.content.addWidget(self.process_label)
+        self.content.addWidget(self.epics_label)
 
-        layout.addWidget(QtWidgets.QLabel("Uptime:"), 4, 0)
+        self.resources = ResourceGrid("IOC resource usage", self)
+        self.diagnostics = ResourceGrid("Host and connection diagnostics", self)
+        core_suffixes = ("IOC_CPU_LOAD", "MEM_USED", "CA_CLNT_CNT")
+        for title_text, suffix, formatter, tooltip in RESOURCE_METRICS:
+            target = self.resources if suffix in core_suffixes else self.diagnostics
+            metric_value = _FormattedPVLabel(f"{spec.stats_prefix}:{suffix}", formatter, target)
+            target.add_metric(suffix, title_text, metric_value, tooltip)
+            self._resource_labels.append(metric_value)
         uptime = PyDMLabel(init_channel=f"ca://{spec.uptime}")
         uptime.setText("—")
-        layout.addWidget(uptime, 4, 1, 1, 2)
+        self.resources.add_metric("uptime", "Uptime", uptime)
+        self.content.addWidget(self.resources)
+        self.details_button = QtWidgets.QToolButton()
+        self.details_button.setText("Host and connection details")
+        self.details_button.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+        self.details_button.setArrowType(QtCore.Qt.RightArrow)
+        self.details_button.setCheckable(True)
+        self.details_button.toggled.connect(self._show_diagnostics)
+        self.content.addWidget(self.details_button, alignment=QtCore.Qt.AlignLeft)
+        self.content.addWidget(self.diagnostics)
+        self.diagnostics.hide()
 
-        resources = QtWidgets.QGroupBox("Resource usage")
-        resource_layout = QtWidgets.QGridLayout(resources)
-        resource_layout.setHorizontalSpacing(12)
-        for index, (title_text, suffix, formatter, tooltip) in enumerate(
-            RESOURCE_METRICS
-        ):
-            metric_row = index // 4
-            metric_column = (index % 4) * 2
-            metric_title = QtWidgets.QLabel(f"{title_text}:")
-            metric_title.setToolTip(tooltip)
-            metric_value = _FormattedPVLabel(
-                f"{spec.stats_prefix}:{suffix}", formatter, resources
-            )
-            metric_value.setToolTip(tooltip)
-            metric_value.setMinimumWidth(62)
-            resource_layout.addWidget(metric_title, metric_row, metric_column)
-            resource_layout.addWidget(metric_value, metric_row, metric_column + 1)
-            self._resource_labels.append(metric_value)
-        layout.addWidget(resources, 5, 0, 1, 3)
-
-        controls = QtWidgets.QHBoxLayout()
+        self.buttons = {}
         for action, label in (("start", "Start"), ("restart", "Restart"), ("stop", "Stop")):
-            button = QtWidgets.QPushButton(label)
-            button.setEnabled(maintenance)
+            button = self.add_action(label, lambda checked=False, value=action: self.control(value))
+            button.setEnabled(maintenance and not data_plugins.is_read_only())
             if not maintenance:
                 button.setToolTip(LOCAL_MAINTENANCE_DISABLED_MESSAGE)
-            button.clicked.connect(lambda checked=False, value=action: self.control(value))
-            controls.addWidget(button)
-        console_button = QtWidgets.QPushButton("Console")
+            elif data_plugins.is_read_only():
+                button.setToolTip("Service controls are disabled in read-only mode.")
+            self.buttons[action] = button
+        console_button = self.add_action("Console / logs", self.open_console)
         console_button.setEnabled(maintenance)
         if not maintenance:
             console_button.setToolTip(LOCAL_MAINTENANCE_DISABLED_MESSAGE)
-        elif spec.key == "main":
-            console_button.setToolTip(
-                "Open a scrollable GUI console with interactive IOC shell input."
-            )
         else:
-            console_button.setToolTip(
-                "Open a scrollable live systemd journal for the camera IOC "
-                "(read only)."
-            )
-        console_button.clicked.connect(self.open_console)
-        controls.addWidget(console_button)
-        controls.addStretch(1)
-        layout.addLayout(controls, 6, 0, 1, 3)
+            console_button.setToolTip("Open the live systemd journal (read only).")
+        self.actions.addStretch(1)
 
         self._heartbeat = _Heartbeat(spec.heartbeat, self)
         self._heartbeat.changed.connect(self._set_epics_status)
 
-    @staticmethod
-    def _status_style(ok: bool) -> str:
-        color = "#2e7d32" if ok else "#b3261e"
-        return f"font-weight: 600; color: {color};"
+    def _show_diagnostics(self, visible):
+        self.diagnostics.setVisible(visible)
+        self.details_button.setArrowType(QtCore.Qt.DownArrow if visible else QtCore.Qt.RightArrow)
 
     @QtCore.Slot(bool, str)
     def _set_epics_status(self, ok, text):
-        self.epics_label.setText(text)
-        self.epics_label.setStyleSheet(self._status_style(bool(ok)))
+        level = "healthy" if ok else ("attention" if "stale" in text.casefold() else "error")
+        self.epics_label.set_status(text, level)
 
     def refresh(self):
         self._heartbeat.poll()
@@ -658,12 +401,12 @@ class _IOCRow(QtWidgets.QFrame):
         error = bytes(process.readAllStandardError()).decode(errors="replace")
         ok, text = parse_process_status(self.spec.key, output or error, int(exit_code))
         self.process_label.setText(f"Process: {text}")
-        self.process_label.setStyleSheet(self._status_style(ok))
+        self.status_badge.set_status("Running" if ok else "Stopped / unavailable", "healthy" if ok else "error")
         process.deleteLater()
         self._status_process = None
 
     def control(self, action: str):
-        if not self._maintenance or self._control_process is not None:
+        if not self._maintenance or self._control_process is not None or data_plugins.is_read_only():
             return
         if action in {"stop", "restart"}:
             answer = QtWidgets.QMessageBox.question(
@@ -678,6 +421,7 @@ class _IOCRow(QtWidgets.QFrame):
         process.setProperty("ioc_action", action)
         self._control_process = process
         self.process_label.setText(f"Process: {action} requested…")
+        self.status_badge.set_status(action.title() + " requested", "active")
         process.finished.connect(self._control_finished)
         process.start(program, arguments)
 
@@ -717,6 +461,8 @@ class _IOCRow(QtWidgets.QFrame):
         QtCore.QTimer.singleShot(500, self.refresh)
 
     def close(self):
+        if self._console_window is not None:
+            self._console_window.close()
         self._heartbeat.close()
         for label in self._resource_labels:
             label.close()
@@ -729,7 +475,7 @@ class IOCControlPanel(Display):
     def __init__(self, parent=None, args=None, macros=None):
         super().__init__(parent=parent, args=args, macros=macros)
         self.setWindowTitle("EPICS IOC Control and Status")
-        self.resize(980, 700)
+        self.resize(1040, 880)
         layout = QtWidgets.QVBoxLayout(self)
 
         heading = QtWidgets.QLabel("EPICS IOC Control and Status")
@@ -737,11 +483,17 @@ class IOCControlPanel(Display):
         layout.addWidget(heading)
 
         note = QtWidgets.QLabel(
-            "The two IOCs run independently on this computer. Process state and "
+            "The IOCs use independent, manually started services. Process state and "
             "EPICS heartbeat are checked separately."
         )
         note.setWordWrap(True)
         layout.addWidget(note)
+        layout.addWidget(status_legend(self))
+
+        self.sections = QtWidgets.QTabWidget()
+        layout.addWidget(self.sections, 1)
+        overview, cards = overview_page(self)
+        self.sections.addTab(overview, "Overview")
 
         maintenance = local_maintenance_allowed()
         if not maintenance:
@@ -752,8 +504,11 @@ class IOCControlPanel(Display):
 
         self._rows = [_IOCRow(spec, maintenance, self) for spec in IOC_SPECS]
         for row in self._rows:
-            layout.addWidget(row)
+            cards.addWidget(row)
+        cards.addStretch(1)
 
+        diagnostics = QtWidgets.QWidget()
+        diagnostic_layout = QtWidgets.QVBoxLayout(diagnostics)
         cameras = QtWidgets.QGroupBox("Camera IOC acquisition health")
         camera_layout = QtWidgets.QGridLayout(cameras)
         headers = ("Camera", "RTSP", "Control", "Published FPS", "Frame age (s)")
@@ -770,8 +525,9 @@ class IOCControlPanel(Display):
                     row_number,
                     column,
                 )
-        layout.addWidget(cameras)
-        layout.addStretch(1)
+        diagnostic_layout.addWidget(cameras)
+        diagnostic_layout.addStretch(1)
+        self.sections.addTab(diagnostics, "Camera health")
 
         self._timer = QtCore.QTimer(self)
         self._timer.timeout.connect(self.refresh)

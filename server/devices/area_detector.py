@@ -234,7 +234,9 @@ class MyZWODetector(SingleTriggerPause, ZWODetector):
     )
 
 class MyQHYDetector(SingleTriggerPause, QHYDetector):
-    cam = Cpt(ZWODetectorCam, "cam1:")
+    cam = Cpt(QHYDetectorCam, "cam1:")
+    focus = Cpt(EpicsMotorCustom, "m12", name="focus", labels=["positioner"])
+    x = Cpt(EpicsMotorCustom, "m1", name="x", labels=["positioner"])
     image = Cpt(ImagePlugin, suffix='image1:')
     stats1 = Cpt(StatsPlugin, 'Stats1:')
 

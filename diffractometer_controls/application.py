@@ -1,5 +1,6 @@
 from control_ui.core.themes import _palette_is_dark, _desktop_prefers_dark, _build_dark_palette, _sync_pyqtgraph_palette
 from control_ui.core.compatibility import BlueskyCompatibility
+from control_ui.core.adl_display import AdlDisplayAdapter
 from diffractometer_controls.site.mitr import profile
 import logging
 import os
@@ -78,6 +79,7 @@ class MITRApplication(BlueskyCompatibility, PyDMApplication):
         self._theme_mode = "system"
 
         super().__init__(ui_file=ui_file, use_main_window=use_main_window, *args, **kwargs)
+        self._adl_display_adapter = getattr(self, "_adl_display_adapter", None) or AdlDisplayAdapter(self)
         # Start exactly one Qt receive loop after the initial display has had a
         # chance to register its callbacks.  Later displays only subscribe.
         self.document_dispatcher.start()
@@ -139,6 +141,7 @@ class MITRApplication(BlueskyCompatibility, PyDMApplication):
         self.setPalette(palette)
         _sync_pyqtgraph_palette(palette)
         self._theme_mode = mode
+        self._adl_display_adapter.refresh()
         self._refresh_theme_for_widgets()
         self._refresh_console_monitors()
         return mode

@@ -1,0 +1,137 @@
+file {
+    name="adl_text_layout.adl"
+    version=030117
+}
+display {
+    object {
+        x=0
+        y=0
+        width=360
+        height=120
+    }
+    clr=2
+    bclr=1
+}
+"color map" {
+    ncolors=6
+    colors {
+        ffffff,
+        bbbbbb,
+        000000,
+        0a00b8,
+        73dfff,
+        fd0000,
+    }
+}
+rectangle {
+    object {
+        x=0
+        y=0
+        width=360
+        height=120
+    }
+    "basic attribute" {
+        clr=2
+        fill="outline"
+        width=1
+    }
+}
+text {
+    object {
+        x=0
+        y=5
+        width=360
+        height=25
+    }
+    "basic attribute" {
+        clr=3
+    }
+    textix="USB-2408-2AO $(P)"
+    align="horiz. centered"
+}
+text {
+    object {
+        x=25
+        y=35
+        width=50
+        height=20
+    }
+    "basic attribute" {
+        clr=2
+    }
+    textix="Model"
+    align="horiz. right"
+}
+"text update" {
+    object {
+        x=80
+        y=35
+        width=100
+        height=20
+    }
+    monitor {
+        chan="$(P)ModelName"
+        clr=3
+        bclr=1
+    }
+    format="string"
+    limits {
+    }
+}
+"text entry" {
+    object {
+        x=200
+        y=35
+        width=80
+        height=20
+    }
+    control {
+        chan="$(P)PollSleepMS"
+        clr=2
+        bclr=4
+    }
+    limits {
+    }
+}
+rectangle {
+    object {
+        x=5
+        y=90
+        width=15
+        height=15
+    }
+    "basic attribute" {
+        clr=5
+        fill="solid"
+    }
+}
+"message button" {
+    object {
+        x=45
+        y=95
+        width=60
+        height=20
+    }
+    control {
+        chan="$(P)Run"
+        clr=2
+        bclr=4
+    }
+    label="Start"
+    press_msg="1"
+}
+"message button" {
+    object {
+        x=115
+        y=95
+        width=60
+        height=20
+    }
+    control {
+        chan="$(P)Run"
+        clr=2
+        bclr=5
+    }
+    label="Stop"
+    press_msg="0"
+}

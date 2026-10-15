@@ -1,0 +1,31 @@
+file {
+    name="adl_embedded_layout.adl"
+    version=030117
+}
+display {
+    object {
+        x=0
+        y=0
+        width=400
+        height=200
+    }
+    clr=1
+    bclr=0
+}
+"color map" {
+    ncolors=2
+    colors {
+        bbbbbb,
+        000000,
+    }
+}
+composite {
+    object {
+        x=10
+        y=20
+        width=360
+        height=100
+    }
+    "composite name"=""
+    "composite file"="adl_text_layout.adl"
+}

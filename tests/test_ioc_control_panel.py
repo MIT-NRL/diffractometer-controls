@@ -11,10 +11,25 @@ from diffractometer_controls.launcher import (
     _github_root,
     _preload_p4p,
 )
-from diffractometer_controls.site.mitr.ioc_control_panel import IOC_SPECS, IOCConsoleWindow, camera_log_command, clean_console_text, format_bytes, format_count, format_percent, parse_process_status, process_command, screen_input_commands
+from diffractometer_controls.site.mitr.ioc_control_panel import IOC_SPECS, IOCConsoleWindow, journal_command, clean_console_text, format_bytes, format_count, format_percent, parse_process_status, process_command
+from diffractometer_controls.site.mitr.ioc_control_panel import _IOCRow, RESOURCE_METRICS
 
 
 class IOCSearchAddressTests(unittest.TestCase):
+    def test_linux_pva_preserves_existing_endpoints_without_list_syntax(self):
+        with patch.dict(os.environ, {
+            "EPICS_PVA_ADDR_LIST": "upstream.example.invalid:5076",
+            "MITR_EPICS_PVA_ADDR_LIST": "control.example.invalid:6201",
+        }, clear=True), patch(
+            "diffractometer_controls.launcher.platform.system", return_value="Linux"
+        ):
+            _configure_epics_search_addresses("localhost")
+            self.assertEqual(os.environ["EPICS_PVA_ADDR_LIST"],
+                             "upstream.example.invalid:5076 localhost control.example.invalid:6201")
+            _configure_epics_search_addresses("localhost")
+            self.assertEqual(os.environ["EPICS_PVA_ADDR_LIST"],
+                             "upstream.example.invalid:5076 localhost control.example.invalid:6201")
+
     def test_github_root_uses_override_when_configured(self):
         with patch.dict(os.environ, {"MITR_GITHUB_ROOT": "C:/custom/github"}, clear=True):
             self.assertEqual(_github_root(), Path("C:/custom/github"))
@@ -83,64 +98,73 @@ class IOCControlCommandTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
-    def test_enter_in_command_field_does_not_clear_console(self):
-        window = IOCConsoleWindow(IOC_SPECS[0])
-        try:
-            window._poll_timer.stop()
-            window.output.setPlainText("existing console output")
-            window.command_edit.clear()
-            window.show()
-            window.command_edit.setFocus()
+    def test_epics_health_is_independent_of_process_health_and_details_retain_metrics(self):
+        with patch("pydm.widgets.channel.PyDMChannel.connect"), patch("pydm.widgets.channel.PyDMChannel.disconnect"):
+            row = _IOCRow(IOC_SPECS[0], False)
+            try:
+                row.status_badge.set_status("Running", "healthy")
+                for ok, text, level in ((True, "EPICS online", "healthy"),
+                                        (False, "EPICS heartbeat stale", "attention"),
+                                        (False, "EPICS disconnected", "error")):
+                    row._set_epics_status(ok, text)
+                    self.assertEqual(row.epics_label.level, level)
+                    self.assertEqual(row.status_badge.level, "healthy")
+                displayed = row.resources.values.keys() | row.diagnostics.values.keys()
+                self.assertTrue({metric[1] for metric in RESOURCE_METRICS} <= displayed)
+                self.assertTrue(row.diagnostics.isHidden())
+                row.details_button.setChecked(True)
+                self.assertFalse(row.diagnostics.isHidden())
+                self.assertFalse(any(button.isEnabled() for button in row.buttons.values()))
+            finally:
+                row.close()
+                row.deleteLater()
+                self.app.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
 
-            with patch.object(window, "_start_next_main_command_step") as start:
-                QtTest.QTest.keyClick(window.command_edit, QtCore.Qt.Key_Return)
-                self.app.processEvents()
+    def test_read_only_mode_allows_monitoring_but_blocks_process_and_console_commands(self):
+        with patch("pydm.widgets.channel.PyDMChannel.connect"), patch("pydm.widgets.channel.PyDMChannel.disconnect"), \
+             patch("pydm.data_plugins.is_read_only", return_value=True):
+            row = _IOCRow(IOC_SPECS[0], True)
+            window = IOCConsoleWindow(IOC_SPECS[0])
+            try:
+                self.assertFalse(any(button.isEnabled() for button in row.buttons.values()))
+                self.assertTrue(window.output.isReadOnly())
+                with patch.object(QtCore, "QProcess") as process:
+                    row.control("start")
+                    process.assert_not_called()
+            finally:
+                window.close()
+                row.close()
+                row.deleteLater()
+                self.app.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
 
-            start.assert_called_once()
-            self.assertEqual(window.output.toPlainText(), "existing console output")
-            for button in (
-                window.clear_button,
-                window.copy_button,
-                window.bottom_button,
-                window.find_button,
-                window.send_button,
-            ):
-                self.assertFalse(button.autoDefault())
-                self.assertFalse(button.isDefault())
-        finally:
-            window.close()
+    def test_all_consoles_are_read_only_journals(self):
+        for spec in IOC_SPECS:
+            with self.subTest(ioc=spec.key):
+                program, arguments = journal_command(spec.key)
+                self.assertEqual(program, "journalctl")
+                self.assertIn("--unit=" + spec.service, arguments)
+                self.assertIn("--follow", arguments)
+                window = IOCConsoleWindow(spec)
+                try:
+                    self.assertTrue(window.output.isReadOnly())
+                    self.assertFalse(hasattr(window, "command_edit"))
+                    window._append_output("test_under_score\n")
+                    self.assertEqual(window.output.toPlainText(), "test_under_score\n")
+                    for button in (window.clear_button, window.copy_button,
+                                   window.bottom_button, window.find_button):
+                        self.assertFalse(button.autoDefault())
+                finally:
+                    window.close()
 
-    def test_main_console_sends_input_to_screen_without_shell(self):
-        self.assertEqual(
-            screen_input_commands(" dbl "),
-            (
-                (
-                    "screen",
-                    ["-S", "4dh4ioc", "-p", "0", "-X", "stuff", "dbl"],
-                ),
-                (
-                    "screen",
-                    ["-S", "4dh4ioc", "-p", "0", "-X", "stuff", "\r"],
-                ),
-            ),
-        )
-        self.assertEqual(screen_input_commands("a\nb")[0][-1][-1], "a b")
-        self.assertEqual(
-            screen_input_commands(""),
-            (
-                (
-                    "screen",
-                    ["-S", "4dh4ioc", "-p", "0", "-X", "stuff", "\r"],
-                ),
-            ),
-        )
-
-    def test_camera_console_follows_journal_read_only(self):
-        program, arguments = camera_log_command()
-        self.assertEqual(program, "journalctl")
-        self.assertIn("--unit=reolinkioc.service", arguments)
-        self.assertIn("--follow", arguments)
-        self.assertIn("--lines=2000", arguments)
+    def test_every_ioc_control_uses_its_own_service(self):
+        for spec in IOC_SPECS:
+            for action in ("start", "stop", "restart"):
+                self.assertEqual(process_command(spec.key, action),
+                                 ("systemctl", ["--user", action, spec.service]))
+        with self.assertRaises(ValueError):
+            process_command("unknown", "start")
+        with self.assertRaises(ValueError):
+            process_command("main", "enable")
 
     def test_console_log_control_sequences_are_removed(self):
         self.assertEqual(
@@ -157,8 +181,9 @@ class IOCControlCommandTests(unittest.TestCase):
         self.assertEqual(format_count(1234.0), "1,234")
 
     def test_each_ioc_has_a_distinct_stats_prefix(self):
-        self.assertEqual(IOC_SPECS[0].stats_prefix, "4dh4")
-        self.assertEqual(IOC_SPECS[1].stats_prefix, "4dh4:ReolinkIOC")
+        self.assertEqual(len(IOC_SPECS), 5)
+        self.assertEqual(len({s.stats_prefix for s in IOC_SPECS}), 5)
+        self.assertTrue(all(s.heartbeat == s.stats_prefix + ":HEARTBEAT" for s in IOC_SPECS))
 
     def test_panel_supports_pydm_dynamic_module_loader(self):
         panel_path = (
@@ -175,12 +200,10 @@ class IOCControlCommandTests(unittest.TestCase):
             ("systemctl", ["--user", "restart", "reolinkioc.service"]),
         )
 
-    def test_main_status_parses_screen_launcher_output(self):
-        running, detail = parse_process_status(
-            "main", "4dh4 is running locally in a screen session (pid=123)\n", 0
-        )
-        self.assertTrue(running)
-        self.assertIn("pid=123", detail)
+    def test_missing_service_is_reported(self):
+        running, detail = parse_process_status("main", "LoadState=not-found\n", 1)
+        self.assertFalse(running)
+        self.assertEqual(detail, "service not installed")
 
     def test_camera_status_includes_pid(self):
         running, detail = parse_process_status(
