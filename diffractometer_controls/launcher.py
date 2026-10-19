@@ -93,7 +93,13 @@ def _load_simple_env_file(path):
             continue
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
             value = value[1:-1]
-        os.environ.setdefault(key, value)
+        if key in {"MITR_EPICS_CA_ADDR_LIST", "MITR_EPICS_PVA_ADDR_LIST"}:
+            # A GUI or terminal launched before an IOC split can pass an older
+            # private endpoint list to its children. Keep those endpoints, but
+            # always include additions from the current host configuration.
+            os.environ[key] = _append_unique_addresses(os.environ.get(key), value.split())
+        else:
+            os.environ.setdefault(key, value)
 
 
 def _preload_p4p():
@@ -157,34 +163,9 @@ def main():
     # Set EPICS as the default protocol
     config.DEFAULT_PROTOCOL = "ca"
 
-    # Define EPICS Support dir where all display files are stored
-    if platform.system() == "Windows":
-        separator = ';'
-    else:
-        separator = ':'
-    path_list = [str(path) for path in mitr_profile.display_directories()]
-    EPICS_SUPPORT = mitr_profile.epics_support()
-    DISPLAY_PATH = os.getenv("PYDM_DISPLAYS_PATH",None)
-    GITHUB = _github_root()
-    if DISPLAY_PATH is None:
-        path_list_adl = [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*op/adl*')] + [dirs.as_posix() for dirs in EPICS_SUPPORT.glob('**/*opi/medm*')]
-        path_list_custom = [
-            path.as_posix()
-            for path in GITHUB.glob('**/PyDM*')
-            if path.is_dir()
-        ]
-        logger.debug(
-            "Configured %d EPICS and %d custom display search paths.",
-            len(path_list_adl),
-            len(path_list_custom),
-        )
-        if len(path_list_adl) != 0:
-            path_list.extend(path_list_adl)
-        if len(path_list_custom) != 0:
-            path_list.extend(path_list_custom)
-        DISPLAY_PATH = separator.join(path_list)
-    # Checkout resources are always available; custom search paths retain precedence.
-    os.environ["PYDM_DISPLAYS_PATH"] = separator.join([DISPLAY_PATH] + path_list)
+    # Retain user overrides and always discover the installed EPICS ADL sources,
+    # even when PYDM_DISPLAYS_PATH was already configured by the login shell.
+    mitr_profile.configure_display_paths(_github_root())
 
     from pydm.utilities import setup_renderer
 

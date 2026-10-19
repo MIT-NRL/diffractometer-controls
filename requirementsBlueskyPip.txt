@@ -1,2 +1,3 @@
 # Pip-only beamline packages. Runtime dependencies are managed by Conda.
+# Use the 0.0.8+ source release for native Qt adaptation and direct ADL loading.
 git+https://github.com/sfayfar/adl2pydm.git

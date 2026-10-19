@@ -1,0 +1,14 @@
+--- a/measCompApp/src/drvMultiFunction.cpp
++++ b/measCompApp/src/drvMultiFunction.cpp
+@@ -2615,6 +2615,11 @@
+         unsigned long long data;
+         status = ulDIn(daqDeviceHandle_, (DigitalPortType)digitalIOPort_[i], &data);
+         newValue = (epicsUInt32) data;
++        // uldaq advertises the USB-2408 expansion ports even when the
++        // expansion is absent. Do not let those unavailable ports prevent
++        // polling the counters, analog inputs, and thermocouples.
++        if (status == ERR_BAD_PORT_TYPE && boardFamily_ == USB_2408_2AO && i > 0)
++          continue;
+       #endif
+       if (status) {
+         if (!prevStatus) {

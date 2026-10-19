@@ -70,8 +70,8 @@ def main():
     os.environ.setdefault("MITR_FILE_DIR_QUERY_MODE", "local")
     output = ROOT / args.output
     output.mkdir(parents=True, exist_ok=True)
-    from diffractometer_controls.site.mitr.profile import display_directories
-    os.environ["PYDM_DISPLAYS_PATH"] = os.pathsep.join(map(str, display_directories()))
+    from diffractometer_controls.site.mitr.profile import configure_display_paths
+    configure_display_paths()
 
     from qtpy import QtCore, QtGui, QtWidgets
     from pydm.application import PyDMApplication

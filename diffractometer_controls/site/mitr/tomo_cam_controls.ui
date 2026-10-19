@@ -2062,7 +2062,7 @@
           </property>
           <property name="filenames" stdset="0">
            <stringlist>
-            <string>commonPlugins.ui</string>
+            <string>commonPlugins.adl</string>
            </stringlist>
           </property>
           <property name="titles" stdset="0">
@@ -2101,13 +2101,13 @@
           </property>
           <property name="filenames" stdset="0">
            <stringlist>
-            <string>NDFileNetCDF.ui</string>
-            <string>NDFileTIFF.ui</string>
-            <string>NDFileJPEG.ui</string>
-            <string>NDFileNexus.ui</string>
-            <string>NDFileMagick.ui</string>
-            <string>NDFileHDF5.ui</string>
-            <string>NDFileNull.ui</string>
+            <string>NDFileNetCDF.adl</string>
+            <string>NDFileTIFF.adl</string>
+            <string>NDFileJPEG.adl</string>
+            <string>NDFileNexus.adl</string>
+            <string>NDFileMagick.adl</string>
+            <string>NDFileHDF5.adl</string>
+            <string>NDFileNull.adl</string>
            </stringlist>
           </property>
           <property name="titles" stdset="0">
@@ -2158,11 +2158,11 @@
           </property>
           <property name="filenames" stdset="0">
            <stringlist>
-            <string>NDROI.ui</string>
-            <string>NDROI.ui</string>
-            <string>NDROI.ui</string>
-            <string>NDROI.ui</string>
-            <string>NDROI4.ui</string>
+            <string>NDROI.adl</string>
+            <string>NDROI.adl</string>
+            <string>NDROI.adl</string>
+            <string>NDROI.adl</string>
+            <string>NDROI4.adl</string>
            </stringlist>
           </property>
           <property name="titles" stdset="0">
@@ -2213,12 +2213,12 @@
           </property>
           <property name="filenames" stdset="0">
            <stringlist>
-            <string>../../../vendor/displays/NDStats.ui</string>
-            <string>../../../vendor/displays/NDStats.ui</string>
-            <string>../../../vendor/displays/NDStats.ui</string>
-            <string>../../../vendor/displays/NDStats.ui</string>
-            <string>../../../vendor/displays/NDStats.ui</string>
-            <string>../../../vendor/displays/NDStats5.ui</string>
+            <string>NDStats.adl</string>
+            <string>NDStats.adl</string>
+            <string>NDStats.adl</string>
+            <string>NDStats.adl</string>
+            <string>NDStats.adl</string>
+            <string>NDStats5.adl</string>
            </stringlist>
           </property>
           <property name="titles" stdset="0">
@@ -2270,22 +2270,22 @@
           </property>
           <property name="filenames" stdset="0">
            <stringlist>
-            <string>NDStdArrays.ui</string>
-            <string>NDPva.ui</string>
-            <string>../../../vendor/displays/NDProcess.ui</string>
-            <string>NDTransform.ui</string>
-            <string>NDColorConvert.ui</string>
-            <string>NDColorConvert.ui</string>
-            <string>NDOverlay.ui</string>
-            <string>NDOverlay8.ui</string>
-            <string>NDCircularBuff.ui</string>
-            <string>NDROIStat.ui</string>
-            <string>NDPluginAttribute.ui</string>
-            <string>NDFFT.ui</string>
-            <string>NDScatter.ui</string>
-            <string>NDGather8.ui</string>
-            <string>NDCodec.ui</string>
-            <string>NDCodec.ui</string>
+            <string>NDStdArrays.adl</string>
+            <string>NDPva.adl</string>
+            <string>NDProcess.adl</string>
+            <string>NDTransform.adl</string>
+            <string>NDColorConvert.adl</string>
+            <string>NDColorConvert.adl</string>
+            <string>NDOverlay.adl</string>
+            <string>NDOverlay8.adl</string>
+            <string>NDCircularBuff.adl</string>
+            <string>NDROIStat.adl</string>
+            <string>NDPluginAttribute.adl</string>
+            <string>NDFFT.adl</string>
+            <string>NDScatter.adl</string>
+            <string>NDGather8.adl</string>
+            <string>NDCodec.adl</string>
+            <string>NDCodec.adl</string>
            </stringlist>
           </property>
           <property name="titles" stdset="0">
@@ -2357,14 +2357,14 @@
           </property>
           <property name="filenames" stdset="0">
            <stringlist>
-            <string>NDStdArrays.ui</string>
-            <string>scan_more.ui</string>
-            <string>yySseq.ui</string>
-            <string>../../../vendor/displays/ioc_stats_soft.ui</string>
-            <string>ADCompVision.ui</string>
-            <string>NDPluginEdge.ui</string>
-            <string>NDBadPixel.ui</string>
-            <string>configMenu.ui</string>
+            <string>NDStdArrays.adl</string>
+            <string>scan_more.adl</string>
+            <string>yySseq.adl</string>
+            <string>ioc_stats_soft.adl</string>
+            <string>ADCompVision.adl</string>
+            <string>NDPluginEdge.adl</string>
+            <string>NDBadPixel.adl</string>
+            <string>configMenu.adl</string>
            </stringlist>
           </property>
           <property name="titles" stdset="0">

@@ -1,4 +1,5 @@
 import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -9,6 +10,7 @@ from qtpy import QtCore, QtTest, QtWidgets
 from diffractometer_controls.launcher import (
     _configure_epics_search_addresses,
     _github_root,
+    _load_simple_env_file,
     _preload_p4p,
 )
 from diffractometer_controls.site.mitr.ioc_control_panel import IOC_SPECS, IOCConsoleWindow, journal_command, clean_console_text, format_bytes, format_count, format_percent, parse_process_status, process_command
@@ -16,6 +18,42 @@ from diffractometer_controls.site.mitr.ioc_control_panel import _IOCRow, RESOURC
 
 
 class IOCSearchAddressTests(unittest.TestCase):
+    def test_updated_network_file_adds_split_iocs_to_inherited_search_lists(self):
+        inherited = {
+            "MITR_EPICS_CA_ADDR_LIST": "control.example.invalid:6101 control.example.invalid:6102",
+            "MITR_EPICS_PVA_ADDR_LIST": "control.example.invalid:6201 control.example.invalid:6202",
+            "EPICS_CA_ADDR_LIST": "control.example.invalid:6101 control.example.invalid:6102",
+            "EPICS_PVA_ADDR_LIST": "control.example.invalid:6201 control.example.invalid:6202",
+            "MITR_CAMERA_BACKEND": "qhy",
+        }
+        ca = [f"control.example.invalid:{6100 + i}" for i in range(1, 6)]
+        pva = [f"control.example.invalid:{6200 + i}" for i in range(1, 6)]
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, inherited, clear=True):
+            path = Path(directory) / "network.env"
+            path.write_text(
+                f'MITR_EPICS_CA_ADDR_LIST="{" ".join(ca)}"\n'
+                f"MITR_EPICS_PVA_ADDR_LIST='{' '.join(pva)}'\n"
+                "MITR_CAMERA_BACKEND=zwo\n"
+            )
+            for _ in range(2):
+                _load_simple_env_file(path)
+                _configure_epics_search_addresses("localhost")
+                for key, expected in (("EPICS_CA_ADDR_LIST", ca), ("EPICS_PVA_ADDR_LIST", pva)):
+                    entries = os.environ[key].split()
+                    self.assertTrue(set(expected).issubset(entries))
+                    self.assertEqual(len(entries), len(set(entries)))
+            self.assertEqual(os.environ["MITR_CAMERA_BACKEND"], "qhy")
+
+    def test_network_file_keeps_additional_user_endpoints(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            "MITR_EPICS_CA_ADDR_LIST": "remote.example.invalid:6109",
+        }, clear=True):
+            path = Path(directory) / "network.env"
+            path.write_text("MITR_EPICS_CA_ADDR_LIST=local.example.invalid:6101\n")
+            _load_simple_env_file(path)
+            self.assertEqual(os.environ["MITR_EPICS_CA_ADDR_LIST"],
+                             "remote.example.invalid:6109 local.example.invalid:6101")
+
     def test_linux_pva_preserves_existing_endpoints_without_list_syntax(self):
         with patch.dict(os.environ, {
             "EPICS_PVA_ADDR_LIST": "upstream.example.invalid:5076",

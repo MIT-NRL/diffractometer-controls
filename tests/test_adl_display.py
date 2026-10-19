@@ -39,6 +39,7 @@ class AdlDisplayTests(unittest.TestCase):
         cls.app.setStyle("Fusion")
         cls.light = QtGui.QPalette(cls.app.palette())
         cls.adapter = AdlDisplayAdapter(cls.app)
+        cls.app._adl_display_adapter = cls.adapter
         # Keep these guards alive through widget destruction: no IOC needed.
         cls.guards = [patch.object(PyDMChannel, "connect"), patch.object(PyDMChannel, "disconnect")]
         for guard in cls.guards:
@@ -185,13 +186,17 @@ class AdlDisplayTests(unittest.TestCase):
         self.assertEqual(readback.font().pointSizeF(), initial_size)
 
     def test_motor_screen_keeps_larger_text_and_uses_spare_label_space(self):
-        path = FIXTURE.parents[2] / "vendor" / "displays" / "motorx_all.ui"
-        screen = self.load(load_ui_file, path)
+        from diffractometer_controls.site.mitr.profile import external_display_directories
+        path = next((root / "motorx_all.adl" for root in external_display_directories()
+                     if (root / "motorx_all.adl").is_file()), None)
+        if path is None:
+            self.skipTest("EPICS motor ADL sources are not installed")
+        screen = self.load(load_adl_file, path)
         labels = {label.text(): label for label in screen.findChildren(QtWidgets.QLabel)}
         for text in ("Drive", "Readback", "Normal", "Backlash", "Jog", "Maximum Spd"):
             self.assert_text_fits(labels[text])
         for text in ("Drive", "Readback", "Normal", "Backlash"):
-            # Keep the saved screen's visible 11-pixel lettering at normal
+            # Keep the motor screen's visible 11-pixel lettering at normal
             # DPI, and at least that much visible height at higher display DPI.
             self.assertGreaterEqual(labels[text].fontMetrics().tightBoundingRect(text).height(), 11)
         maximum = labels["Maximum Spd"]

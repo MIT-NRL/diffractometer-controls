@@ -322,9 +322,9 @@ background-color: rgb(37, 140, 2);
        </property>
        <property name="filenames" stdset="0">
         <stringlist>
-         <string>../../vendor/displays/motorx_more.ui</string>
-         <string>../../vendor/displays/motorx_all.ui</string>
-         <string>../../vendor/displays/motorx_setup.ui</string>
+         <string>motorx_more.adl</string>
+         <string>motorx_all.adl</string>
+         <string>motorx_setup.adl</string>
         </stringlist>
        </property>
        <property name="titles" stdset="0">

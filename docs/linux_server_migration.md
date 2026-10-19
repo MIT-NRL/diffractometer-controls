@@ -42,7 +42,7 @@ CONTROL_CHECKOUT=<absolute checkout root>
 | `diffractometer_controls/areaDetectorConfigXML/` | `server/config/` |
 | `diffractometer_controls/4dh4gui.pl` | `scripts/4dh4gui.pl` |
 | root experiment displays | `diffractometer_controls/screens/{diffraction,tomography}/` |
-| `extra_ui/autoconvert/` | `vendor/displays/` |
+| saved EPICS display conversions | installed support-module `.adl` sources |
 
 Set QueueServer's `WorkingDirectory` to the checkout root and change its existing
 `start-re-manager --config` argument to the new absolute config path. Keep its
@@ -71,6 +71,40 @@ Detector XML defaults to source-relative `server/config/`. If the IOC is remote
 or sees another filesystem, set `MITR_DETECTOR_XML_DIR` in the worker's private
 configuration to the directory visible to that IOC and place matching XML there.
 Confirm attributes/layout readbacks and successful XML loading.
+
+## Original EPICS display sources
+
+Use adl2pydm 0.0.8 with PyDM's direct ADL loader. For a local converter checkout,
+install it into the existing GUI environment without changing other dependencies:
+
+```console
+python -m pip install --no-deps /path/to/adl2pydm
+```
+
+The launcher's display discovery uses the deployed IOC's `envPaths` to prefer
+its active support-module versions. It also scans the configured EPICS support
+and repository roots for `op/adl`, `opi/medm`, and custom `op/PyDM` directories.
+Discovery always runs, including when `PYDM_DISPLAYS_PATH` is already set. User
+paths take precedence; inherited auto-discovered entries are rebuilt in module
+order. Keep machine-specific roots in the existing private environment.
+
+Project links name original ADLs for motor, areaDetector, IOC-statistics, scan,
+and DAQ screens. ZWO, QHY and PSD currently supply custom UI screens in their
+own repositories, which remain on the search path. PyDM can resolve a nested
+`.ui` reference to the corresponding `.adl` when the UI file is absent, including
+links emitted during runtime conversion. The converter's runtime adapter is
+reused to avoid installing two theme adapters for a directly opened ADL.
+
+The old saved conversions remain archived for later removal. They are excluded
+from the runtime search path, active display manifest and structural checks.
+Verify names and macros through `external_displays.json` and check that embedded
+ADLs and related-display buttons resolve outside the archive before deployment.
+
+Control-host verification with adl2pydm 0.0.8 loaded all 69 referenced ADLs and
+four custom detector UIs, including their embedded panels. The installed
+`NDFFT.adl` contains unused malformed menu entries (an empty filename and `l`);
+these produce `.ui` and `l.ui` placeholder links during conversion. Its actual
+plot links resolve. This is a source-screen issue independent of the archive.
 
 ## Preserve host settings and GUI launchers
 
@@ -161,7 +195,8 @@ motors/scalers/camera panels, startup subscriptions, scalar/PSD/imaging document
 representative writer files and XML readbacks. Verify repeated navigation and
 shutdown without duplicate loops/timers or orphaned focus/profile workers.
 Compare both themes and gauges with reference images. Test external displays
-against installed support paths (`vendor/displays/external_references.json`).
+against installed support paths
+(`diffractometer_controls/site/mitr/external_displays.json`).
 
 ## Independent EPICS IOCs
 
@@ -177,6 +212,9 @@ the GUI only monitors these services; it does not start them.
 | ZWO or QHY and their AreaDetector plugins | `4dh4-imaging.service` | `4dh4:IOC:Imaging` |
 | USBCTR and USB2408 | `4dh4-daq.service` | `4dh4:IOC:DAQ` |
 | Reolink cameras | `reolinkioc.service` | `4dh4:IOC:Reolink` |
+
+The installed measComp support includes a [local USB-2408 polling correction](../server/iocs/patches/README.md).
+Retain or reassess it when rebuilding or upgrading that support module.
 
 Each prefix exposes `:HEARTBEAT`, `:UPTIME`, CPU, memory and connection statistics.
 Aliases preserve the original `4dh4:*` and `4dh4:ReolinkIOC:*` statistics names.
@@ -206,6 +244,13 @@ lists include every group. A custom port changes discovery; it is not an access
 control. No access-security policy or firewall changes were introduced. Reolink
 retains CA statistics/control and PVA image transport; all four new groups also
 serve their record databases over PVA.
+
+The GUI merges private CA/PVA endpoints from the current network file into any
+inherited endpoint lists. This keeps a terminal or parent GUI launched before an
+IOC split from hiding the newer IOCs. Restart existing GUI processes after
+updating discovery configuration; their EPICS contexts retain the startup lists.
+The IOC panel's process status and EPICS heartbeat are independent: a running
+service can still be unreachable through an outdated client discovery list.
 
 `MITR_CAMERA_BACKEND=zwo` (default) or `qhy` in
 `~/.config/diffractometer-controls/control.env` selects both the imaging IOC startup

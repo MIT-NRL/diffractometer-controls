@@ -1,0 +1,233 @@
+{
+  "description": "Installed EPICS ADL sources and custom detector UI screens resolved through PYDM_DISPLAYS_PATH.",
+  "references": {
+    "ADBase.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "ADCompVision.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "ADQHY.ui": [
+      "diffractometer_controls/site/mitr/4dh4All.ui",
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "ADZWO.ui": [
+      "diffractometer_controls/site/mitr/4dh4All.ui",
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDBadPixel.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDCircularBuff.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDCodec.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDColorConvert.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDFFT.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDFileHDF5.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDFileJPEG.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDFileMagick.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDFileNetCDF.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDFileNexus.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDFileNull.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDFileTIFF.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDGather8.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDOverlay.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDOverlay8.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDPluginAttribute.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDPluginEdge.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDProcess.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDPva.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDROI.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDROI4.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDROIStat.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDScatter.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDStats.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDStats5.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDStdArrays.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "NDTransform.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "ProgressBar.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "URLDriver.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "URLDriverSetup.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "USB2408_module.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "USBCTR.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "arrayTest.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "asynOctet.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "commonPlugins.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "configMenu.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui",
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "editSseq.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "he3_detector_config.ui": [
+      "diffractometer_controls/screens/diffraction/diffractometer_gui.ui",
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "he3_detector_viewer.ui": [
+      "diffractometer_controls/screens/diffraction/diffractometer_gui.ui",
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "interp.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "interpNew.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "ioc_stats_soft.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "motorx_all.adl": [
+      "control_ui/panels/motor_linear_small.ui",
+      "control_ui/panels/motors_square.ui"
+    ],
+    "motorx_more.adl": [
+      "control_ui/panels/motor_linear_small.ui",
+      "control_ui/panels/motors_square.ui"
+    ],
+    "motorx_setup.adl": [
+      "control_ui/panels/motor_linear_small.ui",
+      "control_ui/panels/motors_square.ui"
+    ],
+    "pvHistory.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "scan.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "scanAux.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "scanParms2Pos.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "scan_more.adl": [
+      "control_ui/panels/tomo_scan_screen.ui",
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ],
+    "scan_saveData.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "softMotors10.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "userArrayCalcs10.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "userArrayCalcs10more.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "userAve10.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "userAve10more.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "userCalcOuts10.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "userCalcOuts10more.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "userCalcs10.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "userCalcs10more.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "userCalcsGlobalEnable.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "userStringCalcs10.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "userStringCalcs10more.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "userStringSeqs10.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "userStringSeqs10more.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "userTransforms10.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "userTransforms10more.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "xxBusyRecord.adl": [
+      "diffractometer_controls/site/mitr/4dh4All.ui"
+    ],
+    "yySseq.adl": [
+      "diffractometer_controls/site/mitr/tomo_cam_controls.ui"
+    ]
+  }
+}

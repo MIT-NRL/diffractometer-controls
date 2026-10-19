@@ -1612,7 +1612,7 @@ background-color: rgb(25, 102, 255);</string>
          </property>
          <property name="filenames" stdset="0">
           <stringlist>
-           <string>../../../vendor/displays/ADBase.ui</string>
+           <string>ADBase.adl</string>
            <string>../../../control_ui/panels/cam.ui</string>
           </stringlist>
          </property>
@@ -1773,8 +1773,8 @@ background-color: rgb(25, 102, 255);</string>
          </property>
          <property name="filenames" stdset="0">
           <stringlist>
-           <string>../../../vendor/displays/URLDriver.ui</string>
-           <string>URLDriverSetup.ui</string>
+           <string>URLDriver.adl</string>
+           <string>URLDriverSetup.adl</string>
            <string>../../../control_ui/panels/cam_url.ui</string>
           </stringlist>
          </property>
@@ -2056,14 +2056,14 @@ background-color: rgb(25, 102, 255);</string>
          </property>
          <property name="filenames" stdset="0">
           <stringlist>
-           <string>asynOctet.ui</string>
-           <string>asynOctet.ui</string>
-           <string>asynOctet.ui</string>
-           <string>asynOctet.ui</string>
-           <string>asynOctet.ui</string>
-           <string>asynOctet.ui</string>
-           <string>asynOctet.ui</string>
-           <string>asynOctet.ui</string>
+           <string>asynOctet.adl</string>
+           <string>asynOctet.adl</string>
+           <string>asynOctet.adl</string>
+           <string>asynOctet.adl</string>
+           <string>asynOctet.adl</string>
+           <string>asynOctet.adl</string>
+           <string>asynOctet.adl</string>
+           <string>asynOctet.adl</string>
           </stringlist>
          </property>
          <property name="titles" stdset="0">
@@ -3271,24 +3271,24 @@ background-color: rgb(25, 102, 255);</string>
          </property>
          <property name="filenames" stdset="0">
           <stringlist>
-           <string>userCalcs10.ui</string>
-           <string>userStringCalcs10.ui</string>
-           <string>userTransforms10.ui</string>
-           <string>userStringSeqs10.ui</string>
-           <string>userArrayCalcs10.ui</string>
-           <string>userAve10.ui</string>
-           <string>userCalcOuts10.ui</string>
-           <string>userStringCalcs10more.ui</string>
-           <string>userTransforms10more.ui</string>
-           <string>userStringSeqs10more.ui</string>
-           <string>userArrayCalcs10more.ui</string>
-           <string>userAve10more.ui</string>
-           <string>userCalcOuts10more.ui</string>
-           <string>userCalcs10more.ui</string>
-           <string>xxBusyRecord.ui</string>
-           <string>xxBusyRecord.ui</string>
-           <string>userCalcsGlobalEnable.ui</string>
-           <string>editSseq.ui</string>
+           <string>userCalcs10.adl</string>
+           <string>userStringCalcs10.adl</string>
+           <string>userTransforms10.adl</string>
+           <string>userStringSeqs10.adl</string>
+           <string>userArrayCalcs10.adl</string>
+           <string>userAve10.adl</string>
+           <string>userCalcOuts10.adl</string>
+           <string>userStringCalcs10more.adl</string>
+           <string>userTransforms10more.adl</string>
+           <string>userStringSeqs10more.adl</string>
+           <string>userArrayCalcs10more.adl</string>
+           <string>userAve10more.adl</string>
+           <string>userCalcOuts10more.adl</string>
+           <string>userCalcs10more.adl</string>
+           <string>xxBusyRecord.adl</string>
+           <string>xxBusyRecord.adl</string>
+           <string>userCalcsGlobalEnable.adl</string>
+           <string>editSseq.adl</string>
           </stringlist>
          </property>
          <property name="titles" stdset="0">
@@ -3396,16 +3396,16 @@ background-color: rgb(25, 102, 255);</string>
          </property>
          <property name="filenames" stdset="0">
           <stringlist>
-           <string>scan.ui</string>
-           <string>scan.ui</string>
-           <string>scan.ui</string>
-           <string>scan.ui</string>
-           <string>scan.ui</string>
-           <string>scanParms2Pos.ui</string>
-           <string>scan_saveData.ui</string>
-           <string>scanAux.ui</string>
-           <string>ProgressBar.ui</string>
-           <string>configMenu.ui</string>
+           <string>scan.adl</string>
+           <string>scan.adl</string>
+           <string>scan.adl</string>
+           <string>scan.adl</string>
+           <string>scan.adl</string>
+           <string>scanParms2Pos.adl</string>
+           <string>scan_saveData.adl</string>
+           <string>scanAux.adl</string>
+           <string>ProgressBar.adl</string>
+           <string>configMenu.adl</string>
           </stringlist>
          </property>
          <property name="titles" stdset="0">
@@ -3469,10 +3469,10 @@ background-color: rgb(25, 102, 255);</string>
          </property>
          <property name="filenames" stdset="0">
           <stringlist>
-           <string>interp.ui</string>
-           <string>arrayTest.ui</string>
-           <string>pvHistory.ui</string>
-           <string>interpNew.ui</string>
+           <string>interp.adl</string>
+           <string>arrayTest.adl</string>
+           <string>pvHistory.adl</string>
+           <string>interpNew.adl</string>
           </stringlist>
          </property>
          <property name="titles" stdset="0">

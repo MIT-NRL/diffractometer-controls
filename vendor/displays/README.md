@@ -1,4 +1,11 @@
-# Generated display resources
+# Archived generated display resources
+
+These files are retained for later removal. Runtime lookup uses original ADLs
+from installed EPICS support modules and custom screens from their own
+repositories. This directory is excluded from the GUI display search path.
+The active external-display manifest is
+`diffractometer_controls/site/mitr/external_displays.json`; the JSON here is a
+historical record.
 
 These existing areaDetector, motor and IOC-statistics displays moved from
 `extra_ui/autoconvert/`; their layout content and macros are preserved. Original
@@ -12,9 +19,8 @@ Some related displays have always come from installed EPICS
 synApps/areaDetector/motor support or custom detector repositories.
 `external_references.json` records 83 unbundled filenames and their original
 baseline references. Supply them through the host's display search paths.
-The launcher retains existing `PYDM_DISPLAYS_PATH` before adding project and
-configured EPICS support paths.
+The launcher retains user `PYDM_DISPLAYS_PATH` overrides, excludes this archive,
+and adds project and configured EPICS support paths.
 
-Structural tests resolve bundled paths/custom imports and allow only recorded
-external filenames. Linux acceptance must verify those files and their macros
-against the installed support tree.
+Structural tests check active project panels against the current manifest;
+they no longer depend on this archive.

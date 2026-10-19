@@ -1,6 +1,12 @@
 from control_ui.core.themes import _palette_is_dark, _desktop_prefers_dark, _build_dark_palette, _sync_pyqtgraph_palette
 from control_ui.core.compatibility import BlueskyCompatibility
-from control_ui.core.adl_display import AdlDisplayAdapter
+try:
+    from adl2pydm.qt import install as install_adl_display_adapter
+except ImportError:  # Compatibility for environments not yet upgraded to 0.0.8.
+    from control_ui.core.adl_display import AdlDisplayAdapter
+
+    def install_adl_display_adapter(application):
+        return getattr(application, "_adl_display_adapter", None) or AdlDisplayAdapter(application)
 from diffractometer_controls.site.mitr import profile
 import logging
 import os
@@ -79,7 +85,7 @@ class MITRApplication(BlueskyCompatibility, PyDMApplication):
         self._theme_mode = "system"
 
         super().__init__(ui_file=ui_file, use_main_window=use_main_window, *args, **kwargs)
-        self._adl_display_adapter = getattr(self, "_adl_display_adapter", None) or AdlDisplayAdapter(self)
+        self._adl_display_adapter = install_adl_display_adapter(self)
         # Start exactly one Qt receive loop after the initial display has had a
         # chance to register its callbacks.  Later displays only subscribe.
         self.document_dispatcher.start()

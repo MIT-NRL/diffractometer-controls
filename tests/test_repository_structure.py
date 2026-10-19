@@ -8,7 +8,7 @@ import unittest
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGES = ("control_ui", "diffractometer_controls", "server", "vendor")
+PACKAGES = ("control_ui", "diffractometer_controls", "server")
 
 
 class RepositoryStructureTests(unittest.TestCase):
@@ -33,7 +33,7 @@ class RepositoryStructureTests(unittest.TestCase):
         files = [path for package in PACKAGES for path in (ROOT / package).rglob("*.ui")]
         bundled_names = {path.name for package in PACKAGES
                          for path in (ROOT / package).rglob("*") if path.is_file()}
-        external = json.loads((ROOT / "vendor/displays/external_references.json").read_text())
+        external = json.loads((ROOT / "diffractometer_controls/site/mitr/external_displays.json").read_text())
         headers = set()
         for path in files:
             with self.subTest(path=path.relative_to(ROOT)):

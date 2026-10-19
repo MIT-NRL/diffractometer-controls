@@ -48,11 +48,22 @@ files. Existing device PV names remain the same. See
 [IOC deployment](docs/linux_server_migration.md#independent-epics-iocs) for service
 names, camera selection and host configuration.
 
+The [Newport encoder setup guide](docs/newport_encoder_setup.md) records the
+tested tomography rotation settings, commissioning and rollback procedures, and
+the distinction between controller feedback and EPICS readback selection.
+
+EPICS support screens load directly from their original `.adl` sources through
+PyDM and adl2pydm (0.0.8 recommended). The launcher discovers the installed IOC's
+module directories first, followed by other EPICS support paths and custom
+camera/PSD `.ui` screens. Existing user display paths remain available. Display
+lookup does not require saved conversions in the checkout. Active external
+filenames are listed in
+`diffractometer_controls/site/mitr/external_displays.json`.
+
 ```text
 control_ui/                 reusable services, widgets, layout and EPICS panels
 diffractometer_controls/    application, experiment screens, analysis and MITR profile
 server/                    ordered startup, device/plan definitions, writers and config
-vendor/displays/           generated EPICS display resources
 scripts/                   Linux session launcher and local verification tools
 examples/                  disconnected workspaces and existing simulation examples
 tests/                     GUI, scientific and offline server checks

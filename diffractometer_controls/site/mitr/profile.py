@@ -1,6 +1,7 @@
 """MITR bindings for the reusable workspace. Importing this module performs no I/O."""
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -43,8 +44,64 @@ def display_directories():
     return tuple(CHECKOUT_ROOT / name for name in (
         "diffractometer_controls", "diffractometer_controls/site/mitr",
         "diffractometer_controls/screens/diffraction", "diffractometer_controls/screens/tomography",
-        "diffractometer_controls/analysis", "control_ui/widgets", "control_ui/panels", "vendor/displays",
+        "diffractometer_controls/analysis", "control_ui/widgets", "control_ui/panels",
     ))
+
+
+def external_display_directories(github_root=None):
+    """Find original EPICS displays, preferring the installed IOC's modules.
+
+    envPaths identifies the versions actually built into the IOC. Searching
+    those first avoids selecting an older areaDetector or measComp installation.
+    No network addresses or support paths are stored in this checkout.
+    """
+    modules = []
+    for boot in ("ioc4dh4-motors", "ioc4dh4"):
+        env_paths = ioc_root() / "iocBoot" / boot / "envPaths"
+        if env_paths.is_file():
+            for name, value in re.findall(r'epicsEnvSet\("([^"\n]+)",\s*"([^"\n]+)"\)', env_paths.read_text()):
+                if name not in {"TOP", "SUPPORT", "EPICS_BASE"} and "$" not in value:
+                    modules.append(Path(value).expanduser())
+            break
+    roots = modules + [epics_support()]
+    if github_root is not None:
+        roots.append(Path(github_root).expanduser())
+    patterns = ("**/op/adl*", "**/opi/medm*", "**/op/PyDM*", "**/op/pydm*")
+    paths, seen = [], set()
+    visited = set()
+    for root in roots:
+        if root in visited or not root.is_dir():
+            continue
+        visited.add(root)
+        for pattern in patterns:
+            for path in sorted(root.glob(pattern)):
+                resolved = path.resolve()
+                if path.is_dir() and resolved not in seen:
+                    paths.append(path)
+                    seen.add(resolved)
+    return tuple(paths)
+
+
+def configure_display_paths(github_root=None):
+    """Keep user overrides, then add local panels and installed source displays."""
+    existing = os.environ.get("PYDM_DISPLAYS_PATH", "").split(os.pathsep)
+    discovered = list(display_directories()) + list(external_display_directories(github_root))
+    automatic = {path.resolve() for path in discovered}
+    # A child GUI inherits the parent's generated path list. Rebuild those
+    # entries in module order rather than promoting old discovery to overrides.
+    paths = [Path(path).expanduser() for path in existing
+             if path and Path(path).expanduser().resolve() not in automatic]
+    paths += discovered
+    archived = (CHECKOUT_ROOT / "vendor" / "displays").resolve()
+    result, seen = [], set()
+    for path in paths:
+        resolved = path.resolve()
+        if resolved == archived or archived in resolved.parents or resolved in seen:
+            continue
+        seen.add(resolved)
+        result.append(str(path))
+    os.environ["PYDM_DISPLAYS_PATH"] = os.pathsep.join(result)
+    return tuple(result)
 
 
 def screen_factory(mode):
