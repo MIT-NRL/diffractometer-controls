@@ -3,6 +3,7 @@ import runpy
 import inspect
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from bluesky import RunEngine
 from ophyd import Component as Cpt, Device, Signal
@@ -265,7 +266,8 @@ class TestScalarPlans(unittest.TestCase):
         self.assertEqual(scan_estimate["estimated_total_time_s"], 8.0)
         self.assertEqual(scan_estimate["estimated_total_units"], 4)
 
-    def test_simulated_usbctr_publishes_live_monitor_documents(self):
+    @patch("ophyd.EpicsMotor", side_effect=lambda prefix, name: SynAxis(name=name))
+    def test_simulated_usbctr_publishes_live_monitor_documents(self, _motor):
         sim_namespace = runpy.run_path(
             str(STARTUP_DIR / "01-sim_devices.py"),
             init_globals={"sd": SimpleNamespace(baseline=[])},
@@ -367,7 +369,8 @@ class TestScalarPlans(unittest.TestCase):
             {"sim_usbctr_he3_tube"},
         )
 
-    def test_hardware_scaler_records_only_selected_channels(self):
+    @patch("ophyd.EpicsMotor", side_effect=lambda prefix, name: SynAxis(name=name))
+    def test_hardware_scaler_records_only_selected_channels(self, _motor):
         sim_namespace = runpy.run_path(
             str(STARTUP_DIR / "01-sim_devices.py"),
             init_globals={"sd": SimpleNamespace(baseline=[])},

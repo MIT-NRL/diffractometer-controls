@@ -40,6 +40,16 @@ opens the relevant view. IOC host/connection details expand on each card, with
 camera acquisition diagnostics under **Camera health**. Process state and
 EPICS/worker connectivity are shown independently.
 
+Diffraction arrays are stored in NeXus/HDF5 and referenced by Tiled when each
+run finishes. Scalar readings and searchable metadata remain in Tiled; live
+plots use the original documents. See the
+[diffraction storage and recovery guide](docs/linux_server_migration.md#diffraction-hdf5-and-tiled-storage)
+for filesystem configuration, file provenance and registration retries.
+See the [history loader, viewer options, and reader login guide](docs/diffraction_history.md)
+for replotting previous scans and access from other computers.
+The [reusable diffraction analysis package](diffraction_analysis/README.md) provides
+explicit peak fitting and a browser that can be embedded on other systems.
+
 The IOC panel controls five independent, manually started user services: motors
 and shared instrument records, He3 PSD, ZWO/QHY imaging, counter/analog/digital
 cards, and Reolink cameras. Consoles are read-only service journals; no IOC shell

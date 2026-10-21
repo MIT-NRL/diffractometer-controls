@@ -171,6 +171,14 @@ def create_plans(context):
             "data_type": "1d",
             "detector_type": "he3psd",
             "live_plot_fields": live_plot_fields,
+            "detector_configurations": {
+                det.name: {
+                    "acquire_time": det.acquire_time.get(),
+                    "nbins": det.nbins.get(),
+                    "soft_lld": det.soft_lld.get(),
+                }
+                for det in detectors
+            },
         }
         acquisition_monitor = _build_acquisition_monitor(
             detectors,

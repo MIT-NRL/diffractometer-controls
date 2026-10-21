@@ -91,7 +91,7 @@ class ServerStartupTests(unittest.TestCase):
     def test_full_numeric_startup_with_fake_devices_and_external_services(self):
         class FakeWriter:
             def __init__(self, *args, **kwargs):
-                pass
+                self.options = kwargs
 
             def receiver(self, *args):
                 pass
@@ -99,10 +99,6 @@ class ServerStartupTests(unittest.TestCase):
             def __call__(self, *args):
                 pass
 
-        apstools = ModuleType("apstools")
-        callbacks = ModuleType("apstools.callbacks")
-        nexus = ModuleType("apstools.callbacks.nexus_writer")
-        nexus.NXWriter = FakeWriter
         tiled_plugins = ModuleType("bluesky_tiled_plugins")
         tiled_plugins.TiledWriter = FakeWriter
         databroker = ModuleType("databroker")
@@ -119,10 +115,16 @@ class ServerStartupTests(unittest.TestCase):
             definitions["_start_file_dir_choices_stream"] = Mock()
             return definitions
 
+        # Native HDF5 libraries must install their real cleanup handlers before
+        # startup's atexit registrations are mocked. Startup only registers
+        # these writer definitions; it does not construct a writer or save data.
+        importlib.import_module("server.services.run_storage")
+        importlib.import_module("server.writers.he3_nexus")
+        importlib.import_module("server.writers.scalar")
+
         with ExitStack() as guards:
             guards.enter_context(patch.dict(sys.modules, {
-                "apstools": apstools, "apstools.callbacks": callbacks,
-                "apstools.callbacks.nexus_writer": nexus, "bluesky_tiled_plugins": tiled_plugins,
+                "bluesky_tiled_plugins": tiled_plugins,
                 "databroker": databroker,
             }))
             guards.enter_context(patch.dict("os.environ", {"TILED_API_KEY": "offline-test-key"}))
@@ -171,10 +173,13 @@ class ServerStartupTests(unittest.TestCase):
             namespace["_start_file_dir_choices_stream"].assert_called_once()
             self.assertIsNotNone(namespace["he3_nexus_writer_subscription"])
             self.assertIsNotNone(namespace["scalar_data_writer_subscription"])
-        # Remove modules created with a deliberately stubbed external writer;
-        # real writer-output tests still require the actual apstools package.
-        sys.modules.pop("server.writers.he3_nexus", None)
-        sys.modules.pop("server.writers.scalar", None)
+            self.assertEqual(namespace["he3_nexus_writer_subscription"],
+                             namespace["run_storage_subscription"])
+            self.assertEqual(namespace["scalar_data_writer_subscription"],
+                             namespace["run_storage_subscription"])
+            self.assertEqual(namespace["tiled_writer"].options, {"batch_size": 1})
+            self.assertEqual(namespace["run_storage"].writer_classes,
+                             [namespace["he3_nexus_writer"], namespace["scalar_data_writer"]])
 
 
 if __name__ == "__main__":

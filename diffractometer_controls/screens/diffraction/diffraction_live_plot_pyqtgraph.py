@@ -13,28 +13,10 @@ from qtpy import QtCore, QtGui
 from qtpy.QtWidgets import QGridLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from control_ui.widgets.scalar_scan_widgets import ScalarCountReadout, ScalarScanTable
-
-_PROFILE_COLOR_STOPS = {
-    "viridis": [(68, 1, 84), (58, 82, 139), (32, 144, 140), (94, 201, 98), (253, 231, 37)],
-    "plasma": [(13, 8, 135), (84, 3, 160), (182, 55, 121), (251, 136, 97), (240, 249, 33)],
-    "cividis": [(0, 32, 76), (40, 83, 107), (101, 129, 120), (170, 181, 115), (253, 234, 69)],
-    "magma": [(0, 0, 4), (60, 15, 112), (140, 41, 129), (221, 73, 104), (252, 253, 191)],
-    "turbo": [(48, 18, 59), (40, 120, 142), (70, 190, 111), (247, 209, 61), (165, 0, 38)],
-}
-
-# Categorical colors for independent detector/scalar series. Continuous maps
-# are reserved for PSD profile history, where color represents scan progress.
-_CATEGORICAL_SERIES_COLORS = (
-    "#1f77b4",
-    "#ff7f0e",
-    "#2ca02c",
-    "#d62728",
-    "#9467bd",
-    "#8c564b",
-    "#e377c2",
-    "#7f7f7f",
-    "#bcbd22",
-    "#17becf",
+from control_ui.widgets.elided_label import ElidedLabel
+from control_ui.widgets.profile_colors import (
+    HISTORY_ALPHA, LATEST_ALPHA, SERIES_COLORS as _CATEGORICAL_SERIES_COLORS,
+    profile_colormap, profile_history_position,
 )
 
 
@@ -125,28 +107,7 @@ def _rgba_to_hex(rgba):
     )
 
 
-def _interp_rgb(color_a, color_b, fraction):
-    fraction = max(0.0, min(1.0, float(fraction)))
-    return tuple(
-        (float(a) + ((float(b) - float(a)) * fraction)) / 255.0
-        for a, b in zip(color_a, color_b)
-    ) + (1.0,)
 
-
-def _make_profile_colormap(name):
-    stops = list(_PROFILE_COLOR_STOPS.get(str(name), _PROFILE_COLOR_STOPS["viridis"]))
-
-    def _color_map(position):
-        pos = max(0.0, min(1.0, float(position)))
-        if len(stops) == 1:
-            return tuple(float(v) / 255.0 for v in stops[0]) + (1.0,)
-        scaled = pos * (len(stops) - 1)
-        low_index = int(math.floor(scaled))
-        high_index = min(len(stops) - 1, low_index + 1)
-        frac = scaled - low_index
-        return _interp_rgb(stops[low_index], stops[high_index], frac)
-
-    return _color_map
 
 
 def _color_to_qcolor(color, alpha=1.0):
@@ -176,9 +137,8 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
         self._applying_theme = False
         self._last_title_style = None
 
-        self._title_label = QLabel(self)
+        self._title_label = ElidedLabel(self)
         self._title_label.setAlignment(QtCore.Qt.AlignCenter)
-        self._title_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         title_font = QtGui.QFont(self.font())
         title_font.setPointSize(max(11, title_font.pointSize() + 1))
         title_font.setBold(True)
@@ -654,6 +614,16 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
             pal = self._palette()
             figure_bg = pal.color(QtGui.QPalette.Window)
             axes_bg = pal.color(QtGui.QPalette.Base)
+            profile_background = axes_bg.getRgb()[:3]
+            if profile_background != getattr(self, '_profile_background', None):
+                self._profile_background = profile_background
+                self._profile_colormaps.clear()
+                for detector in self._profile_history:
+                    self._restyle_profile_history(detector, preview_new=detector in self._live_profile_lines)
+                for detector, item in self._live_profile_lines.items():
+                    color_map = self._profile_colormaps.setdefault(detector, self._select_profile_colormap(detector))
+                    total = len(self._profile_history.get(detector, [])) + 1
+                    self._style_profile_history_item(item, color_map=color_map, total=total, index=total - 1, is_latest=True)
             text = pal.color(QtGui.QPalette.WindowText)
             axis_text = pal.color(QtGui.QPalette.Text)
             edge = pal.color(QtGui.QPalette.Mid)
@@ -823,8 +793,8 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
             age = index / (total - 1)
         # Older spectra remain clearly readable; hue and line width still
         # communicate scan history without fading early points into the grid.
-        alpha = 0.95 if is_latest else 0.75 + (0.10 * color_pos)
-        width = 1.5 if is_latest else 0.8 + (0.3 * age)
+        alpha = LATEST_ALPHA if is_latest else HISTORY_ALPHA
+        width = 1.5 if is_latest else 1.0 + (0.3 * age)
         color = _color_to_qcolor(color_map(color_pos), alpha=alpha)
         pen = pg.mkPen(color=color, width=width)
         item.setPen(pen)
@@ -839,10 +809,7 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
 
     @staticmethod
     def _profile_history_color_position(*, total, index):
-        recent_rank = max(0, int(total) - 1 - int(index))
-        recent_slots = np.asarray([0.90, 0.76, 0.62, 0.48, 0.34, 0.22, 0.15], dtype=float)
-        slot_index = min(recent_rank, recent_slots.size - 1)
-        return float(recent_slots[slot_index])
+        return profile_history_position(total, index)
 
     def _style_series_curve(self, item, *, color, width, marker=None, alpha=1.0, z=3):
         qcolor = _color_to_qcolor(color, alpha=alpha)
@@ -973,11 +940,11 @@ class DiffractionPlotWidgetPyQtGraph(QWidget):
         self._peak_plot_item.setYRange(low - pad, high + pad, padding=0.0)
 
     def _select_profile_colormap(self, detector_name):
-        names = ("viridis", "plasma", "cividis", "magma", "turbo")
         if detector_name not in self._detector_order:
             self._detector_order.append(detector_name)
         index = self._detector_order.index(detector_name)
-        return _make_profile_colormap(names[index % len(names)])
+        background = self._palette().color(QtGui.QPalette.Base).getRgb()[:3]
+        return profile_colormap(index, background)
 
     def _get_detector_series_color(self, detector_name):
         color = self._detector_series_colors.get(detector_name)

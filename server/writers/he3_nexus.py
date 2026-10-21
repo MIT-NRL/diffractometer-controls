@@ -5,15 +5,15 @@ import re
 
 import numpy as np
 
-from apstools.callbacks.nexus_writer import NXWriter
-
-
-HE3_DIFFRACTION_ROOT = pathlib.Path("/home/mitr_4dh4/Data/Diffraction")
-HE3_DIFFRACTION_TEST_ROOT = pathlib.Path(
-    "/home/mitr_4dh4/Data/TestData/Diffraction"
+from server.writers.base import AtomicNXWriter
+from server.config.diffraction import (
+    DIFFRACTION_ROOT, DIFFRACTION_TEST_ROOT,
+    HE3PSD_POSITION_MIN, HE3PSD_POSITION_MAX,
 )
-HE3PSD_POSITION_MIN = -209.21799055746422
-HE3PSD_POSITION_MAX = 209.21799055746422
+
+
+HE3_DIFFRACTION_ROOT = DIFFRACTION_ROOT
+HE3_DIFFRACTION_TEST_ROOT = DIFFRACTION_TEST_ROOT
 TEST_CATALOG_NAMES = {"testdb"}
 HE3_PLAN_NAMES = {
     "count_he3",
@@ -50,7 +50,7 @@ def _normalize_detector_names(detectors):
     return [str(det).strip() for det in (detectors or []) if str(det).strip()]
 
 
-class HE3DiffractionNXWriter(NXWriter):
+class HE3DiffractionNXWriter(AtomicNXWriter):
     instrument_name = "4DH4"
     file_extension = "nxs"
     output_root = HE3_DIFFRACTION_ROOT
@@ -138,7 +138,7 @@ class HE3DiffractionNXWriter(NXWriter):
     def _get_primary_detector_fields(self, primary):
         detector_names = _normalize_detector_names(self.detectors)
         for detector_name in detector_names:
-            if not detector_name.startswith("he3psd"):
+            if "he3psd" not in detector_name:
                 continue
             counts_key = f"{detector_name}_counts"
             if counts_key not in primary:
@@ -151,10 +151,11 @@ class HE3DiffractionNXWriter(NXWriter):
             }
 
         for field_name in primary:
-            if not str(field_name).endswith("_counts"):
+            if (not str(field_name).endswith("_counts")
+                    or str(field_name).endswith("_total_counts")):
                 continue
             detector_name = str(field_name)[: -len("_counts")]
-            if detector_name.startswith("he3psd"):
+            if "he3psd" in detector_name:
                 return {
                     "detector_name": detector_name,
                     "counts": str(field_name),
@@ -184,6 +185,14 @@ class HE3DiffractionNXWriter(NXWriter):
         return arr
 
     def _create_dataset(self, parent, dataset_name, data, entry=None, long_name=None):
+        if self.root is not None and long_name:
+            source = self.root.get(
+                f"/entry/instrument/bluesky/streams/primary/{long_name}/value"
+            )
+            if (source is not None and source.shape == np.shape(data)
+                    and np.array_equal(source[()], data)):
+                parent[dataset_name] = source
+                return parent[dataset_name]
         ds = parent.create_dataset(dataset_name, data=data)
         ds.attrs["target"] = ds.name
         if entry is not None:
@@ -193,14 +202,8 @@ class HE3DiffractionNXWriter(NXWriter):
         return ds
 
     def _get_expected_nbins(self, counts_data):
-        det_config = self.metadata.get("det_config", {}) or {}
-        try:
-            nbins = int(round(float(det_config.get("nbins"))))
-            if nbins > 0:
-                return nbins
-        except Exception:
-            pass
-
+        # Each detector's recorded shape is authoritative, including when
+        # several PSDs use different bin counts in the same run.
         arr = np.asarray(counts_data)
         if arr.ndim == 0:
             return 0
@@ -250,6 +253,23 @@ class HE3DiffractionNXWriter(NXWriter):
         if not detector_fields:
             return super().write_data(parent)
 
+        first = self._write_detector_data(parent, primary, detector_fields, "data")
+        for key in primary:
+            if ("he3psd" not in key or not key.endswith("_counts")
+                    or key.endswith("_total_counts")):
+                continue
+            detector_name = key[:-len("_counts")]
+            if detector_name == detector_fields["detector_name"]:
+                continue
+            fields = {
+                "detector_name": detector_name, "counts": key,
+                "position_x": f"{detector_name}_position_x",
+                "total_counts": f"{detector_name}_total_counts",
+            }
+            self._write_detector_data(parent, primary, fields, f"data_{detector_name}")
+        return first
+
+    def _write_detector_data(self, parent, primary, detector_fields, group_name):
         counts_key = detector_fields["counts"]
         position_key = detector_fields["position_x"]
         total_counts_key = detector_fields["total_counts"]
@@ -265,7 +285,7 @@ class HE3DiffractionNXWriter(NXWriter):
         position_entry = primary.get(position_key)
         total_counts_entry = primary.get(total_counts_key)
 
-        nxdata = self.create_NX_group(parent, "data:NXdata")
+        nxdata = self.create_NX_group(parent, f"{group_name}:NXdata")
         axes = []
 
         num_events = len(counts_entry.get("data", []))

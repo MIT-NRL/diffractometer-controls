@@ -12,6 +12,14 @@ dependencies:
   - bluesky-queueserver-api
   - tiled-client
   - tiled-server
+  - bluesky-tiled-plugins
+  # Direct dependencies of diffraction storage, plotting and analysis.
+  - apstools
+  - h5py
+  - lmfit
+  - numpy
+  - scipy
+  - pyqtgraph
   - suitcase-csv
   - suitcase-tiff
   - suitcase-mongo

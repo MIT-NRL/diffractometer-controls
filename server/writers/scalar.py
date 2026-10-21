@@ -5,16 +5,16 @@ import json
 import os
 import pathlib
 import re
+from uuid import uuid4
 
 import numpy as np
 
-from apstools.callbacks.nexus_writer import NXWriter
+from server.writers.base import AtomicNXWriter
+from server.config.diffraction import DIFFRACTION_ROOT, DIFFRACTION_TEST_ROOT
 
 
-SCALAR_DIFFRACTION_ROOT = pathlib.Path("/home/mitr_4dh4/Data/Diffraction")
-SCALAR_DIFFRACTION_TEST_ROOT = pathlib.Path(
-    "/home/mitr_4dh4/Data/TestData/Diffraction"
-)
+SCALAR_DIFFRACTION_ROOT = DIFFRACTION_ROOT
+SCALAR_DIFFRACTION_TEST_ROOT = DIFFRACTION_TEST_ROOT
 SCALAR_FILE_TYPES = {"csv", "nexus"}
 SCALAR_TEST_CATALOG_NAMES = {"testdb"}
 
@@ -51,7 +51,7 @@ def _scalar_metadata_value(value):
     return value
 
 
-class ScalarDiffractionWriter(NXWriter):
+class ScalarDiffractionWriter(AtomicNXWriter):
     """Write scalar diffraction primary data as selected CSV or NeXus."""
 
     instrument_name = "4DH4"
@@ -220,10 +220,12 @@ class ScalarDiffractionWriter(NXWriter):
             default=0,
         )
         output_path = pathlib.Path(self.file_name)
-        temporary_path = output_path.with_suffix(output_path.suffix + ".tmp")
+        if output_path.exists():
+            raise FileExistsError(f"Refusing to replace an existing export: {output_path}")
+        temporary_path = output_path.with_name(f"{output_path.name}.{uuid4().hex}.partial")
 
         try:
-            with temporary_path.open("w", encoding="utf-8", newline="") as stream:
+            with temporary_path.open("x", encoding="utf-8", newline="") as stream:
                 writer = csv.writer(stream)
                 metadata = self._header_metadata()
                 baseline_readings = dict(metadata.pop("baseline_readings", {}) or {})
@@ -275,7 +277,9 @@ class ScalarDiffractionWriter(NXWriter):
                         value = data[index] if index < len(data) else None
                         row.append(self._csv_value(value))
                     writer.writerow(row)
-            os.replace(temporary_path, output_path)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.link(temporary_path, output_path)
         finally:
             if temporary_path.exists():
                 temporary_path.unlink()

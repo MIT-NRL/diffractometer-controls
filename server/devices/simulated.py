@@ -16,10 +16,11 @@ from ophyd.status import Status, SubscriptionStatus
 from bluesky_queueserver import register_device
 
 from diffractometer_controls.analysis.sim_focus import SimulatedFocusDetector, SimulatedFocusMotor
+from server.config.diffraction import HE3PSD_POSITION_MIN, HE3PSD_POSITION_MAX
 
 def _build_position_axis(nbins):
     n = max(1, int(round(float(nbins))))
-    return np.linspace(-209.21799055746422, 209.21799055746422, n)
+    return np.linspace(HE3PSD_POSITION_MIN, HE3PSD_POSITION_MAX, n)
 
 class SimHE3PSD(Device):
     """

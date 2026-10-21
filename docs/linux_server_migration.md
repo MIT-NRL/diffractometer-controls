@@ -72,6 +72,149 @@ or sees another filesystem, set `MITR_DETECTOR_XML_DIR` in the worker's private
 configuration to the directory visible to that IOC and place matching XML there.
 Confirm attributes/layout readbacks and successful XML loading.
 
+## Diffraction HDF5 and Tiled storage
+
+Diffraction arrays live in the completed `.nxs` file. Tiled stores searchable
+run metadata and scalar event rows in PostgreSQL, and registers HDF5 dataset
+references for the arrays. Array values are not uploaded to SQL or Zarr.
+The GUI continues plotting the original live documents; Tiled array reads
+become available after the run finishes and the file has been validated.
+
+`RunStorage` is the single persistence subscription. It gives each run its own
+writer, writes the file synchronously at run completion, validates its UID and
+stream shapes, and publishes the final name atomically. Registration happens
+after the file closes. Existing single-event and scan layouts are preserved;
+matching raw and curated datasets share HDF5 storage through hard links.
+The first PSD retains `/entry/data`, with additional PSDs exposed under
+`/entry/data_<detector>`. Each axis uses that detector's recorded bin count.
+
+The original Start, Stop and Descriptor documents are stored as JSON beneath
+`/entry/instrument/bluesky/documents`. Raw readings and field timestamps remain
+under `/entry/instrument/bluesky/streams`. Writer metadata includes the full run
+UID, schema version, catalog identity, and a Tiled run URI without credentials.
+Both destinations retain baseline start/end summaries. Tiled's original Start
+document is preserved; summaries and file status are separate run metadata.
+
+The private Tiled configuration needs the following additions to its existing
+catalog arguments. Retain its current database URIs and authentication settings:
+
+```yaml
+trees:
+  - path: 4dh4
+    tree: catalog
+    args:
+      # existing uri, writable_storage and specs
+      readable_storage:
+        - /home/mitr_4dh4/Data/Diffraction
+  - path: testdb
+    tree: catalog
+    args:
+      # existing uri, writable_storage and specs
+      readable_storage:
+        - /home/mitr_4dh4/Data/TestData/Diffraction
+```
+
+File roots default to these same directories. Optional
+`MITR_DIFFRACTION_DATA_ROOT` and `MITR_DIFFRACTION_TEST_DATA_ROOT` overrides must
+also be reflected in the appropriate catalog's `readable_storage`. The worker
+and Tiled server must see the same paths. No Zarr directory is needed for these
+diffraction arrays. Other plans retain their ordinary TiledWriter behavior.
+
+TiledWriter uses `batch_size=1`; the old `max_array_size=512` workaround has been
+removed. Supported diffraction descriptors mark arrays external and events sent
+to Tiled contain scalar values. When the file is ready, standard StreamResource
+and StreamDatum documents associate each array with its original stream and
+sequence numbers. Thus existing reads such as
+`catalog[uid]["primary/he3psd0_counts"].read()` continue to work.
+
+The complete file is also available at `catalog[uid]["artifacts/nexus"]`
+(or `artifacts/csv` for a scalar CSV export). Run metadata `file_export` contains
+the file URI, full UID, SHA-256 checksum, format, schema version and ready state.
+Scalar CSV files retain their existing content and column layout; they are
+registered as original file assets.
+
+During acquisition, `<output>.documents.jsonl` journals original documents,
+including arrays, with a flush and filesystem sync per document. Successful
+persistence removes the journal. Failures retain it and partial HDF5 files have
+a `.partial` suffix; they are never registered as complete output. Errors are
+reported to QueueServer rather than disappearing in a writer thread.
+
+A completed file whose Tiled registration fails also retains
+`<output>.registration.json`. Using the same writer credentials and environment:
+
+```console
+python -m server.services.run_storage /path/to/run.nxs.registration.json --uri http://CONTROL_HOST:8000
+```
+
+The retry verifies the checksum, repairs only missing or incomplete references
+to the same file, and attaches its artifact metadata. It does not replay scalar
+rows or replace the run. If scalar delivery failed earlier, retry explicitly
+refuses to mark it complete; retain the original journal for document recovery.
+An existing output file is never overwritten.
+
+Activate changes with acquisition idle: restart Tiled to load its readable
+paths, then close and reopen the QueueServer worker environment to load the new
+startup subscription. Do not restart IOCs. Existing catalog entries and older
+files are not migrated by this change.
+
+### Storage design and format choices
+
+Previously the file callbacks and `TiledWriter(max_array_size=512)` subscribed
+independently. Tiled chose SQL or array storage according to its size threshold,
+while the file callback produced a separate export. There was no ordered
+file-finalization/registration transaction tying their success together.
+Now run metadata/scalars remain searchable through Tiled/PostgreSQL, while
+diffraction array reads resolve to datasets in the completed NeXus file.
+This is an external asset registration in Tiled's catalog, not a filesystem
+symlink and not an uploaded second copy of the arrays. Hard links *inside* the
+NeXus file let raw and curated views share an identical dataset where possible.
+
+The HDF5 file preserves acquisition documents and readings as a portable
+snapshot. Tiled supplies indexed discovery, authenticated remote subset reads,
+and catalog annotations such as export status. Later catalog corrections need
+not rewrite the original file, so the two metadata views are not a continuously
+synchronized mirror. Back up both the catalog databases and the NeXus files;
+references depend on those files remaining at their registered paths.
+
+For the present scalar/1D diffraction workload, retain NeXus/HDF5 as the
+acquisition format and Tiled as the access/catalog service. Scalar plans still
+offer CSV or NeXus; select NeXus when a portable HDF5 record is required.
+The writer currently buffers readings until run completion, with a durable
+document journal during acquisition. For long/large scans or live stored-array
+access, the next architectural improvement is incremental/chunked HDF5 writing,
+potentially SWMR, with explicit writer/reader coordination and failure recovery.
+Changing file format alone does not address buffering or metadata consistency.
+
+HDF5 is the container; NeXus supplies the scientific structure and meanings.
+Interoperability also requires suitable NXdata signal/axes, units, calibration,
+instrument/sample metadata, and the application definition expected by the
+target software. Existing UID/shape checks are not full application-definition
+validation. Validate sample files against an agreed NeXus definition and open
+them in the intended analysis program before promising native import support.
+
+Zarr is a separate chunked array format, not an HDF5 revision. Its strengths
+include independently accessible compressed chunks, object-store backends, and
+parallel/distributed access when writers own distinct chunks (or shards).
+It can also run on local disks. Zarr v3 sharding groups chunks into fewer
+objects to reduce small-file overhead, with shard-level write coordination.
+HDF5 already supports compression, chunking, and specialized parallel/SWMR
+access; Zarr's main benefit here would be a different storage/access model,
+not simply newer compression or automatically faster PSD reads. A Zarr hierarchy
+does not automatically satisfy NeXus reader expectations.
+
+Consider an optional derived Zarr store if multi-run, distributed or cloud
+analysis becomes a measured need. Keep original NeXus acquisition files and
+record provenance for derived stores/results. Do not duplicate every run into
+both formats without that use case.
+
+Primary documentation:
+
+- [Tiled catalog assets and data sources](https://blueskyproject.io/tiled/explanations/catalog.html)
+- [NeXus and HDF5](https://manual.nexusformat.org/introduction.html)
+- [NeXus signal, axes and units](https://manual.nexusformat.org/datarules.html)
+- [Zarr storage backends](https://zarr.readthedocs.io/en/stable/user-guide/storage/)
+- [Zarr arrays and v3 sharding](https://zarr.readthedocs.io/en/stable/user-guide/arrays/#sharding)
+
 ## Original EPICS display sources
 
 Use adl2pydm 0.0.8 with PyDM's direct ADL loader. For a local converter checkout,

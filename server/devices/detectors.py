@@ -12,10 +12,7 @@ from ophyd.scaler import EpicsScaler
 from ophyd.status import Status, SubscriptionStatus
 
 from bluesky_queueserver import register_device
-
-HE3PSD_POSITION_MIN = -209.21799055746422
-
-HE3PSD_POSITION_MAX = 209.21799055746422
+from server.config.diffraction import HE3PSD_POSITION_MIN, HE3PSD_POSITION_MAX
 
 class PositionSignal(DerivedSignal):
     def inverse(self, value):

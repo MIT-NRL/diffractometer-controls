@@ -47,6 +47,7 @@ try:
 except ImportError:
     from bluesky.callbacks.tiled_writer import TiledWriter
 from tiled.client import from_uri
+from server.services.run_storage import RunStorage
 
 def get_tiled_uri(host=None):
     uri = os.environ.get("TILED_URI") or os.environ.get("MITR_TILED_URI")
@@ -93,10 +94,12 @@ BLUESKY_CATALOG = client[BLUESKY_CATALOG_NAME]
 RE.md["bluesky_catalog"] = BLUESKY_CATALOG_NAME
 if BLUESKY_CATALOG_NAME in {"4dh4", "testdb"}:
     db = BLUESKY_CATALOG
-    RE.subscribe(TiledWriter(BLUESKY_CATALOG, max_array_size=512))
+    tiled_writer = TiledWriter(BLUESKY_CATALOG, batch_size=1)
+    run_storage = RunStorage(tiled_writer, BLUESKY_CATALOG)
 else:
     db = Broker(BLUESKY_CATALOG)
-    RE.subscribe(db.insert)
+    run_storage = RunStorage(db.insert)
+run_storage_subscription = RE.subscribe(run_storage)
 print(f"Bluesky data catalog: {BLUESKY_CATALOG_NAME}")
 if BLUESKY_CATALOG_NAME != BLUESKY_CATALOG_PREFERRED_NAMES[0]:
     print(

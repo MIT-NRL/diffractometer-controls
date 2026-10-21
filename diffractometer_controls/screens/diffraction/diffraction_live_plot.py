@@ -1,16 +1,32 @@
 import math
 import ast
 import concurrent.futures
-import datetime as dt
 import os
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
+
+from diffractometer_controls.analysis.diffraction_history import (
+    DIFFRACTION_EXPERIMENT_TYPE,
+    _is_diffraction_start_doc,
+    _make_history_entry,
+    _preferred_catalog_names_for_mode,
+    _resolve_catalog_name,
+    _run_data_type,
+    _run_start_stop_docs,
+    _start_live_plot_fields,
+    build_history_snapshot,
+    fetch_recent_history_entries,
+    select_history_stream,
+)
+from diffraction_analysis.metadata import run_outcome
+from diffraction_analysis.widgets import run_status_icon
 
 import numpy as np
 from qtpy import QtCore, QtGui
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
@@ -20,20 +36,12 @@ from qtpy.QtWidgets import (
 )
 
 from control_ui.widgets.scalar_scan_widgets import ScalarCountReadout, ScalarScanTable
-
-
-_CATEGORICAL_SERIES_COLORS = (
-    "#1f77b4",
-    "#ff7f0e",
-    "#2ca02c",
-    "#d62728",
-    "#9467bd",
-    "#8c564b",
-    "#e377c2",
-    "#7f7f7f",
-    "#bcbd22",
-    "#17becf",
+from control_ui.widgets.elided_label import ElidedLabel
+from control_ui.widgets.profile_colors import (
+    HISTORY_ALPHA, LATEST_ALPHA, SERIES_COLORS as _CATEGORICAL_SERIES_COLORS,
+    profile_colormap, profile_history_position,
 )
+
 
 try:
     from lmfit.models import GaussianModel, LinearModel
@@ -77,11 +85,6 @@ except Exception:
         ensure_tiled_login = None
 
 try:
-    from tiled.queries import Key
-except Exception:
-    Key = None
-
-try:
     from diffractometer_controls.site.mitr.bluesky_mode import BLUESKY_MODE_TEST, get_bluesky_active_mode
 except Exception:
     try:
@@ -95,19 +98,12 @@ except Exception:
 
 TILED_URI = get_tiled_uri()
 RUN_UID_STATUS_PV = "4dh4:Bluesky:Run:RunUID"
-DIFFRACTION_EXPERIMENT_TYPE = "diffraction"
+RUN_STATE_STATUS_PV = "4dh4:Bluesky:Run:State"
 DEFAULT_HISTORY_LIMIT = 100
 matplotlib = None
 FigureCanvas = None
 NavigationToolbar = None
 
-_PROFILE_COLOR_STOPS = {
-    "viridis": [(68, 1, 84), (58, 82, 139), (32, 144, 140), (94, 201, 98), (253, 231, 37)],
-    "plasma": [(13, 8, 135), (84, 3, 160), (182, 55, 121), (251, 136, 97), (240, 249, 33)],
-    "cividis": [(0, 32, 76), (40, 83, 107), (101, 129, 120), (170, 181, 115), (253, 234, 69)],
-    "magma": [(0, 0, 4), (60, 15, 112), (140, 41, 129), (221, 73, 104), (252, 253, 191)],
-    "turbo": [(48, 18, 59), (40, 120, 142), (70, 190, 111), (247, 209, 61), (165, 0, 38)],
-}
 
 
 def _initialize_matplotlib():
@@ -153,28 +149,7 @@ def _build_linear_axis(*, nbins, axis_min, axis_max):
     return np.linspace(float(axis_min), float(axis_max), n)
 
 
-def _interp_rgb(color_a, color_b, fraction):
-    fraction = max(0.0, min(1.0, float(fraction)))
-    return tuple(
-        (float(a) + ((float(b) - float(a)) * fraction)) / 255.0
-        for a, b in zip(color_a, color_b)
-    ) + (1.0,)
 
-
-def _make_profile_colormap(name):
-    stops = list(_PROFILE_COLOR_STOPS.get(str(name), _PROFILE_COLOR_STOPS["viridis"]))
-
-    def _color_map(position):
-        pos = max(0.0, min(1.0, float(position)))
-        if len(stops) == 1:
-            return tuple(float(v) / 255.0 for v in stops[0]) + (1.0,)
-        scaled = pos * (len(stops) - 1)
-        low_index = int(math.floor(scaled))
-        high_index = min(len(stops) - 1, low_index + 1)
-        frac = scaled - low_index
-        return _interp_rgb(stops[low_index], stops[high_index], frac)
-
-    return _color_map
 
 
 def _rgba_to_hex(rgba):
@@ -189,11 +164,11 @@ def _rgba_to_hex(rgba):
     )
 
 
-def _safe_caget(pv_name):
+def _safe_caget(pv_name, *, as_string=False):
     if caget is None:
         return None
     try:
-        return caget(str(pv_name), timeout=1.0, connection_timeout=1.0)
+        return caget(str(pv_name), timeout=1.0, connection_timeout=1.0, as_string=as_string)
     except Exception:
         return None
 
@@ -204,118 +179,6 @@ def _build_tiled_client(uri):
     if from_uri is None:
         raise RuntimeError("tiled client is unavailable in this environment.")
     return from_uri(uri)
-
-
-def _catalog_exists(container, name):
-    try:
-        if name in container:
-            return True
-    except Exception:
-        pass
-    try:
-        container[name]
-    except Exception:
-        return False
-    return True
-
-
-def _resolve_catalog_name(container, preferred_names):
-    for name in preferred_names:
-        if _catalog_exists(container, name):
-            return name
-    return preferred_names[0]
-
-
-def _preferred_catalog_names_for_mode(mode):
-    if str(mode or "").strip().lower() == str(BLUESKY_MODE_TEST):
-        return ["testdb"]
-    return ["4dh4_diffraction", "4dh4", "4dh4Collection"]
-
-
-def _run_metadata(run):
-    item = getattr(run, "item", None)
-    if isinstance(item, Mapping):
-        try:
-            metadata = item["attributes"]["metadata"]
-        except Exception:
-            metadata = None
-        if isinstance(metadata, Mapping):
-            return dict(metadata)
-
-    metadata = {}
-    getter = getattr(run, "metadata", None)
-    if callable(getter):
-        try:
-            metadata = getter()
-        except Exception:
-            metadata = {}
-    elif isinstance(getter, Mapping):
-        metadata = getter
-    elif isinstance(getattr(run, "_metadata", None), Mapping):
-        metadata = run._metadata
-
-    if isinstance(metadata, Mapping):
-        return dict(metadata)
-
-    v1 = getattr(run, "v1", None)
-    getter = getattr(v1, "metadata", None)
-    if callable(getter):
-        try:
-            metadata = getter()
-        except Exception:
-            metadata = {}
-    elif isinstance(getter, Mapping):
-        metadata = getter
-
-    return dict(metadata or {})
-
-
-def _run_start_stop_docs(run):
-    metadata = _run_metadata(run)
-    start_doc = metadata.get("start")
-    stop_doc = metadata.get("stop")
-    if isinstance(start_doc, dict):
-        return dict(start_doc), dict(stop_doc or {}) if stop_doc is not None else None
-
-    start_attr = getattr(run, "start", None)
-    stop_attr = getattr(run, "stop", None)
-    if isinstance(start_attr, Mapping):
-        return dict(start_attr), dict(stop_attr or {}) if isinstance(stop_attr, Mapping) else None
-
-    v1 = getattr(run, "v1", None)
-    start_attr = getattr(v1, "start", None)
-    stop_attr = getattr(v1, "stop", None)
-    if isinstance(start_attr, Mapping):
-        return dict(start_attr), dict(stop_attr or {}) if isinstance(stop_attr, Mapping) else None
-
-    return dict(metadata or {}), None
-
-
-def _is_diffraction_start_doc(start_doc):
-    if not isinstance(start_doc, dict):
-        return False
-    return str(start_doc.get("experiment_type", "") or "").strip().lower() == DIFFRACTION_EXPERIMENT_TYPE
-
-
-def _run_data_type(start_doc):
-    """Return the detector-output shape, retaining compatibility with old runs."""
-    start_doc = dict(start_doc or {})
-    data_type = str(start_doc.get("data_type", "") or "").strip().lower()
-    if data_type in {"scalar", "1d", "2d"}:
-        return data_type
-    plan_name = str(start_doc.get("plan_name", "") or "").strip().lower()
-    if plan_name in {"count_scalar", "scan_scalar"}:
-        return "scalar"
-    return "1d"
-
-
-def _start_live_plot_fields(start_doc):
-    fields = dict(dict(start_doc or {}).get("live_plot_fields", {}) or {})
-    return {
-        str(data_key): dict(spec or {})
-        for data_key, spec in fields.items()
-        if str(data_key)
-    }
 
 
 def _friendly_source_name(source):
@@ -374,288 +237,6 @@ def _qualify_duplicate_field_labels(fields):
         for data_key, qualified_label in zip(data_keys, candidates):
             fields[data_key]["label"] = qualified_label
     return fields
-
-
-def _data_keys_have_plot_payload(data_keys, start_doc):
-    data_keys = _plain_mapping(data_keys)
-    declared_fields = set(_start_live_plot_fields(start_doc))
-    if declared_fields.intersection(str(key) for key in data_keys):
-        return True
-    if _run_data_type(start_doc) == "scalar":
-        return False
-    return any(
-        str(key).endswith("_counts")
-        or str(key).endswith("_position_x")
-        or str(key).endswith("_total_counts")
-        for key in data_keys
-    )
-
-
-def _format_run_timestamp(epoch_seconds):
-    value = _coerce_number(epoch_seconds)
-    if value is None:
-        return ""
-    try:
-        dt_value = dt.datetime.fromtimestamp(float(value), tz=dt.timezone.utc).astimezone()
-    except Exception:
-        return ""
-    return dt_value.strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _make_history_entry(uid, start_doc):
-    start_doc = dict(start_doc or {})
-    title = str(start_doc.get("title", "") or "").strip()
-    plan_name = str(start_doc.get("plan_name", "") or "").strip()
-    time_value = _coerce_number(start_doc.get("time"))
-    timestamp_text = _format_run_timestamp(time_value)
-    base_label = title or plan_name or str(uid or "")[:8] or "Diffraction Run"
-    label = base_label if not timestamp_text else f"{base_label} | {timestamp_text}"
-    return {
-        "uid": str(uid or start_doc.get("uid", "") or "").strip(),
-        "label": label,
-        "title": title,
-        "plan_name": plan_name,
-        "time": float(time_value) if time_value is not None else None,
-    }
-
-
-def _plain_mapping(value):
-    if isinstance(value, Mapping):
-        return dict(value)
-    try:
-        return dict(value or {})
-    except Exception:
-        return {}
-
-
-def _to_plain_value(value):
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, Mapping):
-        return {key: _to_plain_value(item) for key, item in value.items()}
-    if isinstance(value, tuple):
-        return [_to_plain_value(item) for item in value]
-    if isinstance(value, list):
-        return [_to_plain_value(item) for item in value]
-    return value
-
-
-def _stream_descriptor_docs(run_uid, stream_name, stream, start_doc):
-    descriptor_docs = []
-    descriptors = getattr(stream, "descriptors", None)
-    if descriptors is None:
-        descriptors = []
-
-    for index, descriptor in enumerate(list(descriptors or [])):
-        descriptor_doc = _plain_mapping(descriptor)
-        if not descriptor_doc:
-            continue
-        descriptor_doc = {key: _to_plain_value(value) for key, value in descriptor_doc.items()}
-        descriptor_doc.setdefault("uid", f"{run_uid}-{stream_name}-descriptor-{index}")
-        descriptor_doc.setdefault("name", str(stream_name or "primary"))
-        descriptor_doc.setdefault("run_start", str(run_uid or ""))
-        descriptor_docs.append(descriptor_doc)
-
-    if descriptor_docs:
-        return descriptor_docs
-
-    stream_metadata = _plain_mapping(getattr(stream, "metadata", {}) or {})
-    data_keys = _plain_mapping(stream_metadata.get("data_keys"))
-    if not data_keys:
-        return []
-
-    return [
-        {
-            "uid": f"{run_uid}-{stream_name}-descriptor-0",
-            "name": str(stream_name or "primary"),
-            "run_start": str(run_uid or ""),
-            "time": _coerce_number(stream_metadata.get("time"))
-            or _coerce_number(start_doc.get("time"))
-            or 0.0,
-            "configuration": _to_plain_value(stream_metadata.get("configuration", {}) or {}),
-            "object_keys": _to_plain_value(stream_metadata.get("object_keys", {}) or {}),
-            "data_keys": _to_plain_value(data_keys),
-        }
-    ]
-
-
-def _stream_row_count(dataset, data_keys):
-    row_counts = []
-    saw_constant_like = False
-    data_vars = getattr(dataset, "data_vars", {}) or {}
-    for var_name in list(getattr(data_vars, "keys", lambda: [])()):
-        variable = dataset[var_name]
-        values = getattr(variable, "values", variable)
-        shape = tuple(getattr(values, "shape", ()) or ())
-        data_key = _plain_mapping(dict(data_keys or {}).get(var_name))
-        target_shape = tuple(data_key.get("shape", []) or ())
-        if not shape:
-            continue
-        if target_shape and shape == target_shape:
-            saw_constant_like = True
-            continue
-        row_counts.append(int(shape[0]))
-
-    if row_counts:
-        return max(row_counts)
-    if saw_constant_like:
-        return 1
-
-    sizes = getattr(dataset, "sizes", {}) or {}
-    try:
-        return max(int(value) for value in sizes.values())
-    except Exception:
-        return 0
-
-
-def _dataset_column_to_event_list(values, *, row_count, data_key):
-    raw_values = getattr(values, "values", values)
-    if isinstance(raw_values, np.ndarray):
-        shape = tuple(raw_values.shape)
-        python_value = raw_values.tolist()
-    else:
-        shape = tuple(getattr(raw_values, "shape", ()) or ())
-        python_value = _to_plain_value(raw_values)
-
-    target_shape = tuple(_plain_mapping(data_key).get("shape", []) or ())
-
-    if not shape:
-        item = _to_plain_value(
-            raw_values.item() if hasattr(raw_values, "item") else raw_values
-        )
-        return [item for _ in range(max(1, int(row_count or 1)))]
-
-    if shape and int(shape[0]) == int(max(1, row_count or 1)) and not (
-        target_shape and shape == target_shape
-    ):
-        items = python_value if isinstance(python_value, list) else list(python_value)
-        return [_to_plain_value(item) for item in items]
-
-    if target_shape and shape == target_shape:
-        item = _to_plain_value(python_value)
-        return [item for _ in range(max(1, int(row_count or 1)))]
-
-    if int(max(1, row_count or 1)) == 1:
-        return [_to_plain_value(python_value)]
-
-    try:
-        items = list(raw_values)
-    except Exception:
-        return None
-    if len(items) != int(max(1, row_count or 1)):
-        return None
-    return [_to_plain_value(item) for item in items]
-
-
-def _synthesize_run_documents(run, start_doc, stop_doc):
-    start_doc = {key: _to_plain_value(value) for key, value in dict(start_doc or {}).items()}
-    stop_doc = (
-        {key: _to_plain_value(value) for key, value in dict(stop_doc or {}).items()}
-        if isinstance(stop_doc, Mapping)
-        else None
-    )
-    run_uid = str(start_doc.get("uid", "") or "")
-    documents = [("start", start_doc)]
-
-    try:
-        stream_names = list(run)
-    except Exception:
-        stream_names = []
-
-    for stream_name in stream_names:
-        stream_name = str(stream_name or "").strip()
-        if not stream_name:
-            continue
-        try:
-            stream = run[stream_name]
-        except Exception:
-            continue
-
-        descriptor_docs = _stream_descriptor_docs(run_uid, stream_name, stream, start_doc)
-        for descriptor_doc in descriptor_docs:
-            documents.append(("descriptor", descriptor_doc))
-        if not descriptor_docs:
-            continue
-
-        try:
-            dataset = stream.read()
-        except Exception:
-            continue
-
-        data_keys = _plain_mapping(descriptor_docs[0].get("data_keys"))
-        if not _data_keys_have_plot_payload(data_keys, start_doc):
-            continue
-        row_count = _stream_row_count(dataset, data_keys)
-        if row_count <= 0:
-            continue
-
-        page_data = {}
-        data_vars = getattr(dataset, "data_vars", {}) or {}
-        for var_name in list(getattr(data_vars, "keys", lambda: [])()):
-            try:
-                variable = dataset[var_name]
-            except Exception:
-                continue
-            values = _dataset_column_to_event_list(
-                getattr(variable, "values", variable),
-                row_count=row_count,
-                data_key=data_keys.get(var_name),
-            )
-            if values is None or len(values) != row_count:
-                continue
-            page_data[str(var_name)] = values
-
-        if not page_data:
-            continue
-
-        descriptor_uid = str(descriptor_docs[0].get("uid", "") or f"{run_uid}-{stream_name}-descriptor-0")
-        documents.append(
-            (
-                "event_page",
-                {
-                    "uid": f"{descriptor_uid}-page-0",
-                    "descriptor": descriptor_uid,
-                    "seq_num": list(range(1, int(row_count) + 1)),
-                    "data": page_data,
-                },
-            )
-        )
-
-    if stop_doc:
-        documents.append(("stop", stop_doc))
-    return documents
-
-
-def _documents_have_diffraction_payload(documents):
-    start_doc = {}
-    for name, doc in list(documents or []):
-        if str(name) == "start":
-            start_doc = dict(doc or {})
-            break
-    detector_descriptors = set()
-    for name, doc in list(documents or []):
-        if str(name) != "descriptor":
-            continue
-        data_keys = _plain_mapping(dict(doc or {}).get("data_keys"))
-        if _data_keys_have_plot_payload(data_keys, start_doc):
-            detector_descriptors.add(str(dict(doc or {}).get("uid", "") or ""))
-
-    if not detector_descriptors:
-        return False
-
-    for name, doc in list(documents or []):
-        if str(name) == "event":
-            descriptor_uid = str(dict(doc or {}).get("descriptor", "") or "")
-            if descriptor_uid in detector_descriptors:
-                return True
-        if str(name) == "event_page":
-            descriptor_uid = str(dict(doc or {}).get("descriptor", "") or "")
-            page_data = _plain_mapping(dict(doc or {}).get("data"))
-            if descriptor_uid in detector_descriptors and page_data:
-                return True
-    return False
 
 
 def _fit_peak_position(x_values, y_values):
@@ -1241,16 +822,13 @@ class DiffractionPlotWidget(QWidget):
         else:
             age = index / (total - 1)
         line.set_color(color_map(color_pos))
-        line.set_alpha(0.95 if is_latest else 0.65 + (0.20 * color_pos))
-        line.set_linewidth(1.5 if is_latest else 0.8 + (0.3 * age))
+        line.set_alpha(LATEST_ALPHA if is_latest else HISTORY_ALPHA)
+        line.set_linewidth(1.5 if is_latest else 1.0 + (0.3 * age))
         line.set_marker("o" if is_latest else "None")
 
     @staticmethod
     def _profile_history_color_position(*, total, index):
-        recent_rank = max(0, int(total) - 1 - int(index))
-        recent_slots = np.asarray([0.90, 0.76, 0.62, 0.48, 0.34, 0.22, 0.15], dtype=float)
-        slot_index = min(recent_rank, recent_slots.size - 1)
-        return float(recent_slots[slot_index])
+        return profile_history_position(total, index)
 
     def _on_mouse_press(self, event):
         if event is None or not getattr(event, "dblclick", False):
@@ -1277,11 +855,11 @@ class DiffractionPlotWidget(QWidget):
         self._redraw()
 
     def _select_profile_colormap(self, detector_name):
-        names = ("viridis", "plasma", "cividis", "magma", "turbo")
         if detector_name not in self._detector_order:
             self._detector_order.append(detector_name)
         index = self._detector_order.index(detector_name)
-        return _make_profile_colormap(names[index % len(names)])
+        background = self._palette().color(QtGui.QPalette.Base).getRgb()[:3]
+        return profile_colormap(index, background)
 
     def _get_detector_series_color(self, detector_name):
         color = self._detector_series_colors.get(detector_name)
@@ -1309,6 +887,16 @@ class DiffractionPlotWidget(QWidget):
             pal = self._palette()
             figure_bg = pal.color(QtGui.QPalette.Window)
             axes_bg = pal.color(QtGui.QPalette.Base)
+            profile_background = axes_bg.getRgb()[:3]
+            if profile_background != getattr(self, '_profile_background', None):
+                self._profile_background = profile_background
+                self._profile_colormaps.clear()
+                for detector in self._profile_history:
+                    self._restyle_profile_history(detector, preview_new=detector in self._live_profile_lines)
+                for detector, item in self._live_profile_lines.items():
+                    color_map = self._profile_colormaps.setdefault(detector, self._select_profile_colormap(detector))
+                    item.set_color(color_map(0.9))
+                    item.set_alpha(LATEST_ALPHA)
             text = pal.color(QtGui.QPalette.WindowText)
             axis_text = pal.color(QtGui.QPalette.Text)
             grid = pal.color(QtGui.QPalette.Mid)
@@ -1496,6 +1084,7 @@ class DiffractionHistoryViewer(QWidget):
     next_requested = QtCore.Signal()
     run_selected = QtCore.Signal(str)
     live_follow_toggled = QtCore.Signal(bool)
+    analysis_requested = QtCore.Signal()
 
     def __init__(self, plot_widget, parent=None):
         super().__init__(parent)
@@ -1513,6 +1102,8 @@ class DiffractionHistoryViewer(QWidget):
         self._run_combo = QComboBox(self)
         self._run_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._run_combo.setMinimumContentsLength(20)
+        self._run_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self._run_combo.setMaxVisibleItems(20)
         self._run_combo.currentIndexChanged.connect(self._on_combo_index_changed)
 
         self._next_button = QToolButton(self)
@@ -1526,10 +1117,17 @@ class DiffractionHistoryViewer(QWidget):
 
         self._live_checkbox = QCheckBox("Live scan", self)
         self._live_checkbox.setChecked(True)
+        self._live_checkbox.setToolTip('Follow current and new diffraction runs. Uncheck to hold the displayed run. Live following works without Tiled.')
         self._live_checkbox.toggled.connect(self.live_follow_toggled.emit)
 
-        self._status_label = QLabel(self)
-        self._status_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._analysis_button = QToolButton(self)
+        self._analysis_button.setText("Analyze runs…")
+        self._analysis_button.setToolTip("Open diffraction history and metadata in a separate window")
+        self._analysis_button.clicked.connect(self.analysis_requested.emit)
+
+        self._status_label = ElidedLabel(self)
+        self._status_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self._status_label.setFixedWidth(self.fontMetrics().averageCharWidth() * 32)
         self._status_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
 
         controls_layout = QHBoxLayout()
@@ -1540,13 +1138,27 @@ class DiffractionHistoryViewer(QWidget):
         controls_layout.addWidget(self._run_combo, 1)
         controls_layout.addWidget(self._next_button)
         controls_layout.addWidget(self._live_checkbox)
-        controls_layout.addWidget(self._status_label, 1)
+        controls_layout.addWidget(self._analysis_button)
+        controls_layout.addWidget(self._status_label)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         layout.addLayout(controls_layout)
-        layout.addWidget(self._plot_widget, 1)
+        plot_area = QWidget(self)
+        plot_layout = QGridLayout(plot_area)
+        plot_layout.setContentsMargins(0, 0, 0, 0)
+        plot_layout.addWidget(self._plot_widget, 0, 0)
+        self._history_message = QLabel(plot_area)
+        self._history_message.setAlignment(QtCore.Qt.AlignCenter)
+        self._history_message.setWordWrap(True)
+        self._history_message.setTextFormat(QtCore.Qt.PlainText)
+        self._history_message.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)
+        self._history_message.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        self._history_message.setMargin(40)
+        plot_layout.addWidget(self._history_message, 0, 0)
+        self._history_message.hide()
+        layout.addWidget(plot_area, 1)
         self.setLayout(layout)
 
         self.set_history_state(
@@ -1576,7 +1188,13 @@ class DiffractionHistoryViewer(QWidget):
         with QtCore.QSignalBlocker(self._run_combo):
             self._run_combo.clear()
             for entry in entries:
-                self._run_combo.addItem(str(entry.get("label", "")), str(entry.get("uid", "")))
+                unavailable = bool(entry.get('load_error')) or entry.get('file_status') == 'failed'
+                self._run_combo.addItem(run_status_icon(entry.get('status', ''), unavailable=unavailable),
+                                        str(entry.get("label", "")), str(entry.get("uid", "")))
+                tooltip = '\n'.join(str(value) for value in (
+                    entry.get('status'), entry.get('reason'), entry.get('storage_error'),
+                    entry.get('load_error'), entry.get('note'), entry.get('uid')) if value)
+                self._run_combo.setItemData(self._run_combo.count() - 1, tooltip, QtCore.Qt.ToolTipRole)
             target_index = -1
             if selected_uid:
                 for index, entry in enumerate(entries):
@@ -1596,19 +1214,27 @@ class DiffractionHistoryViewer(QWidget):
         current_index = self._run_combo.currentIndex()
         has_entries = bool(entries)
         controls_enabled = tiled_enabled and history_enabled and has_entries
-        history_controls_enabled = tiled_enabled and history_enabled
         self._run_combo.setEnabled(controls_enabled)
-        self._previous_button.setEnabled(controls_enabled and current_index > 0)
-        self._next_button.setEnabled(
+        self._previous_button.setEnabled(
             controls_enabled and current_index >= 0 and current_index < (len(entries) - 1)
         )
-        self._live_checkbox.setEnabled(history_controls_enabled)
+        self._next_button.setEnabled(controls_enabled and current_index > 0)
+        self._run_combo.setToolTip(self._run_combo.currentText() + '\n' + str(self._run_combo.currentData(QtCore.Qt.ToolTipRole) or ''))
+        self._live_checkbox.setEnabled(True)
         self._status_label.setText(status_text)
         self._apply_theme_from_palette()
 
     @QtCore.Slot(object)
     def reset(self, config=None):
+        self.set_history_message('')
         return self._plot_widget.reset(config)
+
+    @QtCore.Slot(str)
+    def set_history_message(self, text):
+        self._history_message.setText(text)
+        self._history_message.setVisible(bool(text))
+        if text:
+            self._history_message.raise_()
 
     @QtCore.Slot(str, object, object)
     def set_profile(self, detector_name, x_values, y_values):
@@ -1724,6 +1350,7 @@ class DiffractionHistoryViewer(QWidget):
             self.setStyleSheet(f"background-color: {window};")
             self._previous_button.setStyleSheet(button_style)
             self._next_button.setStyleSheet(button_style)
+            self._analysis_button.setStyleSheet(button_style)
             self._run_combo.setStyleSheet(combo_style)
             self._tiled_checkbox.setStyleSheet(checkbox_style)
             self._live_checkbox.setStyleSheet(checkbox_style)
@@ -1746,6 +1373,7 @@ class DiffractionLivePlot(QtCore.QObject):
     _history_state_updated = QtCore.Signal(object)
     _history_refresh_completed = QtCore.Signal(int, object)
     _history_load_completed = QtCore.Signal(int, object)
+    _history_plot_message = QtCore.Signal(str)
 
     def __init__(self, widget, *, stream_name="primary", re_client=None, parent=None):
         super().__init__(parent)
@@ -1770,6 +1398,8 @@ class DiffractionLivePlot(QtCore.QObject):
             self._history_state_updated.connect(set_history_state, queued)
         self._history_refresh_completed.connect(self._on_history_refresh_completed, queued)
         self._history_load_completed.connect(self._on_history_load_completed, queued)
+        if callable(getattr(self.widget, 'set_history_message', None)):
+            self._history_plot_message.connect(self.widget.set_history_message, queued)
 
         self._descriptor_stream = {}
         self._descriptor_run_start = {}
@@ -1803,7 +1433,9 @@ class DiffractionLivePlot(QtCore.QObject):
         self._armed_live_field_signature = ()
         self._planned_summary_x = []
         self._displayed_run_uid = ""
+        self._selected_history_uid = ""
         self._current_live_run_uid = ""
+        self._live_run_active = False
         self._current_live_start_doc = {}
         self._provisional_live_context = False
         self._rendered_primary_seq_nums = set()
@@ -1813,6 +1445,7 @@ class DiffractionLivePlot(QtCore.QObject):
         self._history_limit = int(DEFAULT_HISTORY_LIMIT)
         self._history_entries = []
         self._history_catalog = None
+        self._history_client = None
         self._history_catalog_name = ""
         self._history_mode = ""
         self._history_error = ""
@@ -1822,6 +1455,7 @@ class DiffractionLivePlot(QtCore.QObject):
         self._startup_history_uid = ""
         self._startup_history_retry_count = 0
         self._history_executor = None
+        self._analysis_viewer = None
         self._active = False
         self._running_item_events_connected = False
 
@@ -1840,6 +1474,9 @@ class DiffractionLivePlot(QtCore.QObject):
         live_follow_toggled = getattr(self.widget, "live_follow_toggled", None)
         if live_follow_toggled is not None:
             live_follow_toggled.connect(self._on_live_follow_toggled)
+        analysis_requested = getattr(self.widget, "analysis_requested", None)
+        if analysis_requested is not None:
+            analysis_requested.connect(self.open_analysis_viewer)
         self.destroyed.connect(self.shutdown)
         self.activate()
         self._emit_history_state()
@@ -1885,7 +1522,36 @@ class DiffractionLivePlot(QtCore.QObject):
         self._shutdown_history_executor()
 
     def shutdown(self, *_args):
+        window = self._analysis_viewer
+        self._analysis_viewer = None
+        if window is not None:
+            try:
+                window.close()
+            except RuntimeError:
+                pass
         self.deactivate()
+
+    def open_analysis_viewer(self):
+        """Open an independent, read-only diffraction browser without pausing live plots."""
+        if self._analysis_viewer is not None:
+            self._analysis_viewer.show()
+            self._analysis_viewer.raise_()
+            self._analysis_viewer.activateWindow()
+            return
+        client = self._history_client
+        if client is None:
+            client = ensure_tiled_login(parent=self.widget)
+        if client is None:
+            return
+        from .diffraction_history_window import DiffractionHistoryWindow
+
+        window = DiffractionHistoryWindow(
+            client, mode=get_bluesky_active_mode(),
+            selected_uid=self._displayed_run_uid, parent=self.widget,
+        )
+        self._analysis_viewer = window
+        window.destroyed.connect(lambda: setattr(self, "_analysis_viewer", None))
+        window.show()
 
     def _shutdown_history_executor(self, *_args):
         executor = getattr(self, "_history_executor", None)
@@ -2037,6 +1703,7 @@ class DiffractionLivePlot(QtCore.QObject):
         if request_kind == "history":
             self._display_mode = "history"
             self._live_follow_enabled = False
+            self._selected_history_uid = uid
             self._disarm_live_subscriptions()
             self._clear_live_previews_requested.emit()
 
@@ -2051,12 +1718,13 @@ class DiffractionLivePlot(QtCore.QObject):
         self._emit_history_state(status_text=f"{prefix}: {target_label}", selected_uid=uid)
 
         future = executor.submit(self._history_load_task, uid, request_kind)
-        future.add_done_callback(lambda fut, token=token: self._emit_history_load_result(token, fut))
+        future.add_done_callback(lambda fut, token=token, uid=uid, kind=request_kind:
+                                 self._emit_history_load_result(token, fut, uid=uid, request_kind=kind))
 
-    def _emit_history_load_result(self, token, future):
+    def _emit_history_load_result(self, token, future, *, uid='', request_kind='history'):
         payload = {
-            "uid": "",
-            "request_kind": "history",
+            "uid": uid,
+            "request_kind": request_kind,
             "snapshot": None,
             "entry": None,
             "error": "",
@@ -2076,7 +1744,18 @@ class DiffractionLivePlot(QtCore.QObject):
         error_text = str(payload.get("error", "") or "")
         if error_text:
             prefix = "Startup history unavailable" if request_kind == "startup" else "History load failed"
-            self._emit_history_state(status_text=f"{prefix}: {error_text}")
+            uid = str(payload.get('uid') or '')
+            if request_kind != 'startup' and uid:
+                entry = payload.get('entry') or self._history_entry_for_uid(uid) or {'uid': uid, 'label': uid[:8]}
+                self._merge_history_entry({**entry, 'load_error': error_text})
+                # A selection is a navigation position even when reading it
+                # fails. Otherwise arrows keep retrying it from the last plot.
+                self._selected_history_uid = uid
+                self._displayed_run_uid = uid
+                self._reset_requested.emit({'run_title': 'Historical run unavailable',
+                                            'show_count_rate_gauge': False})
+                self._history_plot_message.emit(f"Failed run / data unavailable\n{entry.get('title') or entry.get('label') or uid}\n{error_text}")
+            self._emit_history_state(status_text=f"{prefix}: {error_text}", selected_uid=uid or None)
             if (
                 request_kind == "startup"
                 and self._live_follow_enabled
@@ -2133,7 +1812,7 @@ class DiffractionLivePlot(QtCore.QObject):
         if request_kind == "latest":
             if not self._live_follow_enabled:
                 return
-            self._render_history_snapshot(snapshot, historical=False)
+            self._render_history_snapshot(snapshot, historical=True)
             self._display_mode = "live"
             self._displayed_run_uid = uid
             self._emit_history_state(
@@ -2142,11 +1821,25 @@ class DiffractionLivePlot(QtCore.QObject):
             )
             return
 
-        self._render_history_snapshot(snapshot, historical=True)
+        self.show_history_snapshot(snapshot)
+
+    def show_history_snapshot(self, snapshot):
+        """Replay a loaded PSD/scalar snapshot on either existing plot widget.
+
+        Call on the Qt thread. Data loading can happen in a background worker
+        using analysis.diffraction_history.build_history_snapshot.
+        """
+        self._history_load_token += 1
         self._display_mode = "history"
         self._live_follow_enabled = False
-        self._displayed_run_uid = uid
-        self._emit_history_state(status_text="Viewing historical diffraction run", selected_uid=uid)
+        self._render_history_snapshot(snapshot, historical=True, register_descriptors=True)
+        self._displayed_run_uid = str(snapshot.get("uid", ""))
+        stop = snapshot.get("stop") or {}
+        exit_status = str(stop.get("exit_status", "") or "")
+        status = "Viewing historical diffraction run"
+        if exit_status and exit_status != "success":
+            status += f" ({exit_status}: {stop.get('reason', '')})"
+        self._emit_history_state(status_text=status, selected_uid=self._displayed_run_uid)
 
     def _history_refresh_task(self, autoload_live):
         catalog, catalog_name, mode = self._ensure_history_catalog()
@@ -2165,19 +1858,23 @@ class DiffractionLivePlot(QtCore.QObject):
         if not _is_diffraction_start_doc(start_doc):
             raise RuntimeError("Selected run is not tagged as diffraction data.")
 
-        snapshot = self._build_history_snapshot(
-            run,
-            start_doc,
-            stop_doc,
-            allow_empty=(str(request_kind or "history") == "startup"),
-        )
+        entry = _make_history_entry(uid, start_doc, stop_doc)
+        try:
+            if entry['status'] == 'Failed' and request_kind != 'startup':
+                raise RuntimeError(f"Recorded acquisition failure: {entry['reason'] or 'No reason recorded'}")
+            snapshot = self._build_history_snapshot(
+                run, start_doc, stop_doc,
+                allow_empty=(str(request_kind or "history") == "startup"),
+            )
+        except Exception as exc:
+            return {'uid': str(uid), 'request_kind': request_kind, 'entry': entry, 'error': str(exc)}
 
         return {
             "uid": str(uid),
             "request_kind": str(request_kind or "history"),
             "catalog_name": catalog_name,
             "mode": mode,
-            "entry": _make_history_entry(uid, start_doc),
+            "entry": entry,
             "snapshot": snapshot,
         }
 
@@ -2186,7 +1883,10 @@ class DiffractionLivePlot(QtCore.QObject):
         if self._history_catalog is not None and self._history_mode == desired_mode:
             return self._history_catalog, self._history_catalog_name, self._history_mode
 
-        client = _build_tiled_client(get_tiled_uri())
+        client = self._history_client
+        if client is None:
+            client = _build_tiled_client(get_tiled_uri())
+            self._history_client = client
         preferred_names = _preferred_catalog_names_for_mode(desired_mode)
         catalog_name = _resolve_catalog_name(client, preferred_names)
         catalog = client[catalog_name]
@@ -2197,49 +1897,7 @@ class DiffractionLivePlot(QtCore.QObject):
         return self._history_catalog, self._history_catalog_name, self._history_mode
 
     def _fetch_recent_history_entries(self, catalog, *, limit):
-        limit = max(1, int(limit))
-
-        def _collect_entries(tree):
-            try:
-                iterable = tree.sort(("time", -1)).items()
-            except Exception:
-                iterable = tree.items()
-            out = []
-            seen = set()
-            scan_cap = max(limit * 5, 300)
-            for index, (uid, run) in enumerate(iterable):
-                if index >= scan_cap:
-                    break
-                start_doc, _ = _run_start_stop_docs(run)
-                if not _is_diffraction_start_doc(start_doc):
-                    continue
-                entry = _make_history_entry(uid, start_doc)
-                uid_text = str(entry.get("uid", "") or "")
-                if not uid_text or uid_text in seen:
-                    continue
-                seen.add(uid_text)
-                out.append(entry)
-                if len(out) >= limit:
-                    break
-            out.sort(
-                key=lambda item: (
-                    item.get("time") is None,
-                    -(float(item.get("time")) if item.get("time") is not None else 0.0),
-                )
-            )
-            return out[:limit]
-
-        query_tree = catalog
-        if Key is not None:
-            try:
-                query_tree = catalog.search(Key("experiment_type") == DIFFRACTION_EXPERIMENT_TYPE)
-            except Exception:
-                query_tree = catalog
-
-        entries = _collect_entries(query_tree)
-        if entries or query_tree is catalog:
-            return entries
-        return _collect_entries(catalog)
+        return fetch_recent_history_entries(catalog, limit=limit)
 
     def _merge_history_entry(self, entry):
         entry = dict(entry or {})
@@ -2271,6 +1929,8 @@ class DiffractionLivePlot(QtCore.QObject):
         return -1
 
     def _current_selected_history_uid(self):
+        if self._display_mode == 'history' and self._selected_history_uid:
+            return self._selected_history_uid
         if self._displayed_run_uid:
             return str(self._displayed_run_uid)
         if self._current_live_run_uid:
@@ -2324,6 +1984,7 @@ class DiffractionLivePlot(QtCore.QObject):
                 self._emit_history_state()
                 return
             self._tiled_enabled = True
+            self._history_client = client
             self._history_catalog = None
             self._history_catalog_name = ""
             self._history_mode = ""
@@ -2334,6 +1995,7 @@ class DiffractionLivePlot(QtCore.QObject):
             return
 
         self._tiled_enabled = False
+        self._history_client = None
         self._history_catalog = None
         self._history_catalog_name = ""
         self._history_mode = ""
@@ -2341,12 +2003,15 @@ class DiffractionLivePlot(QtCore.QObject):
         self._history_entries = []
         self._history_refresh_token += 1
         self._history_load_token += 1
+        self._on_live_follow_toggled(True)
         self._emit_history_state(status_text="Live only (Tiled off)")
 
     def _on_live_follow_toggled(self, enabled):
         enabled = bool(enabled)
         if enabled == self._live_follow_enabled:
             return
+        # A late history read must not switch live following off again.
+        self._history_load_token += 1
         if enabled:
             self._live_follow_enabled = True
             self._display_mode = "live"
@@ -2355,11 +2020,12 @@ class DiffractionLivePlot(QtCore.QObject):
                 isinstance(self._current_live_start_doc, dict)
                 and self._current_live_start_doc
                 and active_uid
+                and self._current_live_start_doc.get('uid') == active_uid
                 and str(self._displayed_run_uid or "") != str(self._current_live_run_uid or "")
             ):
                 self._configure_run_display(self._current_live_start_doc, historical=False)
             self._arm_current_running_item()
-            self._emit_history_state(status_text="Live diffraction run")
+            self._emit_history_state(status_text="Live diffraction run" if active_uid else 'Live follow enabled · waiting for next diffraction run')
             self._request_startup_history_load()
             return
         self._live_follow_enabled = False
@@ -2369,143 +2035,33 @@ class DiffractionLivePlot(QtCore.QObject):
         self._emit_history_state(status_text="History mode")
 
     def _read_active_run_uid(self, *, allow_cached=False):
-        value = _safe_caget(RUN_UID_STATUS_PV)
-        text = str(value or "").strip()
-        if text:
-            return text
-        if allow_cached:
+        # State is an EPICS mbbo: request its label, not its integer value.
+        state = str(_safe_caget(RUN_STATE_STATUS_PV, as_string=True) or '').strip().upper()
+        if state in {'IDLE', 'DONE', 'ABORTED', 'FAILED', 'CLOSED', 'STALE'}:
+            return ''
+        if state in {'RUNNING', 'PAUSED', 'SUSPENDED'}:
+            value = _safe_caget(RUN_UID_STATUS_PV)
+            if value:
+                return str(value).strip()
+        # Start/Stop documents also establish activity if status PVs cannot
+        # be reached. A retained RunUID PV by itself is not activity evidence.
+        if self._live_run_active and (allow_cached or self._current_live_run_uid):
             return str(self._current_live_run_uid or "").strip()
         return ""
 
     def _select_history_stream(self, run, start_doc):
-        run_uid = str(dict(start_doc or {}).get("uid", "") or "")
-        ranked_streams = []
-        try:
-            stream_names = list(run)
-        except Exception:
-            stream_names = []
-
-        for stream_name in stream_names:
-            stream_name = str(stream_name or "").strip()
-            if not stream_name:
-                continue
-            try:
-                stream = run[stream_name]
-            except Exception:
-                continue
-            descriptor_docs = _stream_descriptor_docs(run_uid, stream_name, stream, start_doc)
-            if not descriptor_docs:
-                continue
-            data_keys = _plain_mapping(descriptor_docs[0].get("data_keys"))
-            if not _data_keys_have_plot_payload(data_keys, start_doc):
-                continue
-            if stream_name == self.stream_name:
-                priority = 0
-            elif stream_name == "baseline":
-                priority = 2
-            else:
-                priority = 1
-            ranked_streams.append((priority, stream_name, stream, data_keys))
-
-        if not ranked_streams:
-            return None, None, None
-
-        ranked_streams.sort(key=lambda item: (item[0], item[1]))
-        _priority, stream_name, stream, data_keys = ranked_streams[0]
-        return stream_name, stream, data_keys
+        return select_history_stream(run, start_doc, stream_name=self.stream_name)
 
     def _build_history_snapshot(self, run, start_doc, stop_doc, *, allow_empty=False):
-        base_snapshot = {
-            "uid": str(dict(start_doc or {}).get("uid", "") or ""),
-            "stream_name": "",
-            "start": {key: _to_plain_value(value) for key, value in dict(start_doc or {}).items()},
-            "stop": (
-                {key: _to_plain_value(value) for key, value in dict(stop_doc or {}).items()}
-                if isinstance(stop_doc, Mapping)
-                else None
-            ),
-            "descriptor_docs": [],
-            "rows": [],
-            "seq_nums": [],
-            "pending_reason": "",
-        }
-        stream_name, stream, data_keys = self._select_history_stream(run, start_doc)
-        if stream is None:
-            if allow_empty:
-                snapshot = dict(base_snapshot)
-                snapshot["pending_reason"] = "No diffraction-compatible stream is available yet."
-                return snapshot
-            raise RuntimeError("No diffraction-compatible stream was found for this run.")
-        descriptor_docs = _stream_descriptor_docs(
-            str(dict(start_doc or {}).get("uid", "") or ""),
-            stream_name,
-            stream,
-            start_doc,
+        return build_history_snapshot(
+            run, start_doc, stop_doc, stream_name=self.stream_name, allow_empty=allow_empty,
         )
-        base_snapshot["stream_name"] = str(stream_name)
-        base_snapshot["descriptor_docs"] = list(descriptor_docs or [])
-
-        try:
-            dataset = stream.read()
-        except Exception as exc:
-            if allow_empty:
-                snapshot = dict(base_snapshot)
-                snapshot["pending_reason"] = f"Tiled stream {stream_name!r} is not readable yet: {exc}"
-                return snapshot
-            raise RuntimeError(f"Unable to read Tiled stream {stream_name!r}: {exc}") from exc
-
-        row_count = _stream_row_count(dataset, data_keys)
-        if row_count <= 0:
-            if allow_empty:
-                snapshot = dict(base_snapshot)
-                snapshot["pending_reason"] = f"Tiled stream {stream_name!r} does not contain stored rows yet."
-                return snapshot
-            raise RuntimeError(f"Tiled stream {stream_name!r} did not contain any rows.")
-
-        page_data = {}
-        data_vars = getattr(dataset, "data_vars", {}) or {}
-        for var_name in list(getattr(data_vars, "keys", lambda: [])()):
-            try:
-                variable = dataset[var_name]
-            except Exception:
-                continue
-            values = _dataset_column_to_event_list(
-                getattr(variable, "values", variable),
-                row_count=row_count,
-                data_key=data_keys.get(var_name),
-            )
-            if values is None or len(values) != row_count:
-                continue
-            page_data[str(var_name)] = values
-
-        rows = []
-        seq_nums = []
-        for index in range(int(max(0, row_count))):
-            row = {}
-            for key, values in page_data.items():
-                try:
-                    row[str(key)] = values[index]
-                except Exception:
-                    pass
-            rows.append(row)
-            seq_nums.append(index + 1)
-
-        if not rows:
-            if allow_empty:
-                snapshot = dict(base_snapshot)
-                snapshot["pending_reason"] = f"Tiled stream {stream_name!r} does not have plottable rows yet."
-                return snapshot
-            raise RuntimeError(f"Tiled stream {stream_name!r} did not yield any plottable rows.")
-
-        snapshot = dict(base_snapshot)
-        snapshot["rows"] = rows
-        snapshot["seq_nums"] = seq_nums
-        return snapshot
 
     def _configure_run_display(self, start_doc, *, historical):
         start_doc = dict(start_doc or {})
         self._detector_axis_cache.clear()
         self._run_uid = str(start_doc.get("uid", ""))
+        self._selected_history_uid = self._run_uid
         self._displayed_run_uid = str(self._run_uid or "")
         self._run_title = str(start_doc.get("title", "") or "")
         self._plan_name = str(start_doc.get("plan_name", "") or "")
@@ -2768,6 +2324,10 @@ class DiffractionLivePlot(QtCore.QObject):
         for index, row in enumerate(rows):
             seq_num = seq_nums[index] if index < len(seq_nums) else (index + 1)
             self._render_history_row(data=dict(row or {}), seq_num=seq_num)
+        entry = _make_history_entry(snapshot.get('uid'), start_doc, snapshot.get('stop'))
+        export = snapshot.get('file_export') or {}
+        entry.update(file_status=export.get('status', ''), storage_error=export.get('error', ''))
+        self._merge_history_entry(entry)
 
     def _apply_live_backfill_snapshot(self, snapshot):
         snapshot = dict(snapshot or {})
@@ -2815,10 +2375,13 @@ class DiffractionLivePlot(QtCore.QObject):
             start_doc = dict(doc or {})
             if not _is_diffraction_start_doc(start_doc):
                 return
+            if self._live_follow_enabled:
+                self._history_load_token += 1
             self._descriptor_stream.clear()
             self._descriptor_run_start.clear()
             self._descriptor_data_keys.clear()
             self._current_live_run_uid = str(start_doc.get("uid", "") or "")
+            self._live_run_active = True
             self._current_live_start_doc = dict(start_doc)
             self._provisional_live_context = False
             self._merge_history_entry(_make_history_entry(self._current_live_run_uid, start_doc))
@@ -2885,6 +2448,11 @@ class DiffractionLivePlot(QtCore.QObject):
             return
 
         if name == "stop":
+            if self._live_follow_enabled:
+                self._history_load_token += 1
+            if str(doc.get('run_start') or '') == str(self._current_live_run_uid or ''):
+                self._live_run_active = False
+                self._current_live_run_uid = ''
             if (not self._live_follow_enabled) or self._display_mode != "live":
                 return
             exit_status = str(doc.get("exit_status", "") or "unknown")
