@@ -74,19 +74,26 @@ Confirm attributes/layout readbacks and successful XML loading.
 
 ## Diffraction HDF5 and Tiled storage
 
-Diffraction arrays live in the completed `.nxs` file. Tiled stores searchable
+Diffraction arrays live in one incrementally written `.nxs` file. Tiled stores searchable
 run metadata and scalar event rows in PostgreSQL, and registers HDF5 dataset
 references for the arrays. Array values are not uploaded to SQL or Zarr.
-The GUI continues plotting the original live documents; Tiled array reads
-become available after the run finishes and the file has been validated.
+The GUI continues plotting original live documents. Each full point is flushed
+and synced before its arrays are advertised through Tiled, including during a run.
 
 `RunStorage` is the single persistence subscription. It gives each run its own
-writer, writes the file synchronously at run completion, validates its UID and
-stream shapes, and publishes the final name atomically. Registration happens
-after the file closes. Existing single-event and scan layouts are preserved;
-matching raw and curated datasets share HDF5 storage through hard links.
+writer and appends chunked, extensible datasets without buffering spectra in
+Python lists. HDF5 SWMR allows independent readers during acquisition. The
+stable filename becomes visible after the first primary point is committed;
+its presence alone does **not** mean that acquisition has completed. Each stream
+has a `committed` row count below `/entry/instrument/bluesky/streams`. Values and
+timestamps are synced before advancing that count. An incomplete tail is never
+advertised as a complete point. NeXus UID and shapes are checked at finalization.
+Raw and curated datasets share HDF5 storage through hard links.
 The first PSD retains `/entry/data`, with additional PSDs exposed under
 `/entry/data_<detector>`. Each axis uses that detector's recorded bin count.
+Schema 2.0 always stores PSD counts as `(point, bin)`, including a one-point run;
+`event_index` and `position_x` identify those dimensions. Existing files retain
+their earlier layout and remain readable through the shared loader.
 
 The original Start, Stop and Descriptor documents are stored as JSON beneath
 `/entry/instrument/bluesky/documents`. Raw readings and field timestamps remain
@@ -94,6 +101,10 @@ under `/entry/instrument/bluesky/streams`. Writer metadata includes the full run
 UID, schema version, catalog identity, and a Tiled run URI without credentials.
 Both destinations retain baseline start/end summaries. Tiled's original Start
 document is preserved; summaries and file status are separate run metadata.
+Start JSON remains a scalar string. Mutable Stop/Descriptor JSON and the baseline
+summary use resizable UTF-8 **byte arrays**, avoiding SWMR's variable-length
+string restriction. Decode those datasets with `dataset[()].tobytes().decode('utf-8')`
+before JSON parsing. Their `encoding` and `mime_type` attributes identify the format.
 
 The private Tiled configuration needs the following additions to its existing
 catalog arguments. Retain its current database URIs and authentication settings:
@@ -122,10 +133,16 @@ diffraction arrays. Other plans retain their ordinary TiledWriter behavior.
 
 TiledWriter uses `batch_size=1`; the old `max_array_size=512` workaround has been
 removed. Supported diffraction descriptors mark arrays external and events sent
-to Tiled contain scalar values. When the file is ready, standard StreamResource
+to Tiled contain scalar values. After each durable point, standard StreamResource
 and StreamDatum documents associate each array with its original stream and
 sequence numbers. Thus existing reads such as
 `catalog[uid]["primary/he3psd0_counts"].read()` continue to work.
+The worker installs a small HDF5 consolidator extension for resources marked
+`committed_prefix`. It passes an explicit `0:N` slice to Tiled's standard HDF5
+adapter. Thus the catalog can still read its last published prefix when the
+physical file grows during a network outage. No custom server adapter is needed.
+When the first primary point makes the file visible, previously saved array
+monitor readings are also registered, including their original sequence gaps.
 
 The complete file is also available at `catalog[uid]["artifacts/nexus"]`
 (or `artifacts/csv` for a scalar CSV export). Run metadata `file_export` contains
@@ -135,9 +152,29 @@ registered as original file assets.
 
 During acquisition, `<output>.documents.jsonl` journals original documents,
 including arrays, with a flush and filesystem sync per document. Successful
-persistence removes the journal. Failures retain it and partial HDF5 files have
-a `.partial` suffix; they are never registered as complete output. Errors are
+persistence removes the journal. Failures retain it. Before the first primary
+point, provisional HDF5 files have a `.partial` suffix. Once live data is exposed,
+the stable `.nxs` path remains even if the run crashes. `file_export.status`,
+the original Stop document, and the file's `storage/state` distinguish finished,
+failed and unfinished runs; the complete artifact/checksum is registered only
+after finalization. Errors are
 reported to QueueServer rather than disappearing in a writer thread.
+
+If the worker exits abruptly, committed SWMR data remains readable with
+`h5py.File(path, 'r', swmr=True, libver='latest')`. This does not promise recovery
+of an unfinished exposure or protection against failed storage hardware.
+After confirming acquisition has stopped, rebuild an interrupted acquisition
+from its retained journal into a **new** NeXus file:
+
+```console
+python -m server.services.recover_diffraction /path/to/run.nxs.documents.jsonl --output /path/to/run-recovered.nxs
+```
+
+Recovery streams records to disk, preserves the source file and journal, and
+ignores only a torn final JSON line. If no original Stop exists, it records an
+explicit recovered/aborted Stop and the recovered point count. It does not clear
+HDF5 crash flags in place, overwrite originals, or alter Tiled. Catalog repair
+after incomplete scalar delivery remains a separate, deliberate recovery task.
 
 A completed file whose Tiled registration fails also retains
 `<output>.registration.json`. Using the same writer credentials and environment:
@@ -152,9 +189,18 @@ rows or replace the run. If scalar delivery failed earlier, retry explicitly
 refuses to mark it complete; retain the original journal for document recovery.
 An existing output file is never overwritten.
 
-Activate changes with acquisition idle: restart Tiled to load its readable
-paths, then close and reopen the QueueServer worker environment to load the new
-startup subscription. Do not restart IOCs. Existing catalog entries and older
+All streams and their fields must be declared before the first primary point;
+SWMR prohibits adding objects afterward. Current diffraction plans use this
+layout. Descriptor changes, new late streams, changed shapes/dtypes, external
+input fields, and oversized strings fail explicitly and retain recovery data.
+Strings use fixed UTF-8 byte storage (up to 65536 bytes per scalar value) rather
+than silently truncating longer values. CSV exports retain their existing mode;
+selecting scalar NeXus enables incremental saving too.
+
+Activate changes with acquisition idle: close and reopen the QueueServer worker
+environment to load the new writer. Reload the GUI for live backfill. Existing
+Tiled readable paths already suffice; a Tiled restart is needed only if those
+paths change. Do not restart IOCs. Existing catalog entries and older
 files are not migrated by this change.
 
 ### Storage design and format choices
@@ -179,10 +225,9 @@ references depend on those files remaining at their registered paths.
 For the present scalar/1D diffraction workload, retain NeXus/HDF5 as the
 acquisition format and Tiled as the access/catalog service. Scalar plans still
 offer CSV or NeXus; select NeXus when a portable HDF5 record is required.
-The writer currently buffers readings until run completion, with a durable
-document journal during acquisition. For long/large scans or live stored-array
-access, the next architectural improvement is incremental/chunked HDF5 writing,
-potentially SWMR, with explicit writer/reader coordination and failure recovery.
+The writer now appends and syncs each point with SWMR readers and a durable
+document journal. Finalization writes Stop/summary metadata and registers the
+complete artifact and checksum; it does not copy all spectra into a second file.
 Changing file format alone does not address buffering or metadata consistency.
 
 HDF5 is the container; NeXus supplies the scientific structure and meanings.
@@ -209,6 +254,8 @@ both formats without that use case.
 
 Primary documentation:
 
+- [h5py SWMR requirements and reader/writer protocol](https://docs.h5py.org/en/stable/swmr.html)
+- [Bluesky Tiled consolidator extension API](https://blueskyproject.io/bluesky-tiled-plugins/_api/bluesky_tiled_plugins/bluesky_tiled_plugins.writing.consolidators.html)
 - [Tiled catalog assets and data sources](https://blueskyproject.io/tiled/explanations/catalog.html)
 - [NeXus and HDF5](https://manual.nexusformat.org/introduction.html)
 - [NeXus signal, axes and units](https://manual.nexusformat.org/datarules.html)

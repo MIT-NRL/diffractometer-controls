@@ -83,6 +83,110 @@ class RunStorageTests(unittest.TestCase):
             self.storage(name, doc)
         return self.catalog[start["uid"]]
 
+    def test_tiled_and_loader_read_a_stable_prefix_before_stop(self):
+        start, descriptor, events, stop = self.documents(num=3)
+        self.addCleanup(self.storage.close)
+        self.storage("start", start)
+        self.storage("descriptor", descriptor)
+        for index, event in enumerate(events):
+            self.storage("event", event)
+            run = self.catalog[start["uid"]]
+            self.assertEqual(run.metadata["file_export"]["status"], "collecting")
+            self.assertEqual(run.metadata["file_export"]["committed_points"], index + 1)
+            source, = run["primary/he3psd0_counts"].data_sources()
+            self.assertTrue(source.parameters["swmr"])
+            snapshot = build_history_snapshot(run)
+            self.assertEqual(snapshot["seq_nums"], list(range(1, index + 2)))
+            self.assertEqual(len(snapshot["rows"]), index + 1)
+            np.testing.assert_array_equal(snapshot["rows"][-1]["he3psd0_counts"], np.arange(5) + index)
+        self.storage("stop", stop)
+        self.assertEqual(self.catalog[start["uid"]].metadata["file_export"]["status"], "ready")
+
+    def test_array_monitors_before_first_primary_point_are_registered_in_full(self):
+        start, descriptor, events, stop = self.documents(num=1)
+        self.addCleanup(self.storage.close)
+        monitor = copy.deepcopy(descriptor)
+        monitor.update(uid=str(uuid4()), name="he3psd0_counts_monitor")
+        monitor["data_keys"] = {"he3psd0_counts": monitor["data_keys"]["he3psd0_counts"]}
+        monitor["object_keys"] = {"he3psd0": ["he3psd0_counts"]}
+        self.storage("start", start)
+        self.storage("descriptor", monitor)
+        self.storage("descriptor", descriptor)
+
+        def record_monitor(sequence):
+            values = np.arange(5, dtype="int32") + sequence * 10
+            self.storage("event", {
+                "uid": str(uuid4()), "descriptor": monitor["uid"], "seq_num": sequence,
+                "time": start["time"] + sequence / 100,
+                "data": {"he3psd0_counts": values},
+                "timestamps": {"he3psd0_counts": start["time"] + sequence / 100},
+            })
+            return values
+
+        expected = [record_monitor(2), record_monitor(4)]
+        self.storage("event", events[0])
+        run = self.catalog[start["uid"]]
+        np.testing.assert_array_equal(run["he3psd0_counts_monitor/he3psd0_counts"].read(), expected)
+        expected.append(record_monitor(7))
+        np.testing.assert_array_equal(run["he3psd0_counts_monitor/he3psd0_counts"].read(), expected)
+        self.storage("stop", stop)
+        np.testing.assert_array_equal(run["he3psd0_counts_monitor/he3psd0_counts"].read(), expected)
+        self.assertEqual(run["he3psd0_counts_monitor/seq_num"].read().tolist(), [2, 4, 7])
+
+    def test_tiled_failure_does_not_stop_incremental_disk_saving(self):
+        start, descriptor, events, stop = self.documents(num=3)
+        self.addCleanup(self.storage.close)
+        self.storage("start", start)
+        self.storage("descriptor", descriptor)
+        self.storage("event", events[0])
+        real_writer = self.storage.tiled_writer
+
+        def offline(name, doc):
+            if name == "event":
+                raise OSError("Tiled offline")
+            return real_writer(name, doc)
+
+        self.storage.tiled_writer = offline
+        for event in events[1:]:
+            self.storage("event", event)
+        partial = build_history_snapshot(self.catalog[start["uid"]])
+        self.assertEqual(partial["seq_nums"], [1])
+        with self.assertRaises(RuntimeError):
+            self.storage("stop", stop)
+        output = self.storage.last_result["journal"].removesuffix(".documents.jsonl")
+        with h5py.File(output, "r") as handle:
+            self.assertEqual(handle["entry/data/counts"].shape, (3, 5))
+
+    def test_failure_before_tiled_start_still_saves_the_complete_file(self):
+        documents = self.documents(num=2)
+        self.storage.tiled_writer = lambda *args: (_ for _ in ()).throw(OSError("Tiled unavailable"))
+        with self.assertRaises(RuntimeError):
+            self.acquire(documents)
+        journal = pathlib.Path(self.storage.last_result["journal"])
+        output = pathlib.Path(str(journal).removesuffix(".documents.jsonl"))
+        with h5py.File(output, "r") as handle:
+            self.assertEqual(handle["entry/data/counts"].shape, (2, 5))
+        self.assertTrue(journal.exists())
+        manifest = json.loads(pathlib.Path(str(output) + ".registration.json").read_text())
+        self.assertFalse(manifest["events_complete"])
+
+    def test_failed_point_does_not_break_access_to_the_previous_committed_prefix(self):
+        start, descriptor, events, stop = self.documents(num=2)
+        self.addCleanup(self.storage.close)
+        self.storage("start", start)
+        self.storage("descriptor", descriptor)
+        self.storage("event", events[0])
+        writer = self.storage._active_runs[start["uid"]].writer
+        with patch.object(writer, "_sync", side_effect=OSError("storage sync failed")):
+            with self.assertRaises(OSError):
+                self.storage("event", events[1])
+        snapshot = build_history_snapshot(self.catalog[start["uid"]])
+        self.assertEqual(snapshot["file_export"]["status"], "failed")
+        self.assertEqual(snapshot["seq_nums"], [1])
+        np.testing.assert_array_equal(snapshot["rows"][0]["he3psd0_counts"], np.arange(5))
+        with self.assertRaises(OSError):
+            self.storage("stop", stop)
+
     def test_arrays_read_from_hdf5_without_sql_or_zarr_copies(self):
         documents = self.documents()
         original = copy.deepcopy(documents)
@@ -116,7 +220,7 @@ class RunStorageTests(unittest.TestCase):
                              handle["entry/instrument/bluesky/streams/primary/he3psd0_counts/value"].id)
             docs = handle["entry/instrument/bluesky/documents"]
             self.assertEqual(json.loads(docs["start"].asstr()[()]), documents[0])
-            self.assertEqual(json.loads(docs["stop"].asstr()[()]), documents[3])
+            self.assertEqual(json.loads(docs["stop"][()].tobytes().decode("utf-8")), documents[3])
 
     def test_interleaved_runs_and_test_paths_keep_independent_metadata(self):
         first = self.documents()
@@ -228,6 +332,67 @@ class RunStorageTests(unittest.TestCase):
                 self.assertEqual(snapshot["start"]["live_plot_fields"]["temperature"]["units"], "C")
                 self.assertNotIn("theta", snapshot["start"]["live_plot_fields"])
 
+    def test_active_scalar_loading_is_independent_of_csv_or_nexus_export(self):
+        from tests.test_scalar_data_writer import _start_doc, _descriptor, _event
+        root = self.root
+
+        class LocalScalar(ScalarDiffractionWriter):
+            output_root = root / 'active-scalar'
+
+        self.storage.add_writer(LocalScalar)
+        self.addCleanup(self.storage.close)
+        for format_name in ('csv', 'nexus'):
+            with self.subTest(format=format_name):
+                start = _start_doc(format_name)
+                start['uid'] = str(uuid4())
+                descriptor = _descriptor(start['uid'])
+                descriptor['uid'] = str(uuid4())
+                self.storage('start', start)
+                self.storage('descriptor', descriptor)
+                for seq in (2, 4):
+                    self.storage('event', _event(descriptor['uid'], seq, 295 + seq, seq * 0.5))
+                    snapshot = build_history_snapshot(self.catalog[start['uid']])
+                    self.assertEqual(snapshot['seq_nums'], [2] if seq == 2 else [2, 4])
+                    self.assertEqual(snapshot['rows'][-1]['temperature'], 295 + seq)
+                    self.assertIsNone(snapshot['stop'])
+                # A stale export watermark must not hide scalar SQL rows.
+                run = self.catalog[start['uid']]
+                base = getattr(run, 'base', run)
+                base.update_metadata({'file_export': {'status': 'collecting', 'incremental': True,
+                                                      'committed_points': 0}})
+                self.assertEqual(len(build_history_snapshot(self.catalog[start['uid']])['rows']), 2)
+                self.storage('stop', {'uid': str(uuid4()), 'run_start': start['uid'],
+                                     'time': start['time'] + 5, 'exit_status': 'success',
+                                     'reason': '', 'num_events': {'primary': 2}})
+
+    def test_failed_scalar_file_export_keeps_tiled_readings_loadable(self):
+        from tests.test_scalar_data_writer import _start_doc, _descriptor, _event
+        root = self.root
+
+        class LocalScalar(ScalarDiffractionWriter):
+            output_root = root / 'failed-scalar-export'
+
+        self.storage.add_writer(LocalScalar)
+        for format_name in ('csv', 'nexus'):
+            with self.subTest(format=format_name):
+                start = _start_doc(format_name)
+                start['uid'] = str(uuid4())
+                descriptor = _descriptor(start['uid'])
+                descriptor['uid'] = str(uuid4())
+                events = [_event(descriptor['uid'], index + 1, 295 + index, index * 0.5) for index in range(2)]
+                stop = {'uid': str(uuid4()), 'run_start': start['uid'], 'time': start['time'] + 3,
+                        'exit_status': 'success', 'reason': '', 'num_events': {'primary': 2}}
+                method = '_write_csv' if format_name == 'csv' else 'validate_file'
+                with patch.object(LocalScalar, method, side_effect=OSError('Export disk unavailable')):
+                    with self.assertRaises(OSError):
+                        self.acquire((start, descriptor, events, stop))
+                snapshot = build_history_snapshot(self.catalog[start['uid']])
+                self.assertEqual(snapshot['seq_nums'], [1, 2])
+                self.assertEqual([row['temperature'] for row in snapshot['rows']], [295, 296])
+                self.assertEqual(snapshot['file_export']['status'], 'failed')
+                self.assertIn('Export disk unavailable', snapshot['file_export']['error'])
+                self.assertEqual(snapshot['stop'], stop)
+
     def test_history_search_sorts_nested_start_times_newest_first(self):
         uids = []
         for timestamp in (2100000000, 2100000002, 2100000001):
@@ -285,6 +450,29 @@ class RunStorageTests(unittest.TestCase):
         self.assertEqual(run.metadata["baseline_readings"]["reactor_power_6"]["start"], 6.0)
         with h5py.File(self.storage.last_result["file"]) as handle:
             self.assertIn("entry/data_sim_he3psd1/counts", handle)
+
+    def test_real_scalar_nexus_plan_keeps_live_monitor_streams(self):
+        from bluesky import RunEngine
+        from tests.test_scalar_plans import _load_scalar_plan_namespace
+        root = self.root
+
+        class LocalScalar(ScalarDiffractionWriter):
+            output_root = root / "scalar-monitor"
+            test_output_root = root / "scalar-monitor-test"
+
+        self.storage.add_writer(LocalScalar)
+        namespace = _load_scalar_plan_namespace()
+        engine = RunEngine({"bluesky_catalog": "testdb"})
+        engine.subscribe(self.storage)
+        uid, = engine(namespace["count_scalar"](
+            "incremental scalar", detectors=namespace["temperature"],
+            acquire_time=0.01, num=2, file_type="nexus",
+        ))
+        self.assertEqual(len(build_history_snapshot(self.catalog[uid])["rows"]), 2)
+        with h5py.File(self.storage.last_result["file"]) as handle:
+            streams = handle["entry/instrument/bluesky/streams"]
+            self.assertIn("temperature_monitor", streams)
+            self.assertGreaterEqual(streams["temperature_monitor/committed"][()], 2)
 
     def test_artifact_retry_preserves_file_and_does_not_duplicate_scalar_rows(self):
         documents = self.documents()
@@ -365,8 +553,14 @@ class RunStorageTests(unittest.TestCase):
     def test_write_failure_never_publishes_final_file(self):
         documents = self.documents()
         with patch.object(self.writer_class, "write_root", side_effect=OSError("disk full")):
+            self.storage("start", documents[0])
+            self.storage("descriptor", documents[1])
             with self.assertRaises(OSError):
-                self.acquire(documents)
+                self.storage("event", documents[2][0])
+            # RunEngine emits Stop after an event callback fails. Exercise that
+            # cleanup explicitly when using this document-level fixture.
+            with self.assertRaises(OSError):
+                self.storage("stop", documents[3])
         journal = pathlib.Path(self.storage.last_result["journal"])
         output = pathlib.Path(str(journal).removesuffix(".documents.jsonl"))
         self.assertFalse(output.exists())

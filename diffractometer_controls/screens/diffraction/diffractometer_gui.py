@@ -13,6 +13,7 @@ from pydm.widgets.channel import PyDMChannel
 # from bluesky_widgets.models.plot_builders import Lines, Images
 from bluesky_widgets.models.run_engine_client import RunEngineClient
 from diffractometer_controls.site.mitr.experiment_screen import ExperimentScreen
+from control_ui.widgets.row_geometry import match_control_heights
 
 _DIFFRACTION_PLOT_SUPPORT = None
 
@@ -205,9 +206,9 @@ class MainScreen(ExperimentScreen):
             plot_class = classes["pyqtgraph_plot"] or classes["matplotlib_plot"]
             plot_widget = plot_class()
             viewer = classes["viewer"](plot_widget)
-            self._diffraction_live_plot = classes["controller"](viewer, re_client=re_client)
+            self._diffraction_live_plot = classes["controller"](viewer, re_client=re_client, auto_history=True)
             self._document_subscription = self.services.documents.subscribe(
-                self._diffraction_live_plot.on_document
+                self._diffraction_live_plot.on_document, accept_partial=True
             )
         else:
             viewer = _DiffractionUnavailableWidget(support.get("message", ""))
@@ -218,6 +219,7 @@ class MainScreen(ExperimentScreen):
         )
         self._setup_acquire_indicator()
         self._setup_time_remaining_progress()
+        self._match_acquisition_row_heights()
 
         self.ui.Data_Viewer.layout().addWidget(viewer)
 
@@ -256,7 +258,7 @@ class MainScreen(ExperimentScreen):
             controller.activate()
             if self._document_subscription is None:
                 self._document_subscription = self.services.documents.subscribe(
-                    controller.on_document
+                    controller.on_document, accept_partial=True
                 )
         if self._acquisition_document_subscription is None:
             self._acquisition_document_subscription = self.services.documents.subscribe(
@@ -295,7 +297,6 @@ class MainScreen(ExperimentScreen):
 
         self.acquire_indicator = QtWidgets.QLabel(self.ui)
         self.acquire_indicator.setObjectName("acquireIndicator")
-        self.acquire_indicator.setFixedSize(40, 40)
         self.acquire_indicator.setAlignment(QtCore.Qt.AlignCenter)
         row_layout.insertWidget(index, self.acquire_indicator)
         self._set_acquire_indicator(False, "No active run")
@@ -311,8 +312,6 @@ class MainScreen(ExperimentScreen):
             return
 
         self.time_remaining_progress = QtWidgets.QProgressBar(self.ui)
-        self.time_remaining_progress.setMinimumHeight(34)
-        self.time_remaining_progress.setMaximumHeight(34)
         self.time_remaining_progress.setMinimumWidth(220)
         self.time_remaining_progress.setSizePolicy(
             QtWidgets.QSizePolicy.Expanding,
@@ -348,6 +347,30 @@ class MainScreen(ExperimentScreen):
         old_widget.hide()
         row_layout.insertWidget(idx, self.time_remaining_progress)
         row_layout.setStretch(idx, 2)
+
+    def _match_acquisition_row_heights(self):
+        if getattr(self, '_matching_acquisition_heights', False):
+            return
+        indicator = getattr(self, 'acquire_indicator', None)
+        progress = getattr(self, 'time_remaining_progress', None)
+        if indicator is None or progress is None:
+            return
+        self._matching_acquisition_heights = True
+        try:
+            height = match_control_heights(indicator, progress, self.ui.PyDMRelatedDisplayButton)
+            indicator.setFixedWidth(height)
+            # The progress bar sits inside two Designer layouts; their margins
+            # must not offset it from the light and detector configuration button.
+            self.ui.verticalLayout_4.setContentsMargins(0, 0, 0, 0)
+            self.ui.horizontalLayout.setContentsMargins(0, 0, 0, 0)
+        finally:
+            self._matching_acquisition_heights = False
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() in (QtCore.QEvent.FontChange, QtCore.QEvent.ApplicationFontChange,
+                            QtCore.QEvent.StyleChange):
+            self._match_acquisition_row_heights()
 
     @staticmethod
     def _channel_address(pvname):

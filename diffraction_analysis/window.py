@@ -7,8 +7,8 @@ import threading
 from qtpy import QtCore, QtWidgets
 
 from .history import (
-    _format_run_timestamp, _is_diffraction_start_doc, _run_metadata, _run_start_stop_docs,
-    build_history_snapshot, fetch_recent_history_entries,
+    _is_diffraction_start_doc, _run_metadata, _run_start_stop_docs,
+    build_history_snapshot, fetch_recent_history_entries, format_history_entry, history_entry_tooltip,
 )
 from .panel import AnalysisPanel
 from .fitting import fit_curve
@@ -60,11 +60,13 @@ class DiffractionAnalysisWindow(QtWidgets.QMainWindow):
         self.load_more_button.clicked.connect(self._load_more)
         self.load_more_button.setEnabled(False)
         self.search_edit = QtWidgets.QLineEdit(self)
-        self.search_edit.setPlaceholderText("Filter title, sample, plan, status, ID or UID")
+        self.search_edit.setPlaceholderText("Filter title, sample, detector, plan, status or ID")
         self.search_edit.textChanged.connect(self._filter_entries)
         self.count_label = QtWidgets.QLabel("Connecting…", self)
         self.run_list = QtWidgets.QListWidget(self)
         self.run_list.setMinimumWidth(240)
+        self.run_list.setTextElideMode(QtCore.Qt.ElideRight)
+        self.run_list.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.run_list.currentItemChanged.connect(self._run_selected)
 
         left = QtWidgets.QWidget(self)
@@ -251,7 +253,7 @@ class DiffractionAnalysisWindow(QtWidgets.QMainWindow):
         text = self.search_edit.text().strip().casefold()
         shown = 0
         for index, entry in enumerate(self._entries):
-            match = text in " ".join(str(entry.get(key, "") or "") for key in ("title", "sample", "plan_name", "scan_id", "uid", "status", "exit_status", "reason")).casefold()
+            match = text in " ".join(str(entry.get(key, "") or "") for key in ("title", "sample", "detectors", "plan_name", "scan_id", "uid", "status", "exit_status", "reason")).casefold()
             self.run_list.item(index).setHidden(not match)
             shown += int(match)
         self.count_label.setText(f"{shown} shown / {len(self._entries)} loaded · diffraction only")
@@ -341,16 +343,11 @@ class DiffractionAnalysisWindow(QtWidgets.QMainWindow):
             self.load_more_button.setEnabled(payload["has_more"])
             with QtCore.QSignalBlocker(self.run_list):
                 for entry in self._entries:
-                    scan = entry.get("scan_id")
-                    prefix = f"#{scan} · " if scan is not None else ""
-                    title = entry.get("title") or entry.get("plan_name") or entry["uid"][:8]
-                    text = f"{prefix}{title}\n{entry['status']} · {_format_run_timestamp(entry.get('time'))} · {entry.get('data_type', '')}"
+                    text = format_history_entry(entry, multiline=True)
                     item = QtWidgets.QListWidgetItem(text, self.run_list)
                     item.setIcon(run_status_icon(entry['status'], unavailable=bool(entry.get('load_error')) or entry.get('file_status') == 'failed'))
                     item.setData(QtCore.Qt.UserRole, entry["uid"])
-                    item.setToolTip('\n'.join(str(value) for value in (
-                        entry['uid'], entry['status'], entry.get('reason'), entry.get('note'),
-                        entry.get('storage_error'), entry.get('plan_name'), entry.get('sample')) if value))
+                    item.setToolTip(history_entry_tooltip(entry))
             self._filter_entries()
             self.statusBar().showMessage(f"Catalog: {payload['catalog_name']} · diffraction data only · read-only")
             target = next((index for index, entry in enumerate(self._entries) if entry["uid"] == self._selected_uid), 0)

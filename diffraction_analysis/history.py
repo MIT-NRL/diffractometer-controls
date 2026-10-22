@@ -186,22 +186,60 @@ def _make_history_entry(uid, start_doc, stop_doc=None):
     title = str(start_doc.get("title", "") or "").strip()
     plan_name = str(start_doc.get("plan_name", "") or "").strip()
     time_value = _coerce_number(start_doc.get("time"))
-    timestamp_text = _format_run_timestamp(time_value)
-    base_label = title or plan_name or str(uid or "")[:8] or "Diffraction Run"
     outcome = run_outcome(start_doc, stop_doc)
-    label = base_label if not timestamp_text else f"{base_label} | {timestamp_text}"
-    label += f" | {outcome['status']}"
-    return {
+    detectors = start_doc.get("detectors") or []
+    if isinstance(detectors, str):
+        detectors = [detectors]
+    entry = {
         "uid": str(uid or start_doc.get("uid", "") or "").strip(),
-        "label": label,
         "title": title,
         "plan_name": plan_name,
         "scan_id": start_doc.get("scan_id"),
         "sample": str(start_doc.get("sample", "") or ""),
+        "detectors": list(dict.fromkeys(str(name).strip() for name in detectors if str(name).strip())),
         "data_type": _run_data_type(start_doc),
         "time": float(time_value) if time_value is not None else None,
         **outcome,
     }
+    entry["label"] = format_history_entry(entry)
+    return entry
+
+
+def format_history_entry(entry, *, multiline=False):
+    """Keep status in the icon while making run identity easy to scan."""
+    def shorten(value, limit):
+        text = " ".join(str(value).split())
+        return text if len(text) <= limit else text[:limit - 1] + "…"
+
+    title = entry.get("title") or entry.get("plan_name") or entry.get("label") or str(entry.get("uid", ""))[:8] or "Diffraction Run"
+    timestamp = _format_run_timestamp(entry.get("time"))[:16] or "---"
+    sample = entry.get("sample") or "---"
+    plan = entry.get("plan_name") or "---"
+    if multiline:
+        scan = entry.get("scan_id")
+        prefix = f"#{scan} · " if scan is not None else ""
+        return f"{prefix}{title}\n{timestamp}\nSample: {sample}\nPlan: {plan}"
+
+    return " | ".join((shorten(title, 18), timestamp, shorten(sample, 10), shorten(plan, 18)))
+
+
+def history_entry_tooltip(entry):
+    """Full identifiers and outcome remain available when list text is elided."""
+    details = {
+        "Title": entry.get("title") or entry.get("plan_name") or entry.get("label"),
+        "Date": _format_run_timestamp(entry.get("time")) or "---",
+        "Sample": entry.get("sample") or "---",
+        "Detectors": ", ".join(entry.get("detectors") or []) or "---",
+        "Status": entry.get("status"),
+        "Reason": entry.get("reason"),
+        "Storage error": entry.get("storage_error"),
+        "Load error": entry.get("load_error"),
+        "Note": entry.get("note"),
+        "Plan": entry.get("plan_name") or "---",
+        "Scan ID": entry.get("scan_id"),
+        "UID": entry.get("uid"),
+    }
+    return "\n".join(f"{name}: {value}" for name, value in details.items() if value is not None and value != "")
 
 
 def _plain_mapping(value):
@@ -420,9 +458,9 @@ def build_history_snapshot(
 ):
     """Load one PSD or scalar run using its recorded configuration.
 
-    Missing arrays and failed exports raise useful errors rather than producing
-    a partial-looking plot. ``allow_empty`` is for live startup backfill only;
-    arrays in new runs become readable after HDF5 finalization.
+    Scalar readings come directly from Tiled regardless of file-export status.
+    Arrays require a ready export or an advertised incremental prefix.
+    ``allow_empty`` returns a waiting reason for live startup backfill.
     """
     if start_doc is None:
         start_doc, stop_doc = _run_start_stop_docs(run)
@@ -449,8 +487,25 @@ def build_history_snapshot(
             return snapshot
         raise RuntimeError(message)
 
+    if allow_empty:
+        # A GUI joining mid-run missed the monitor Descriptors as well as Start.
+        # Recover their identities without reading monitor arrays or treating
+        # their independent sequence numbers as completed acquisition points.
+        streams = _run_streams(run)
+        monitor_names = {str(spec.get("stream", ""))
+                         for spec in _start_live_plot_fields(start_doc).values()
+                         if spec.get("transport") == "document" and spec.get("stream")}
+        for name in sorted(monitor_names):
+            if name in streams:
+                try:
+                    snapshot["descriptor_docs"].extend(_stream_descriptor_docs(snapshot["uid"], name, streams[name], start_doc))
+                except Exception:
+                    pass  # Optional monitor metadata must not block acquisition data.
+
     export = snapshot["file_export"]
-    if export and export.get("status") != "ready":
+    scalar = _run_data_type(start_doc) == "scalar"
+    incremental = bool(export.get("incremental")) and export.get("status") != "ready"
+    if not scalar and export and export.get("status") != "ready" and not incremental:
         status = str(export.get("status", "unknown"))
         detail = str(export.get("error", "") or "")
         return unavailable(
@@ -460,12 +515,46 @@ def build_history_snapshot(
     name, stream, data_keys = select_history_stream(run, start_doc, stream_name=stream_name)
     if stream is None:
         return unavailable("No diffraction-compatible stream was found for this run.")
+    if scalar and name != stream_name:
+        return unavailable(f"No completed scalar readings are available in acquisition stream {stream_name!r}.")
     snapshot["stream_name"] = name
-    snapshot["descriptor_docs"] = _stream_descriptor_docs(snapshot["uid"], name, stream, start_doc)
-    if _run_data_type(start_doc) == "scalar" and not _start_live_plot_fields(start_doc):
+    snapshot["descriptor_docs"].extend(_stream_descriptor_docs(snapshot["uid"], name, stream, start_doc))
+    if scalar and not _start_live_plot_fields(start_doc):
         snapshot["start"]["live_plot_fields"] = _legacy_scalar_fields(data_keys, start_doc)
+    stored_scalars = scalar and all(
+        spec.get("dtype") != "array" and not spec.get("shape") and not spec.get("external")
+        for spec in data_keys.values()
+    )
+    if stored_scalars:
+        incremental = False  # HDF5 committed_points is unrelated to scalar SQL delivery.
+    elif scalar and export and export.get("status") != "ready" and not incremental:
+        return unavailable("This stream includes external or array fields whose file export is not ready.")
+    if incremental:
+        # Freeze one advertised prefix before reading fields independently.
+        # stream.read() could combine different extents while a new point is
+        # being published. Neither uncommitted tails nor live CA previews are
+        # acquisition events.
+        count = int(export.get("committed_points", 0))
+        if count <= 0:
+            return unavailable("Waiting for the first committed diffraction point.")
+        try:
+            sequences = np.asarray(stream["seq_num"].read())[:count].tolist()
+            columns = {}
+            for key, spec in data_keys.items():
+                node = stream[key]
+                values = np.asarray(node[:count] if spec.get("dtype") == "array" else node.read())[:count]
+                if values.shape != (count, *spec.get("shape", [])):
+                    return unavailable(f"Committed field {key!r} is not fully registered yet.")
+                columns[key] = values.tolist()
+            if len(sequences) != count:
+                return unavailable("Committed sequence numbers are not fully registered yet.")
+        except Exception as exc:
+            return unavailable(f"Unable to read committed diffraction points: {exc}")
+        snapshot["rows"] = [{key: values[index] for key, values in columns.items()} for index in range(count)]
+        snapshot["seq_nums"] = sequences
+        return snapshot
     try:
-        dataset = stream.read()
+        dataset = _read_scalar_dataset(stream, data_keys) if stored_scalars else stream.read()
     except Exception as exc:
         return unavailable(f"Unable to read Tiled stream {name!r}: {exc}")
     row_count = _stream_row_count(dataset, data_keys)
@@ -507,6 +596,30 @@ def build_history_snapshot(
     ]
     snapshot["seq_nums"] = seq_nums
     return snapshot
+
+
+def _read_scalar_dataset(stream, data_keys):
+    """Read values and sequence numbers together from the native Tiled table.
+
+    Reading seq_num separately can race an append during an active run. Older
+    stream clients without a native table retain their existing read path.
+    """
+    base = getattr(stream, "base", None)
+    if base is not None:
+        try:
+            table = base["internal"]
+        except KeyError:
+            pass
+        else:
+            frame = table.read()
+            missing = set(data_keys) - set(frame.columns)
+            if missing:
+                raise RuntimeError(f"Missing stored scalar fields: {', '.join(sorted(missing))}.")
+            fields = list(data_keys)
+            if "seq_num" in frame.columns:
+                return frame[[*fields, "seq_num"]].set_index("seq_num").to_xarray()
+            return frame[fields].to_xarray()
+    return stream.read()
 
 
 def fetch_recent_history_entries(catalog, *, limit=100):

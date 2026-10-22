@@ -246,6 +246,8 @@ class ScalarDiffractionWriterTests(unittest.TestCase):
                 ][()]
                 if isinstance(baseline, bytes):
                     baseline = baseline.decode()
+                elif getattr(baseline, "dtype", None) == "uint8":
+                    baseline = baseline.tobytes().decode("utf-8")
                 self.assertIn("reactor_power_6", baseline)
                 self.assertIn("sample_temperature", baseline)
 

@@ -31,6 +31,7 @@ class RunStorage:
         self.writer_classes = []
         self.last_result = None
         self._completion_errors = {}
+        self._active_runs = {}
         self._router = RunRouter([self._factory])
 
     def add_writer(self, writer_class):
@@ -40,7 +41,9 @@ class RunStorage:
         for writer_class in self.writer_classes:
             writer = writer_class()
             if writer._is_supported_run(doc):
-                return [_FileRun(self, writer)], []
+                run = _FileRun(self, writer)
+                self._active_runs[doc["uid"]] = run
+                return [run], []
         return [self.tiled_writer], []
 
     def __call__(self, name, doc):
@@ -50,6 +53,14 @@ class RunStorage:
             if error is not None:
                 raise error
         return result
+
+    def close(self):
+        """Close unfinished files on an orderly worker exit; keep journals."""
+        for run in list(self._active_runs.values()):
+            close = getattr(run.writer, "close", None)
+            if close is not None:
+                close()
+        self._active_runs.clear()
 
 
 class _FileRun:
@@ -61,6 +72,11 @@ class _FileRun:
         self.sequence_numbers = {}
         self.array_keys = {}
         self.tiled_error = None
+        self.registration_error = None
+        self.storage_error = None
+        self.live_resources = set()
+        self.live_published = {}
+        self.published_points = 0
         self.journal = None
         self.stop_sent = False
 
@@ -73,12 +89,18 @@ class _FileRun:
     def _send(self, name, doc):
         if self.tiled_error is not None:
             return
+        external = name in {"stream_resource", "stream_datum"}
+        if external and self.registration_error is not None:
+            return
         try:
             if name == "stop":
                 self.stop_sent = True
             self.owner.tiled_writer(name, doc)
         except Exception as exc:
-            self.tiled_error = exc
+            if external:
+                self.registration_error = exc
+            else:
+                self.tiled_error = exc
             logger.exception("Tiled persistence failed; original documents remain in %s", self.journal)
 
     def _status(self, status, stop=None, error=None):
@@ -89,6 +111,11 @@ class _FileRun:
             base = getattr(run, "base", run)
             metadata = {"file_export": {"status": status, "run_uid": self.writer.uid,
                                         "error": error}}
+            if getattr(self.writer, "incremental_enabled", False):
+                export = metadata["file_export"]
+                export.update(incremental=True, swmr=True, committed_points=self.published_points)
+                if self.writer.live_file is not None:
+                    export["file_uri"] = self.writer.live_file.resolve().as_uri()
             if stop is not None:
                 metadata["stop"] = stop
             base.update_metadata(metadata)
@@ -108,6 +135,25 @@ class _FileRun:
         self.emitted.add(uid)
 
     def __call__(self, name, doc):
+        try:
+            return self._process(name, doc)
+        except Exception as exc:
+            self.storage_error = exc
+            close = getattr(self.writer, "close", None)
+            if close is not None:
+                close()
+            self._status("failed", error=str(exc))
+            self.owner.last_result = {"run_uid": self.writer.uid, "status": "failed",
+                                      "journal": str(self.journal), "error": str(exc)}
+            raise
+        finally:
+            if name == "stop":
+                self.owner._active_runs.pop(doc["run_start"], None)
+                close = getattr(self.writer, "close", None)
+                if close is not None:
+                    close()
+
+    def _process(self, name, doc):
         if name == "event_page":
             for event in unpack_event_page(doc):
                 self("event", event)
@@ -123,6 +169,7 @@ class _FileRun:
             # An existing journal must be recovered, never silently appended to.
             self.journal.touch(exist_ok=False)
             self._record(name, doc)
+            self.owner.last_result = {"run_uid": doc["uid"], "status": "collecting", "journal": str(self.journal)}
             self._send(name, doc)
             self._status("collecting")
             return
@@ -150,6 +197,15 @@ class _FileRun:
                     for key in self.array_keys[uid]:
                         doc.get(field, {}).pop(key, None)
             self._send(name, doc)
+            if self.owner.catalog is not None and getattr(self.writer, "live_file", None) is not None:
+                # Making the file visible also makes earlier monitor readings
+                # publishable. Catch up each stream without replaying datums.
+                for descriptor_uid in self.descriptors:
+                    self._register_live_event(descriptor_uid)
+                if self.tiled_error is None and self.registration_error is None:
+                    if self.descriptors[uid]["name"] == "primary":
+                        self.published_points = len(self.sequence_numbers[uid])
+                    self._status("collecting")
             return
         if name != "stop":
             self.writer.receiver(name, doc)
@@ -160,6 +216,8 @@ class _FileRun:
         self.owner.last_result = result
         self._status("writing")
         try:
+            if self.storage_error is not None:
+                raise self.storage_error
             self.writer.receiver(name, doc)
             output = self.writer.output_nexus_file or getattr(self.writer, "output_csv_file", None)
             if output is None:
@@ -171,6 +229,8 @@ class _FileRun:
             events_complete = self.tiled_error is None
             if self.owner.catalog is not None and self.writer.output_nexus_file:
                 for resource, datums in self._external_documents(output):
+                    if resource["uid"] in self.live_resources:
+                        continue
                     self._send("stream_resource", resource)
                     for datum in datums:
                         self._send("stream_datum", datum)
@@ -179,7 +239,7 @@ class _FileRun:
             manifest["events_complete"] = events_complete
             pending = Path(str(output) + ".registration.json")
             write_json(pending, manifest)
-            if self.tiled_error is not None:
+            if self.tiled_error is not None or self.registration_error is not None:
                 raise RuntimeError("Tiled did not persist all run documents") from self.tiled_error
             if self.owner.catalog is not None:
                 register_export(self.owner.catalog, manifest)
@@ -209,21 +269,55 @@ class _FileRun:
                     "mimetype": "application/x-hdf5",
                     "parameters": {
                         "dataset": f"/entry/instrument/bluesky/streams/{descriptor['name']}/{key}/value",
-                        "join_method": "stack", "swmr": False,
+                        "join_method": "stack", "swmr": bool(getattr(self.writer, "incremental_enabled", False)),
                         "chunk_shape": [1, *descriptor["data_keys"][key]["shape"]],
                     },
                 }
-                datums = []
-                first = 0
-                for index in range(1, len(seqs) + 1):
-                    if index == len(seqs) or seqs[index] != seqs[index - 1] + 1:
-                        datums.append({
-                            "uid": f"{resource_uid}/{first}", "stream_resource": resource_uid,
-                            "descriptor": uid, "indices": {"start": first, "stop": index},
-                            "seq_nums": {"start": seqs[first], "stop": seqs[index - 1] + 1},
-                        })
-                        first = index
-                yield resource, datums
+                yield resource, self._stream_datums(resource_uid, uid, seqs)
+
+    @staticmethod
+    def _stream_datums(resource_uid, descriptor_uid, seqs, first=0):
+        for index in range(first + 1, len(seqs) + 1):
+            if index == len(seqs) or seqs[index] != seqs[index - 1] + 1:
+                yield {
+                    "uid": f"{resource_uid}/{first}", "stream_resource": resource_uid,
+                    "descriptor": descriptor_uid, "indices": {"start": first, "stop": index},
+                    "seq_nums": {"start": seqs[first], "stop": seqs[index - 1] + 1},
+                }
+                first = index
+
+    def _register_live_event(self, uid):
+        """Advertise the unregistered committed suffix, preserving sequence gaps."""
+        from server.services.tiled_streams import install_committed_hdf5_consolidator
+
+        seqs = self.sequence_numbers[uid]
+        if not seqs or not self.array_keys[uid] or self.tiled_error is not None or self.registration_error is not None:
+            return
+        install_committed_hdf5_consolidator()
+        output = self.writer.live_file
+        descriptor = self.descriptors[uid]
+        for key in sorted(self.array_keys[uid]):
+            resource_uid = str(uuid5(NAMESPACE_URL, f"{self.writer.uid}/{uid}/{key}"))
+            if resource_uid not in self.live_resources:
+                resource = {
+                    "uid": resource_uid, "run_start": self.writer.uid,
+                    "data_key": key, "uri": output.resolve().as_uri(),
+                    "mimetype": "application/x-hdf5",
+                    "parameters": {"dataset": f"/entry/instrument/bluesky/streams/{descriptor['name']}/{key}/value",
+                                   "join_method": "stack", "swmr": True,
+                                   "committed_prefix": True,
+                                   "chunk_shape": [1, *descriptor["data_keys"][key]["shape"]]},
+                }
+                self._send("stream_resource", resource)
+                if self.tiled_error is not None or self.registration_error is not None:
+                    return
+                self.live_resources.add(resource_uid)
+            first = self.live_published.get(resource_uid, 0)
+            for datum in self._stream_datums(resource_uid, uid, seqs, first):
+                self._send("stream_datum", datum)
+                if self.tiled_error is not None or self.registration_error is not None:
+                    return
+                self.live_published[resource_uid] = datum["indices"]["stop"]
 
 
 def write_json(path, document):
@@ -248,6 +342,7 @@ def make_manifest(writer, output, descriptors, sequence_numbers):
         "start": writer.start_document, "stop": writer.stop_document,
         "descriptors": list(descriptors.values()), "sequence_numbers": sequence_numbers,
         "baseline_readings": writer.metadata.get("baseline_readings", {}),
+        "incremental": bool(getattr(writer, "incremental_enabled", False)),
     }
 
 
@@ -266,6 +361,8 @@ def register_export(catalog, manifest):
     output = Path(manifest["file"])
     metadata = {key: manifest[key] for key in ("schema_version", "run_uid", "sha256", "format")}
     metadata.update(file_uri=output.as_uri(), status="ready", error=None)
+    if manifest.get("incremental"):
+        metadata.update(incremental=True, swmr=True)
     kind = manifest["format"]
     try:
         existing = artifacts[kind]
@@ -275,7 +372,7 @@ def register_export(catalog, manifest):
             mimetype="application/x-hdf5" if kind == "nexus" else "application/octet-stream",
             management=Management.external,
             structure=None if kind == "nexus" else BytesStructure(),
-            parameters={"swmr": False} if kind == "nexus" else {},
+            parameters={"swmr": bool(manifest.get("incremental"))} if kind == "nexus" else {},
             assets=[Asset(data_uri=output.as_uri(), is_directory=False, parameter="data_uris", num=0)],
         )
         artifacts.new(key=kind, structure_family=source.structure_family,
@@ -337,10 +434,12 @@ def retry_registration(catalog, manifest_path):
                             shape=dataset.shape,
                             chunks=((1,) * dataset.shape[0], *[(size,) for size in dataset.shape[1:]]),
                         ),
-                        parameters={"dataset": dataset_path, "swmr": False},
+                        parameters={"dataset": dataset_path, "swmr": bool(manifest.get("incremental"))},
                         assets=[Asset(data_uri=output.as_uri(), is_directory=False,
                                       parameter="data_uris", num=0)],
                     )
+                    if manifest.get("incremental"):
+                        source.parameters["slice"] = f"0:{dataset.shape[0]}"
                     try:
                         node = parent[key]
                     except KeyError:
@@ -353,7 +452,8 @@ def retry_registration(catalog, manifest_path):
                             raise ValueError(f"Existing array {stream}/{key} references another source")
                         # TiledWriter may have created a zero-length source
                         # before its subsequent shape update failed.
-                        if node.shape != dataset.shape or node.dtype != dataset.dtype:
+                        if (node.shape != dataset.shape or node.dtype != dataset.dtype
+                                or existing.parameters.get("slice") != source.parameters.get("slice")):
                             source.id = existing.id
                             response = node.context.http_client.put(
                                 node.uri.replace("/metadata/", "/data_source/", 1),

@@ -6,6 +6,7 @@ if str(_checkout_root) not in sys.path:
     sys.path.insert(0, str(_checkout_root))
 
 import os
+import atexit
 import importlib.util
 from bluesky import RunEngine
 from bluesky.utils import PersistentDict
@@ -100,6 +101,7 @@ else:
     db = Broker(BLUESKY_CATALOG)
     run_storage = RunStorage(db.insert)
 run_storage_subscription = RE.subscribe(run_storage)
+atexit.register(run_storage.close)
 print(f"Bluesky data catalog: {BLUESKY_CATALOG_NAME}")
 if BLUESKY_CATALOG_NAME != BLUESKY_CATALOG_PREFERRED_NAMES[0]:
     print(

@@ -33,7 +33,7 @@ class FakeDocuments:
         self.callbacks = {}
         self.token = 0
 
-    def subscribe(self, callback):
+    def subscribe(self, callback, *, accept_partial=False):
         self.token += 1
         self.callbacks[self.token] = callback
         return self.token
@@ -105,6 +105,7 @@ class ExperimentScreenIntegrationTests(unittest.TestCase):
             patch.object(rec.QtReConsoleMonitor, "_start_thread", lambda self: None),
             patch.object(rec.QtReConsoleMonitor, "_start_timer", lambda self: None),
             patch("epics.caget", lambda *args, **kwargs: None),
+            patch("diffractometer_controls.analysis.tiled_auth.build_tiled_client_from_local_reader", return_value=None),
             patch.object(diffractometer_gui, "_DIFFRACTION_PLOT_SUPPORT", {
                 "controller_ok": True, "pyqtgraph_ok": True,
             }),

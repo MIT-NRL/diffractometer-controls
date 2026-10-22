@@ -5,7 +5,7 @@ import re
 
 import numpy as np
 
-from server.writers.base import AtomicNXWriter
+from server.writers.incremental import IncrementalNXWriter
 from server.config.diffraction import (
     DIFFRACTION_ROOT, DIFFRACTION_TEST_ROOT,
     HE3PSD_POSITION_MIN, HE3PSD_POSITION_MAX,
@@ -50,7 +50,7 @@ def _normalize_detector_names(detectors):
     return [str(det).strip() for det in (detectors or []) if str(det).strip()]
 
 
-class HE3DiffractionNXWriter(AtomicNXWriter):
+class HE3DiffractionNXWriter(IncrementalNXWriter):
     instrument_name = "4DH4"
     file_extension = "nxs"
     output_root = HE3_DIFFRACTION_ROOT

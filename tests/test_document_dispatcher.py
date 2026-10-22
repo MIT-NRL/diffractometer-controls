@@ -1,4 +1,6 @@
 import unittest
+import pickle
+from unittest.mock import Mock, patch
 
 try:
     from control_ui.core.document_dispatcher import DocumentDispatcherService
@@ -45,6 +47,44 @@ class _RemoteDispatcherShape(_FakeCallbackDispatcher):
 
 
 class DocumentDispatcherServiceTests(unittest.TestCase):
+    def test_real_receiver_delivers_midrun_documents_only_to_opted_in_subscribers(self):
+        from bluesky_widgets.qt.zmq_dispatcher import RemoteDispatcher
+
+        event = {"descriptor": "old-descriptor", "seq_num": 50, "data": {"det_counts": [1, 2]}}
+        start = {"uid": "next-run"}
+        messages = [b" event " + pickle.dumps(event), b" start " + pickle.dumps(start),
+                    b" event " + pickle.dumps(event)]
+        with patch("bluesky_widgets.qt.zmq_dispatcher.zmq.Context") as context:
+            context.return_value.socket.return_value.recv.side_effect = messages
+            dispatcher = RemoteDispatcher(("127.0.0.1", 5568))
+        service = DocumentDispatcherService(dispatcher, receive_partial_runs=True)
+        live_callback, full_run_callback = Mock(), Mock()
+        service.subscribe(live_callback, accept_partial=True)
+        service.subscribe(full_run_callback)
+        receiver = dispatcher._receive_data()
+        try:
+            dispatcher._process_result(next(receiver))
+            live_callback.assert_called_once_with("event", event)
+            full_run_callback.assert_not_called()
+            dispatcher._process_result(next(receiver))
+            dispatcher._process_result(next(receiver))
+            self.assertEqual(live_callback.call_count, 3)
+            self.assertEqual(full_run_callback.call_count, 2)
+            full_run_callback.assert_called_with("event", event)
+        finally:
+            receiver.close()
+            service.stop()
+
+    def test_partial_mode_removes_its_start_observer_and_callback_wrappers(self):
+        dispatcher = _FakeCallbackDispatcher()
+        service = DocumentDispatcherService(dispatcher, receive_partial_runs=True)
+        service.subscribe(Mock(), accept_partial=True)
+        service.subscribe(Mock())
+        self.assertEqual(service.subscription_count, 2)
+        service.stop()
+        self.assertEqual(dispatcher.subscriptions, {})
+        self.assertEqual(service._callbacks, {})
+
     def test_start_and_stop_are_idempotent(self):
         dispatcher = _FakeCallbackDispatcher()
         service = DocumentDispatcherService(dispatcher)

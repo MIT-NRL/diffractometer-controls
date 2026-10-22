@@ -11,11 +11,25 @@ class DocumentDispatcherService:
     internals or starting additional receive loops.
     """
 
-    def __init__(self, dispatcher):
+    def __init__(self, dispatcher, *, receive_partial_runs=False):
         self.dispatcher = dispatcher
         self._started = False
         self._stopped = False
         self._tokens = set()
+        self._callbacks = {}
+        self._receive_partial_runs = bool(receive_partial_runs)
+        self._waiting_for_start = bool(getattr(dispatcher, "_waiting_for_start", True))
+        self._start_token = None
+        if self._receive_partial_runs:
+            self._start_token = dispatcher.subscribe(self._on_start, "start")
+            # bluesky-widgets otherwise drops every document until the next
+            # Start. Diffraction can recover context or display a live preview
+            # without that Start; other subscribers retain the original gate.
+            if hasattr(dispatcher, "_waiting_for_start"):
+                dispatcher._waiting_for_start = False
+
+    def _on_start(self, *_args):
+        self._waiting_for_start = False
 
     @property
     def started(self):
@@ -29,17 +43,26 @@ class DocumentDispatcherService:
     def subscription_count(self):
         return len(self._tokens)
 
-    def subscribe(self, callback, name="all"):
+    def subscribe(self, callback, name="all", *, accept_partial=False):
         if self._stopped:
             raise RuntimeError("The document dispatcher has already stopped.")
+        if self._receive_partial_runs and not accept_partial:
+            original_callback = callback
+
+            def callback(doc_name, doc):
+                if not self._waiting_for_start:
+                    original_callback(doc_name, doc)
+
         token = self.dispatcher.subscribe(callback, name)
         self._tokens.add(token)
+        self._callbacks[token] = callback
         return token
 
     def unsubscribe(self, token):
         if token is None:
             return
         self._tokens.discard(token)
+        self._callbacks.pop(token, None)
         unsubscribe = getattr(self.dispatcher, "unsubscribe", None)
         if not callable(unsubscribe):
             unsubscribe = getattr(
@@ -67,5 +90,8 @@ class DocumentDispatcherService:
         self._stopped = True
         for token in tuple(self._tokens):
             self.unsubscribe(token)
+        if self._start_token is not None:
+            self.unsubscribe(self._start_token)
+            self._start_token = None
         self.dispatcher.stop()
         return True

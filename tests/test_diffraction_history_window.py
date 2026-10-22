@@ -93,6 +93,19 @@ class DiffractionHistoryWindowTests(unittest.TestCase):
         finally:
             self.close_window(window)
 
+    def test_scalar_export_failure_keeps_the_data_plot_and_error_metadata(self):
+        run = make_scalar('scalar-export-failed')
+        run.metadata['file_export'] = {'status': 'failed', 'error': 'CSV disk offline'}
+        window = DiffractionHistoryWindow({'4dh4': Catalog(scalar=run)})
+        try:
+            self.wait_for(lambda: window.analysis.curve is not None)
+            self.assertEqual(window.analysis.curve['y'].tolist(), [295, 296])
+            self.assertEqual(window.analysis.curve['x'].tolist(), [0.5, 1.5])
+            self.assertEqual(json.loads(window.metadata_json.toPlainText())['file_export']['error'], 'CSV disk offline')
+            self.assertTrue(window.data_view.plot._message.isHidden())
+        finally:
+            self.close_window(window)
+
     def test_load_more_keeps_initial_limit_at_100(self):
         catalog = Catalog((str(i), make_psd(str(i), i)) for i in range(101))
         window = DiffractionHistoryWindow({'4dh4': catalog})

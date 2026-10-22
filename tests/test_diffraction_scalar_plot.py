@@ -58,6 +58,11 @@ class TestDiffractionScalarPlot(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
+    def setUp(self):
+        # These are document/GUI tests; only explicit FakePV tests use CA.
+        self.enterContext(mock.patch.object(live_plot_module, "PV", None))
+        self.enterContext(mock.patch.object(live_plot_module, "caget", return_value=None))
+
     def _flush(self):
         self.app.processEvents()
         self.app.processEvents()

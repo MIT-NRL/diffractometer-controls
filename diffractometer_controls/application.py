@@ -68,7 +68,7 @@ class MITRApplication(BlueskyCompatibility, PyDMApplication):
         endpoints = profile.endpoints(ipaddress)
         self.re_client = RunEngineClient(zmq_control_addr=endpoints.control, zmq_info_addr=endpoints.info)
         self.re_dispatcher = RemoteDispatcher(endpoints.documents)
-        self.document_dispatcher = DocumentDispatcherService(self.re_dispatcher)
+        self.document_dispatcher = DocumentDispatcherService(self.re_dispatcher, receive_partial_runs=True)
         self.re_manager_api = REManagerAPI(
             zmq_control_addr=endpoints.control,
             zmq_info_addr=endpoints.info,

@@ -88,6 +88,14 @@ An alternate normalized loader can be passed as `snapshot_loader`. Its result
 uses `start`, `stop`, `rows`, `seq_nums`, and `descriptor_docs`; see `history.py`.
 HDF5 references are resolved by the Tiled server, so client file mounts are not
 required. This package does not import old archives into a catalog.
+Incremental runs can be inspected before Stop: the loader freezes the advertised
+committed point count and reads that prefix consistently, even when another
+point is being saved. It does not include an unfinished exposure or change an
+unfinished/failed acquisition into a successful run.
+Scalar scans read their primary Tiled table independently of CSV/NeXus export
+status or HDF5 point counts. Values and sequence numbers come from one table
+snapshot; pending/failed exports remain visible as separate metadata. Live
+monitor samples are not substituted for completed scalar acquisition points.
 
 ## Run data and fitting tabs
 

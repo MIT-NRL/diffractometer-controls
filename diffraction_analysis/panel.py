@@ -125,6 +125,14 @@ class AnalysisPanel(QtWidgets.QWidget):
             item.curve.setCacheMode(QtWidgets.QGraphicsItem.DeviceCoordinateCache)
             item.scatter.setCacheMode(QtWidgets.QGraphicsItem.DeviceCoordinateCache)
         self.region = pg.LinearRegionItem(values=(0, 1), brush=pg.mkBrush(80, 130, 210, 20))
+        for line, bound in zip(self.region.lines, ('lower', 'upper')):
+            line.setPen(color=line.pen.color(), width=2)
+            line.setHoverPen(color=line.hoverPen.color(), width=3)
+            # Pixel-sized handles also widen InfiniteLine's hit area along
+            # the whole boundary, independently of the plot's zoom level.
+            line.addMarker('<|>', position=0.9, size=16)
+            line.setCursor(QtCore.Qt.SizeHorCursor)
+            line.setToolTip(f'Drag to adjust the {bound} fitting limit.')
         self.region.setZValue(-10)
         self.plot.addItem(self.region, ignoreBounds=True)
         self._window_timer = QtCore.QTimer(self)

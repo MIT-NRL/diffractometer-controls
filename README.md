@@ -40,9 +40,10 @@ opens the relevant view. IOC host/connection details expand on each card, with
 camera acquisition diagnostics under **Camera health**. Process state and
 EPICS/worker connectivity are shown independently.
 
-Diffraction arrays are stored in NeXus/HDF5 and referenced by Tiled when each
-run finishes. Scalar readings and searchable metadata remain in Tiled; live
-plots use the original documents. See the
+Diffraction arrays are appended to NeXus/HDF5 and exposed through Tiled after
+each completed point is flushed to disk. Scalar readings and searchable
+metadata remain in Tiled; live plots merge stored points with new documents
+when joining an active run. See the
 [diffraction storage and recovery guide](docs/linux_server_migration.md#diffraction-hdf5-and-tiled-storage)
 for filesystem configuration, file provenance and registration retries.
 See the [history loader, viewer options, and reader login guide](docs/diffraction_history.md)

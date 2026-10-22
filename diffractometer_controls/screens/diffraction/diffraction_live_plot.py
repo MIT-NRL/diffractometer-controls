@@ -3,6 +3,7 @@ import ast
 import concurrent.futures
 import os
 import re
+import threading
 from collections.abc import Iterable
 
 from diffractometer_controls.analysis.diffraction_history import (
@@ -19,6 +20,7 @@ from diffractometer_controls.analysis.diffraction_history import (
     select_history_stream,
 )
 from diffraction_analysis.metadata import run_outcome
+from diffraction_analysis.history import history_entry_tooltip
 from diffraction_analysis.widgets import run_status_icon
 
 import numpy as np
@@ -29,6 +31,7 @@ from qtpy.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QListView,
     QSizePolicy,
     QToolButton,
     QVBoxLayout,
@@ -37,6 +40,7 @@ from qtpy.QtWidgets import (
 
 from control_ui.widgets.scalar_scan_widgets import ScalarCountReadout, ScalarScanTable
 from control_ui.widgets.elided_label import ElidedLabel
+from control_ui.widgets.row_geometry import match_control_heights
 from control_ui.widgets.profile_colors import (
     HISTORY_ALPHA, LATEST_ALPHA, SERIES_COLORS as _CATEGORICAL_SERIES_COLORS,
     profile_colormap, profile_history_position,
@@ -1103,7 +1107,15 @@ class DiffractionHistoryViewer(QWidget):
         self._run_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._run_combo.setMinimumContentsLength(20)
         self._run_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self._run_combo.setMaxVisibleItems(20)
+        self._run_combo.setMaxVisibleItems(12)
+        run_list = QListView(self._run_combo)
+        run_list.setUniformItemSizes(True)
+        run_list.setTextElideMode(QtCore.Qt.ElideRight)
+        run_list.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        run_list.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        self._run_combo.setView(run_list)
+        # Bound the popup itself; bounding only its view leaves an oversized frame.
+        run_list.window().setMaximumSize(640, 360)
         self._run_combo.currentIndexChanged.connect(self._on_combo_index_changed)
 
         self._next_button = QToolButton(self)
@@ -1129,6 +1141,10 @@ class DiffractionHistoryViewer(QWidget):
         self._status_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self._status_label.setFixedWidth(self.fontMetrics().averageCharWidth() * 32)
         self._status_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        self._row_controls = (
+            self._tiled_checkbox, self._previous_button, self._run_combo,
+            self._next_button, self._live_checkbox, self._analysis_button, self._status_label,
+        )
 
         controls_layout = QHBoxLayout()
         controls_layout.setContentsMargins(0, 0, 0, 0)
@@ -1191,9 +1207,7 @@ class DiffractionHistoryViewer(QWidget):
                 unavailable = bool(entry.get('load_error')) or entry.get('file_status') == 'failed'
                 self._run_combo.addItem(run_status_icon(entry.get('status', ''), unavailable=unavailable),
                                         str(entry.get("label", "")), str(entry.get("uid", "")))
-                tooltip = '\n'.join(str(value) for value in (
-                    entry.get('status'), entry.get('reason'), entry.get('storage_error'),
-                    entry.get('load_error'), entry.get('note'), entry.get('uid')) if value)
+                tooltip = history_entry_tooltip(entry)
                 self._run_combo.setItemData(self._run_combo.count() - 1, tooltip, QtCore.Qt.ToolTipRole)
             target_index = -1
             if selected_uid:
@@ -1219,7 +1233,7 @@ class DiffractionHistoryViewer(QWidget):
             controls_enabled and current_index >= 0 and current_index < (len(entries) - 1)
         )
         self._next_button.setEnabled(controls_enabled and current_index > 0)
-        self._run_combo.setToolTip(self._run_combo.currentText() + '\n' + str(self._run_combo.currentData(QtCore.Qt.ToolTipRole) or ''))
+        self._run_combo.setToolTip(str(self._run_combo.currentData(QtCore.Qt.ToolTipRole) or self._run_combo.currentText()))
         self._live_checkbox.setEnabled(True)
         self._status_label.setText(status_text)
         self._apply_theme_from_palette()
@@ -1285,8 +1299,15 @@ class DiffractionHistoryViewer(QWidget):
             QtCore.QEvent.PaletteChange,
             QtCore.QEvent.ApplicationPaletteChange,
             QtCore.QEvent.StyleChange,
+            QtCore.QEvent.FontChange,
+            QtCore.QEvent.ApplicationFontChange,
         ):
             self._apply_theme_from_palette()
+
+    def _match_row_heights(self):
+        height = match_control_heights(*self._row_controls)
+        self._previous_button.setFixedWidth(height)
+        self._next_button.setFixedWidth(height)
 
     def _apply_theme_from_palette(self):
         if self._applying_theme:
@@ -1317,6 +1338,8 @@ class DiffractionHistoryViewer(QWidget):
             )
             combo_style = (
                 "QComboBox {"
+                # Menu-style popups can ignore maxVisibleItems and expand to fit labels.
+                " combobox-popup: 0;"
                 f" background-color: {base};"
                 f" color: {text};"
                 f" border: 1px solid {border};"
@@ -1345,6 +1368,7 @@ class DiffractionHistoryViewer(QWidget):
                 status_style,
             )
             if theme_signature == self._last_theme_signature:
+                self._match_row_heights()
                 return
 
             self.setStyleSheet(f"background-color: {window};")
@@ -1352,10 +1376,13 @@ class DiffractionHistoryViewer(QWidget):
             self._next_button.setStyleSheet(button_style)
             self._analysis_button.setStyleSheet(button_style)
             self._run_combo.setStyleSheet(combo_style)
+            # A style change can restore the menu popup's hidden scrollbar policy.
+            self._run_combo.view().setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
             self._tiled_checkbox.setStyleSheet(checkbox_style)
             self._live_checkbox.setStyleSheet(checkbox_style)
             self._status_label.setStyleSheet(status_style)
             self._last_theme_signature = theme_signature
+            self._match_row_heights()
         finally:
             self._applying_theme = False
 
@@ -1374,8 +1401,9 @@ class DiffractionLivePlot(QtCore.QObject):
     _history_refresh_completed = QtCore.Signal(int, object)
     _history_load_completed = QtCore.Signal(int, object)
     _history_plot_message = QtCore.Signal(str)
+    _local_reader_ready = QtCore.Signal(object)
 
-    def __init__(self, widget, *, stream_name="primary", re_client=None, parent=None):
+    def __init__(self, widget, *, stream_name="primary", re_client=None, parent=None, auto_history=False):
         super().__init__(parent)
         self.widget = widget
         self.stream_name = str(stream_name or "primary")
@@ -1398,6 +1426,7 @@ class DiffractionLivePlot(QtCore.QObject):
             self._history_state_updated.connect(set_history_state, queued)
         self._history_refresh_completed.connect(self._on_history_refresh_completed, queued)
         self._history_load_completed.connect(self._on_history_load_completed, queued)
+        self._local_reader_ready.connect(self._on_local_reader_ready, queued)
         if callable(getattr(self.widget, 'set_history_message', None)):
             self._history_plot_message.connect(self.widget.set_history_message, queued)
 
@@ -1439,6 +1468,16 @@ class DiffractionLivePlot(QtCore.QObject):
         self._current_live_start_doc = {}
         self._provisional_live_context = False
         self._rendered_primary_seq_nums = set()
+        self._live_primary_rows = {}
+        self._live_preview_lock = threading.RLock()
+        self._live_preview_profiles = {}
+        self._live_preview_values = {}
+        self._live_backfill_pending = False
+        self._history_access_changed = False
+        self._backfill_retry_timer = QtCore.QTimer(self)
+        self._backfill_retry_timer.setSingleShot(True)
+        self._backfill_retry_timer.setInterval(5000)
+        self._backfill_retry_timer.timeout.connect(self._request_startup_history_load)
         self._tiled_enabled = False
         self._live_follow_enabled = True
         self._display_mode = "live"
@@ -1480,6 +1519,40 @@ class DiffractionLivePlot(QtCore.QObject):
         self.destroyed.connect(self.shutdown)
         self.activate()
         self._emit_history_state()
+        if auto_history:
+            QtCore.QTimer.singleShot(0, self._connect_local_history_async)
+
+    def _connect_local_history_async(self):
+        if not self._active or self._history_executor is None:
+            return
+        from diffractometer_controls.analysis.tiled_auth import build_tiled_client_from_local_reader
+
+        def connect():
+            try:
+                return build_tiled_client_from_local_reader()
+            except Exception:
+                return None  # Live acquisition remains usable when Tiled is offline.
+
+        def completed(future):
+            if future.cancelled():
+                return
+            try:
+                self._local_reader_ready.emit(future.result())
+            except RuntimeError:
+                pass
+
+        self._history_executor.submit(connect).add_done_callback(completed)
+
+    def _on_local_reader_ready(self, client):
+        if client is None or not self._active or self._history_access_changed:
+            if client is not None and client is not self._history_client:
+                context = getattr(client, "context", None)
+                if context is not None:
+                    context.close()
+            return
+        self._history_client = client
+        self._tiled_enabled = True
+        self._refresh_history_async(autoload_live=True)
 
     def _set_running_item_events_connected(self, connected):
         connected = bool(connected)
@@ -1510,10 +1583,14 @@ class DiffractionLivePlot(QtCore.QObject):
             )
         self._set_running_item_events_connected(True)
         QtCore.QTimer.singleShot(0, self._arm_current_running_item)
+        if self._tiled_enabled:
+            QtCore.QTimer.singleShot(0, self._request_startup_history_load)
 
     def deactivate(self):
         """Suspend callbacks and workers while PyDM caches the hidden screen."""
         self._active = False
+        self._live_backfill_pending = False
+        self._backfill_retry_timer.stop()
         self._set_running_item_events_connected(False)
         self._disarm_live_subscriptions()
         # Invalidate results from work that may complete after deactivation.
@@ -1667,12 +1744,16 @@ class DiffractionLivePlot(QtCore.QObject):
             self._request_startup_history_load()
 
     def _request_startup_history_load(self):
-        if not self._tiled_enabled:
+        if not self._active or self._live_backfill_pending or not self._tiled_enabled:
             return
         if not self._live_follow_enabled:
             return
         live_uid = self._read_active_run_uid()
         if not live_uid:
+            if self._provisional_live_context:
+                self._emit_history_state(status_text="Live diffraction run · waiting for run identity")
+                self._backfill_retry_timer.start(5000)
+                return
             latest_uid = ""
             if self._history_entries:
                 latest_uid = str(self._history_entries[0].get("uid", "") or "").strip()
@@ -1684,6 +1765,7 @@ class DiffractionLivePlot(QtCore.QObject):
         if str(live_uid) != str(self._startup_history_uid or ""):
             self._startup_history_retry_count = 0
         self._current_live_run_uid = str(live_uid)
+        self._live_run_active = True
         self._startup_history_uid = str(live_uid)
         self._request_history_load(live_uid, request_kind="startup")
 
@@ -1700,6 +1782,7 @@ class DiffractionLivePlot(QtCore.QObject):
         self._history_load_token += 1
         token = int(self._history_load_token)
         request_kind = str(request_kind or "history")
+        self._live_backfill_pending = request_kind == "startup"
         if request_kind == "history":
             self._display_mode = "history"
             self._live_follow_enabled = False
@@ -1738,8 +1821,18 @@ class DiffractionLivePlot(QtCore.QObject):
     def _on_history_load_completed(self, token, payload):
         if int(token) != int(self._history_load_token):
             return
+        self._live_backfill_pending = False
         payload = dict(payload or {})
         request_kind = str(payload.get("request_kind", "history") or "history")
+
+        if request_kind == "latest" and (self._live_run_active or self._provisional_live_context):
+            # QueueServer can reveal an already-running plan without a Start
+            # document. A pending latest-run read must not replace that live view.
+            self._arm_current_running_item()
+            self._emit_history_state(status_text="Live diffraction run")
+            if self._tiled_enabled:
+                self._backfill_retry_timer.start(5000)
+            return
 
         error_text = str(payload.get("error", "") or "")
         if error_text:
@@ -1760,10 +1853,9 @@ class DiffractionLivePlot(QtCore.QObject):
                 request_kind == "startup"
                 and self._live_follow_enabled
                 and str(payload.get("uid", "") or "") == str(self._current_live_run_uid or "")
-                and self._startup_history_retry_count < 3
             ):
                 self._startup_history_retry_count += 1
-                self._schedule_history_refresh(delay_ms=1500, autoload_live=True)
+                self._backfill_retry_timer.start(5000)
             return
 
         uid = str(payload.get("uid", "") or "")
@@ -1782,7 +1874,6 @@ class DiffractionLivePlot(QtCore.QObject):
                 return
             if uid != str(self._current_live_run_uid or ""):
                 return
-            self._current_live_start_doc = dict(snapshot.get("start", {}) or {})
             rows = list(snapshot.get("rows", []) or [])
             has_rows = bool(rows)
             pending_reason = str(snapshot.get("pending_reason", "") or "").strip()
@@ -1790,13 +1881,15 @@ class DiffractionLivePlot(QtCore.QObject):
                 self._startup_history_retry_count = 0
             self._display_mode = "live"
             self._displayed_run_uid = uid
-            if has_rows:
+            try:
                 self._apply_live_backfill_snapshot(snapshot)
+            except Exception as exc:
+                self._emit_history_state(status_text=f"Live diffraction run · history unavailable: {exc}")
+                self._backfill_retry_timer.start(5000)
+                return
+            if has_rows:
                 self._emit_history_state(status_text="Live diffraction run", selected_uid=uid)
             else:
-                self._register_descriptor_docs(snapshot.get("descriptor_docs", []) or [])
-                if str(self._run_uid or "") != uid:
-                    self._configure_run_display(self._current_live_start_doc, historical=False)
                 status_text = "Live diffraction run (waiting for stored data)"
                 if pending_reason:
                     status_text = f"Live diffraction run ({pending_reason})"
@@ -1804,9 +1897,8 @@ class DiffractionLivePlot(QtCore.QObject):
                     status_text=status_text,
                     selected_uid=uid,
                 )
-                if self._startup_history_retry_count < 3:
-                    self._startup_history_retry_count += 1
-                    self._schedule_history_refresh(delay_ms=1500, autoload_live=True)
+                self._startup_history_retry_count += 1
+                self._backfill_retry_timer.start(5000)
             return
 
         if request_kind == "latest":
@@ -1831,6 +1923,8 @@ class DiffractionLivePlot(QtCore.QObject):
         """
         self._history_load_token += 1
         self._display_mode = "history"
+        self._live_backfill_pending = False
+        self._backfill_retry_timer.stop()
         self._live_follow_enabled = False
         self._render_history_snapshot(snapshot, historical=True, register_descriptors=True)
         self._displayed_run_uid = str(snapshot.get("uid", ""))
@@ -1971,6 +2065,7 @@ class DiffractionLivePlot(QtCore.QObject):
         self._request_history_load(uid, request_kind="history")
 
     def _on_tiled_enabled_toggled(self, enabled):
+        self._history_access_changed = True
         enabled = bool(enabled)
         if enabled == self._tiled_enabled:
             return
@@ -1995,6 +2090,8 @@ class DiffractionLivePlot(QtCore.QObject):
             return
 
         self._tiled_enabled = False
+        self._live_backfill_pending = False
+        self._backfill_retry_timer.stop()
         self._history_client = None
         self._history_catalog = None
         self._history_catalog_name = ""
@@ -2012,6 +2109,8 @@ class DiffractionLivePlot(QtCore.QObject):
             return
         # A late history read must not switch live following off again.
         self._history_load_token += 1
+        self._live_backfill_pending = False
+        self._backfill_retry_timer.stop()
         if enabled:
             self._live_follow_enabled = True
             self._display_mode = "live"
@@ -2057,7 +2156,7 @@ class DiffractionLivePlot(QtCore.QObject):
             run, start_doc, stop_doc, stream_name=self.stream_name, allow_empty=allow_empty,
         )
 
-    def _configure_run_display(self, start_doc, *, historical):
+    def _configure_run_display(self, start_doc, *, historical, preserve_live_previews=False):
         start_doc = dict(start_doc or {})
         self._detector_axis_cache.clear()
         self._run_uid = str(start_doc.get("uid", ""))
@@ -2089,6 +2188,11 @@ class DiffractionLivePlot(QtCore.QObject):
         self._summary_counter = 0
         self._primary_points_seen = 0
         self._rendered_primary_seq_nums.clear()
+        self._live_primary_rows.clear()
+        if not preserve_live_previews:
+            with self._live_preview_lock:
+                self._live_preview_profiles.clear()
+                self._live_preview_values.clear()
         self._summary_path_last_point = None
         self._summary_path_distance = 0.0
         self._planned_summary_x = []
@@ -2215,7 +2319,10 @@ class DiffractionLivePlot(QtCore.QObject):
             and self._live_follow_enabled
             and self._display_mode == "live"
         ):
-            self._arm_live_plot_field_subscriptions(self._live_plot_fields)
+            if self._live_plot_fields:
+                self._arm_live_plot_field_subscriptions(self._live_plot_fields)
+            else:
+                self._arm_live_subscriptions(self._run_detector_names)
             if self._live_subscriptions:
                 self._armed_live_detectors = tuple(self._run_detector_names)
         self._merge_history_entry(_make_history_entry(self._run_uid, start_doc))
@@ -2236,6 +2343,8 @@ class DiffractionLivePlot(QtCore.QObject):
             )
 
     def _render_history_row(self, *, data, seq_num):
+        if seq_num is not None:
+            self._live_primary_rows[int(seq_num)] = dict(data)
         if self._data_type == "scalar":
             summary_x = self._extract_summary_x(data=data, seq_num=seq_num)
             self._emit_scalar_values(data, x_value=summary_x, live=False)
@@ -2339,6 +2448,27 @@ class DiffractionLivePlot(QtCore.QObject):
 
         if not uid:
             return
+        if self._current_live_run_uid and uid != self._current_live_run_uid:
+            return
+        same_run = str(self._run_uid or "") in {"", "__live_running__", uid}
+        if not same_run and self._current_live_run_uid != uid:
+            return
+
+        # A document can arrive while Tiled is reading earlier points. Rebuild
+        # the union in acquisition order so old points never become the newest
+        # spectrum, and path coordinates/summary colors remain correct.
+        merged = {int(seq_nums[index] if index < len(seq_nums) else index + 1): dict(row)
+                  for index, row in enumerate(rows)}
+        if (same_run and not self._provisional_live_context and uid == self._run_uid
+                and start_doc == self._current_live_start_doc
+                and set(merged).issubset(self._rendered_primary_seq_nums)):
+            self._register_descriptor_docs(descriptor_docs)
+            return
+        if same_run:
+            merged.update(self._live_primary_rows)
+        self._configure_run_display(start_doc, historical=False, preserve_live_previews=same_run)
+        rows = [merged[seq] for seq in sorted(merged)]
+        seq_nums = sorted(merged)
 
         if (
             not self._run_uid
@@ -2367,6 +2497,25 @@ class DiffractionLivePlot(QtCore.QObject):
                 continue
             self._render_history_row(data=dict(row or {}), seq_num=seq_num_value)
 
+        # Replaying completed points resets the plot. Restore the most recent
+        # in-progress values even when no new CA callback follows the reset.
+        # CA callbacks can arrive during replay. Read their latest values now,
+        # and order restoration before any subsequent callbacks, rather than
+        # restoring a stale copy captured before the redraw.
+        with self._live_preview_lock:
+            for detector, (axis, counts) in tuple(self._live_preview_profiles.items()):
+                self._emit_live_profile(detector, axis, counts)
+            live_x = self._estimate_live_summary_x()
+            for label, (previous_x, value) in tuple(self._live_preview_values.items()):
+                if self._data_type == "scalar":
+                    # Provisional previews use raw data keys until metadata
+                    # supplies display labels. Keep one series after relabeling.
+                    new_label = str(self._live_plot_fields.get(label, {}).get("label") or label)
+                    if new_label != label:
+                        self._live_preview_values.pop(label, None)
+                        label = new_label
+                self._emit_live_summary(label, live_x if live_x is not None else previous_x, value)
+
     def on_document(self, name, doc):
         # PyDM caches this screen during navigation. Continue consuming run
         # documents while it is hidden so switching back does not lose a run;
@@ -2377,6 +2526,8 @@ class DiffractionLivePlot(QtCore.QObject):
                 return
             if self._live_follow_enabled:
                 self._history_load_token += 1
+                self._live_backfill_pending = False
+                self._backfill_retry_timer.stop()
             self._descriptor_stream.clear()
             self._descriptor_run_start.clear()
             self._descriptor_data_keys.clear()
@@ -2448,6 +2599,10 @@ class DiffractionLivePlot(QtCore.QObject):
             return
 
         if name == "stop":
+            if str(doc.get('run_start') or '') != str(self._current_live_run_uid or ''):
+                return
+            self._live_backfill_pending = False
+            self._backfill_retry_timer.stop()
             if self._live_follow_enabled:
                 self._history_load_token += 1
             if str(doc.get('run_start') or '') == str(self._current_live_run_uid or ''):
@@ -2479,7 +2634,10 @@ class DiffractionLivePlot(QtCore.QObject):
             and (self._current_live_run_uid or self._provisional_live_context)
         ):
             return
-        self._arm_live_subscriptions(detector_names)
+        if self._live_plot_fields:
+            self._arm_live_plot_field_subscriptions(self._live_plot_fields)
+        else:
+            self._arm_live_subscriptions(detector_names)
 
     def _process_event(self, *, descriptor_uid, data, seq_num, timestamps=None):
         detector_fields = {}
@@ -2508,17 +2666,30 @@ class DiffractionLivePlot(QtCore.QObject):
                 )
             ):
                 return
-            is_primary_stream = True
+            # On a mid-run connection, monitor descriptors may have been sent
+            # before this GUI existed. Their seq_nums belong to separate
+            # streams and must never be deduplicated as completed scan points.
+            # Until we know the descriptor, show a live preview instead.
+            is_primary_stream = False
+            if self._tiled_enabled and not self._live_backfill_pending and not self._backfill_retry_timer.isActive():
+                self._backfill_retry_timer.start(5000)
 
         summary_x = None
         if is_primary_stream:
-            summary_x = self._extract_summary_x(data=data, seq_num=seq_num)
             try:
                 seq_num_value = int(seq_num) if seq_num is not None else None
             except Exception:
                 seq_num_value = None
             if seq_num_value is not None and seq_num_value in self._rendered_primary_seq_nums:
                 return
+            with self._live_preview_lock:
+                self._live_preview_profiles.clear()
+                self._live_preview_values.clear()
+            if seq_num_value is not None:
+                if seq_num_value > max(self._rendered_primary_seq_nums, default=0) + 1 and self._tiled_enabled:
+                    self._backfill_retry_timer.start(0)
+                self._live_primary_rows[seq_num_value] = dict(data)
+            summary_x = self._extract_summary_x(data=data, seq_num=seq_num)
 
         if self._data_type == "scalar":
             if is_primary_stream:
@@ -2538,6 +2709,16 @@ class DiffractionLivePlot(QtCore.QObject):
             return
 
         for detector_name, fields in detector_fields.items():
+            if not is_primary_stream:
+                counts = _coerce_array(fields.get("counts"))
+                position_x = _coerce_array(fields.get("position_x"))
+                if position_x is not None:
+                    self._detector_axis_cache[detector_name] = position_x
+                if counts is not None:
+                    self._handle_live_counts_update(detector_name, counts)
+                if fields.get("total_counts") is not None:
+                    self._handle_live_total_counts_update(detector_name, fields["total_counts"])
+                continue
             counts = _coerce_array(fields.get("counts"))
             if counts is None:
                 continue
@@ -2551,13 +2732,7 @@ class DiffractionLivePlot(QtCore.QObject):
                 continue
 
             self._detector_axis_cache[detector_name] = position_x
-            if is_primary_stream:
-                self._profile_updated.emit(str(detector_name), position_x, counts)
-            else:
-                self._live_profile_updated.emit(str(detector_name), position_x, counts)
-
-            if not is_primary_stream:
-                continue
+            self._profile_updated.emit(str(detector_name), position_x, counts)
             total_counts = _coerce_number(fields.get("total_counts"))
             if total_counts is None:
                 try:
@@ -2645,6 +2820,7 @@ class DiffractionLivePlot(QtCore.QObject):
         provisional_uid = active_uid or str(self._current_live_run_uid or "").strip() or "__live_running__"
         if active_uid:
             self._current_live_run_uid = active_uid
+            self._live_run_active = True
 
         if str(self._run_uid or "") == provisional_uid and self._current_live_start_doc:
             return
@@ -2708,6 +2884,9 @@ class DiffractionLivePlot(QtCore.QObject):
             "plan_name": plan_name,
             "experiment_type": DIFFRACTION_EXPERIMENT_TYPE,
         }
+        detectors = self._normalize_detector_names(kwargs.get("detectors") or kwargs.get("detector"))
+        if detectors:
+            start_doc["detectors"] = detectors
         title = str(kwargs.get("title", "") or "").strip()
         if title:
             start_doc["title"] = title
@@ -2859,7 +3038,7 @@ class DiffractionLivePlot(QtCore.QObject):
             return
 
         self._detector_axis_cache[detector_name] = position_x
-        self._live_profile_updated.emit(str(detector_name), position_x, counts)
+        self._emit_live_profile(str(detector_name), position_x, counts)
         should_emit_summary = True
         total_counts = _coerce_number(self._live_total_counts.get(detector_name))
         if total_counts is None:
@@ -2872,7 +3051,7 @@ class DiffractionLivePlot(QtCore.QObject):
             should_emit_summary = False
         summary_x = self._estimate_live_summary_x()
         if should_emit_summary and total_counts is not None and summary_x is not None:
-            self._live_summary_point_updated.emit(
+            self._emit_live_summary(
                 str(detector_name),
                 float(summary_x),
                 float(total_counts),
@@ -2885,7 +3064,7 @@ class DiffractionLivePlot(QtCore.QObject):
         summary_x = self._estimate_live_summary_x()
         if scalar_value is None or summary_x is None:
             return
-        self._live_summary_point_updated.emit(
+        self._emit_live_summary(
             str(series_name),
             float(summary_x),
             float(scalar_value),
@@ -2966,11 +3145,21 @@ class DiffractionLivePlot(QtCore.QObject):
         summary_x = self._estimate_live_summary_x()
         if summary_x is None:
             return
-        self._live_summary_point_updated.emit(
+        self._emit_live_summary(
             str(detector_name),
             float(summary_x),
             float(total_counts),
         )
+
+    def _emit_live_profile(self, detector_name, axis, counts):
+        with self._live_preview_lock:
+            self._live_preview_profiles[detector_name] = (axis, counts)
+            self._live_profile_updated.emit(detector_name, axis, counts)
+
+    def _emit_live_summary(self, label, x_value, value):
+        with self._live_preview_lock:
+            self._live_preview_values[label] = (x_value, value)
+            self._live_summary_point_updated.emit(label, float(x_value), float(value))
 
     def _estimate_live_summary_x(self):
         if self._summary_mode == "exposure":
@@ -3178,7 +3367,7 @@ class DiffractionLivePlot(QtCore.QObject):
         if x_value is None:
             return
         data = dict(data or {})
-        signal = self._live_summary_point_updated if live else self._summary_point_updated
+        emit_value = self._emit_live_summary if live else self._summary_point_updated.emit
         for data_key, spec in self._live_plot_fields.items():
             if str(spec.get("role", "signal") or "signal") != "elapsed_time":
                 continue
@@ -3186,7 +3375,7 @@ class DiffractionLivePlot(QtCore.QObject):
             if elapsed_time is not None:
                 self._set_live_scalar_elapsed(data_key, elapsed_time)
         for label, value in self._extract_scalar_values(data):
-            signal.emit(str(label), float(x_value), float(value))
+            emit_value(str(label), float(x_value), float(value))
             if str(label) in self._scalar_count_labels:
                 if live:
                     self._live_scalar_counts[str(label)] = float(value)

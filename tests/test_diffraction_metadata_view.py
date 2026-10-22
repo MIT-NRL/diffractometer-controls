@@ -50,7 +50,7 @@ class OutcomeTests(unittest.TestCase):
             entry, = fetch_recent_history_entries(Catalog(scan=run))
         self.assertEqual(entry['status'], 'Failed')
         self.assertEqual(entry['reason'], 'motor timeout')
-        self.assertIn('Failed', entry['label'])
+        self.assertNotIn('Failed', entry['label'])
 
     def test_overview_keeps_acquisition_and_storage_outcomes_separate(self):
         metadata = {'start': {'uid': 'run', 'time': 100, 'num_points': 5},
@@ -157,7 +157,8 @@ class MetadataViewTests(unittest.TestCase):
         window = DiffractionAnalysisWindow({'r': Catalog(scan=run)}, catalogs={'Runs': 'r'})
         try:
             self.wait_for(lambda: window.data_view.snapshot is not None)
-            self.assertIn('Failed', window.run_list.item(0).text())
+            self.assertNotIn('Failed', window.run_list.item(0).text())
+            self.assertIn('Status: Failed', window.run_list.item(0).toolTip())
             self.assertIn('motor timeout', window.run_list.item(0).toolTip())
             self.assertEqual(window.details_tabs.tabText(1), 'Overview')
             self.assertEqual(window._overview['Run']['Reason'], 'motor timeout')

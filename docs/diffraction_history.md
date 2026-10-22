@@ -60,14 +60,35 @@ viewer actions changes the recorded acquisition or export status in Tiled.
 
 The embedded history bar gives its buttons stable widths, lets the selector
 fill the remaining space, and elides long status/title text with full tooltips.
+Run lists show the title, local date/time, sample, and plan name. The
+outcome icon replaces repeated status text; full names, status, and any failure
+reason remain in the tooltip, along with detector names. The analysis browser
+also filters detector names.
 Names no longer alter the layout. **Live scan** remains enabled independently
 of Tiled: checked follows current/new documents and live detector updates;
 unchecked holds the displayed run. Selecting history unchecks it, and turning
 Tiled off resumes live following. Late history requests cannot override a new
 live selection. An idle run-status PV means the retained last RunUID is not an
 active acquisition; Start/Stop documents provide activity evidence when the
-status PVs cannot be read. Resuming partway through a run shows current/future
-data; completed HDF5-backed history becomes available after finalization.
+status PVs cannot be read. With Tiled enabled, resuming partway through an
+incrementally saved run loads committed points and merges them with live
+documents by sequence number, in acquisition order. A long first exposure keeps
+retrying until its first point is committed. A later sequence gap requests
+another backfill. The control host tries its installed reader key automatically
+in the background; other computers enable Tiled and log in normally. A missing
+or unavailable local reader leaves live plotting available without a dialog.
+
+The document receiver also accepts updates when this GUI missed the run's Start
+message. Diffraction opts into these partial-run documents; other subscribers
+keep waiting for a full run. QueueServer supplies provisional plan context when
+Tiled is unavailable. Unknown stream descriptors produce live previews rather
+than completed points, so monitor sequence numbers cannot collide with scan
+sequence numbers. Startup loading recovers monitor descriptors from Tiled
+metadata. Backfill preserves the latest in-progress spectrum or scalar value,
+including updates received during the history redraw,
+and a late read of an older run cannot replace an active live display. Live
+following requires the document stream or detector CA connection; Tiled is
+optional for current values and is needed to recover earlier completed points.
 
 PSD profile history uses blue-to-green and orange-to-red ramps from newest to
 oldest for the first two detectors: newest spectra/previews are blue and orange;
@@ -140,10 +161,20 @@ additions are exposed separately as `inferred_metadata` and used in the plotting
 snapshot. The popout's metadata tree shows the catalog's recorded metadata and
 any recovered plotting fields separately.
 
-New file exports must have `file_export.status == "ready"`. An unfinished or
-failed export produces a descriptive error. `allow_empty=True` is reserved for
-live-startup backfill: it returns an empty snapshot with `pending_reason` until
-the arrays are registered. Live documents continue to supply acquisition plots.
+Scalar readings load directly from Tiled independently of CSV/NeXus export
+status, including during acquisition and after an export failure. Native scalar
+table reads fetch signal values, motor positions and sequence numbers together
+so a concurrent append cannot mismatch them. The primary acquisition stream is
+required; monitor samples do not count as completed scalar points. Export and
+acquisition statuses remain unchanged and visible in metadata.
+
+Completed exports have `file_export.status == "ready"`. For array data, incremental exports also
+expose a frozen prefix of `committed_points` while collecting or after a failure;
+each required field and sequence number must be registered for that prefix.
+Pre-incremental unfinished array exports still produce a descriptive error.
+`allow_empty=True` is reserved for live-startup backfill: it returns an empty
+snapshot with `pending_reason` until a committed prefix is available. Live
+documents continue to supply acquisition plots.
 Legacy runs without export-status metadata are read using their stored streams.
 
 ## Reuse and fitting

@@ -1,8 +1,11 @@
 """History normalization tests, independent of hardware and Qt."""
 
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 from diffractometer_controls.analysis.diffraction_history import build_history_snapshot
@@ -41,6 +44,77 @@ def psd_stream():
 
 
 class DiffractionHistoryTests(unittest.TestCase):
+    def test_startup_recovers_monitor_descriptors_even_before_first_committed_point(self):
+        run = Run(psd_stream(), export={"status": "collecting", "incremental": True, "committed_points": 0})
+        run.metadata["stop"] = None
+        run.metadata["start"]["live_plot_fields"] = {
+            "psd_counts": {"role": "profile", "transport": "document", "stream": "psd_counts_monitor"}}
+        monitor = psd_stream()
+        monitor.descriptors = [{"uid": "actual-monitor-uid", "name": "psd_counts_monitor",
+                                "run_start": "history-run", "data_keys": monitor.metadata["data_keys"]}]
+        monitor.read = Mock(side_effect=AssertionError("Read a monitor array"))
+        run["psd_counts_monitor"] = monitor
+        snapshot = build_history_snapshot(run, allow_empty=True)
+        self.assertEqual(snapshot["rows"], [])
+        self.assertEqual(snapshot["descriptor_docs"][0]["uid"], "actual-monitor-uid")
+        monitor.read.assert_not_called()
+
+    def scalar_stream(self, *, empty=False):
+        values = [] if empty else [295, 296]
+        return Stream(xr.Dataset({'temperature': ('event', values), 'theta': ('event', values)},
+                                 coords={'seq_num': ('event', [] if empty else [2, 4])}), {
+            'temperature': {'dtype': 'number', 'shape': [], 'object_name': 'temperature', 'units': 'C'},
+            'theta': {'dtype': 'number', 'shape': [], 'object_name': 'theta', 'units': 'deg'},
+        })
+
+    def test_scalar_readings_ignore_file_export_status_and_hdf5_point_count(self):
+        for status in ('collecting', 'writing', 'failed', 'ready'):
+            for incremental in (False, True):
+                with self.subTest(status=status, incremental=incremental):
+                    export = {'status': status, 'incremental': incremental,
+                              'committed_points': 0, 'error': 'file unavailable'}
+                    run = Run(self.scalar_stream(), scalar=True, export=export)
+                    run.metadata['start']['motors'] = ['theta']
+                    run.metadata['stop'] = None
+                    snapshot = build_history_snapshot(run)
+                    self.assertEqual(snapshot['seq_nums'], [2, 4])
+                    self.assertEqual([row['temperature'] for row in snapshot['rows']], [295, 296])
+                    self.assertEqual(snapshot['file_export'], export)
+                    self.assertIsNone(snapshot['stop'])
+                    self.assertEqual(run.metadata['file_export'], export)
+
+    def test_native_scalar_table_reads_values_and_sequences_in_one_snapshot(self):
+        stream = self.scalar_stream()
+        table = Mock()
+        table.read.return_value = pd.DataFrame({'temperature': [295, 296], 'theta': [1, 2],
+                                               'seq_num': [2, 4], 'ts_temperature': [10, 20]})
+        stream.base = {'internal': table}
+        stream.read = Mock(side_effect=AssertionError('Used separate field reads'))
+        run = Run(stream, scalar=True, export={'status': 'collecting'})
+        snapshot = build_history_snapshot(run)
+        self.assertEqual(snapshot['seq_nums'], [2, 4])
+        self.assertEqual(snapshot['rows'], [{'temperature': 295, 'theta': 1}, {'temperature': 296, 'theta': 2}])
+        table.read.assert_called_once_with()
+        stream.read.assert_not_called()
+
+    def test_empty_scalar_acquisition_waits_instead_of_loading_monitor_samples(self):
+        run = Run(self.scalar_stream(empty=True), scalar=True, export={'status': 'collecting'})
+        run.metadata['stop'] = None
+        run['temperature_monitor'] = self.scalar_stream()
+        snapshot = build_history_snapshot(run, allow_empty=True)
+        self.assertEqual(snapshot['rows'], [])
+        self.assertTrue(snapshot['pending_reason'])
+        del run['primary']
+        snapshot = build_history_snapshot(run, allow_empty=True)
+        self.assertEqual(snapshot['rows'], [])
+        self.assertIn('acquisition stream', snapshot['pending_reason'])
+
+    def test_missing_native_scalar_column_is_an_error(self):
+        stream = self.scalar_stream()
+        stream.base = {'internal': SimpleNamespace(read=lambda: pd.DataFrame({'seq_num': [1], 'theta': [2]}))}
+        with self.assertRaisesRegex(RuntimeError, 'Missing stored scalar fields: temperature'):
+            build_history_snapshot(Run(stream, scalar=True))
+
     def test_both_stream_layouts_keep_constant_axes_and_sequence_gaps(self):
         for namespace in (False, True):
             with self.subTest(namespace=namespace):

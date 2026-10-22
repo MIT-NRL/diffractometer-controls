@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import numpy as np
 
-from server.writers.base import AtomicNXWriter
+from server.writers.incremental import IncrementalNXWriter
 from server.config.diffraction import DIFFRACTION_ROOT, DIFFRACTION_TEST_ROOT
 
 
@@ -51,7 +51,7 @@ def _scalar_metadata_value(value):
     return value
 
 
-class ScalarDiffractionWriter(AtomicNXWriter):
+class ScalarDiffractionWriter(IncrementalNXWriter):
     """Write scalar diffraction primary data as selected CSV or NeXus."""
 
     instrument_name = "4DH4"
