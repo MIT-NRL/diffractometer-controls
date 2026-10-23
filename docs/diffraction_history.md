@@ -231,7 +231,7 @@ documents stay intact; enrichment is identified as a later catalog annotation.
 The server already had a `local` password provider and separate admin, reader,
 and acquisition-writer credentials. The shared `4dh4-reader` account was verified
 and its password replaced with a generated memorable passphrase. Its role can
-read metadata and data in both catalogs and manage its own API keys; it cannot
+read metadata and data in both catalogs; it cannot
 create or modify scan data. The acquisition writer key and admin password were
 left unchanged.
 
@@ -245,7 +245,7 @@ connects automatically as the reader. Its dedicated API key grants only
 `read:metadata` and `read:data`, and is stored in the private mode-600 file
 `~/.config/diffractometer-controls/tiled-reader.json`. The file records the
 computer's hostname and the server URL; automatic login applies only when both
-match. This uses [Tiled's API-key support](https://blueskyproject.io/tiled/how-to/api-keys.html)
+match. This uses [Tiled's API-key support](https://blueskyproject.io/tiled/user-guide/api-keys.html)
 without loading the server's admin password or acquisition writer key into the
 GUI. It takes precedence over cached logins on the control computer. Removing
 the local configuration disables automatic login; the key can also be revoked
@@ -261,10 +261,53 @@ This matters because Tiled listens on the control computer's LAN address;
 `localhost:8000` is not its listening endpoint. Connection failures show a
 connection error rather than requesting a password for an unreachable server.
 
-On another computer, open the GUI's **Tiled** login, enter the server URL from
+On another computer without a local key, open the GUI's **Tiled** login, enter the server URL from
 `reader-login.txt`, and use `4dh4-reader` with the new passphrase. The dialog defaults to
 that username. For a persistent server default, set `MITR_TILED_URI`; optionally
 set `MITR_TILED_USERNAME`. Existing `TILED_URI` takes precedence if set.
+
+### Optional reader key on other computers
+
+One shared reader API key may be used on several trusted computers, like the
+shared reader login. Separate keys are optional: they make it possible to
+revoke one computer's access without changing the others. Use a key scoped
+only to `read:metadata` and `read:data`; the setup command verifies those scopes
+and refuses writer/admin or unrestricted inherited keys.
+
+From the project checkout and its Python environment, run this on each computer
+(Linux, macOS, or Windows):
+
+```console
+python -m diffractometer_controls.analysis.configure_tiled_reader --uri http://CONTROL_HOST:8000
+```
+
+Paste the reader API key at the hidden prompt. It is not printed, placed in
+command-line arguments, or written to the repository. Existing settings are
+preserved unless `--replace` is supplied. The file lives at
+`~/.config/diffractometer-controls/tiled-reader.json`, or
+`%USERPROFILE%\.config\diffractometer-controls\tiled-reader.json` on Windows.
+Each installation records its own hostname and the intended server.
+
+On Linux/macOS the file is owned by the current user with mode 600. On Windows,
+the whole configuration (including server identity) is encrypted and integrity
+protected using current-user
+[Windows DPAPI](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata).
+Use the setup command on each Windows account/computer; copying an encrypted
+configuration file is not the way to share a key. The same original reader key
+can still be pasted into each setup prompt.
+
+Restart the GUI to use local reader access automatically. Systems without a
+valid key retain cached-session/password login. Removing the local file restores
+normal login on that computer; revoking a shared key in Tiled affects every
+computer using that key. If an explicit Tiled/control-host environment override
+points to a different server, it takes precedence and the local key is not sent
+to that other server. No server/worker restart is required.
+
+For new per-PC keys, use the dedicated manager identity in
+[Tiled Manager](tiled_manager.md). Provisioning removes key management from the
+shared reader password account. The control PC's older key stays valid under
+that reader identity; only an appropriately authorized owner/administrator can
+revoke it. Do not distribute acquisition writer or server admin credentials.
 
 “Remember login” uses Tiled's token cache; the GUI does not save the password.
 An unchecked box now works because the GUI keeps the authenticated in-memory

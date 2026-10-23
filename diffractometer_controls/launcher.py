@@ -151,6 +151,8 @@ def main():
     _load_simple_env_file("~/.config/diffractometer-controls/control.env")
     _load_simple_env_file("~/.config/epics/network.env")
     _load_simple_env_file("~/.config/bluesky-queueserver/client-zmq.env")
+    from control_ui.core.logging_config import configure_http_logging
+    configure_http_logging()
     _preload_p4p()
 
     # Camera ArrayData PVs are much larger than Channel Access's small default

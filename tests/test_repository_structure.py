@@ -8,12 +8,13 @@ import unittest
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGES = ("control_ui", "diffractometer_controls", "server", "diffraction_analysis")
+PACKAGES = ("control_ui", "diffractometer_controls", "server", "diffraction_analysis", "tiled_manager")
 
 
 class RepositoryStructureTests(unittest.TestCase):
     def test_shared_controls_do_not_import_instrument_or_server(self):
-        for path in [* (ROOT / "control_ui").rglob("*.py"), * (ROOT / "diffraction_analysis").rglob("*.py")]:
+        for path in [* (ROOT / "control_ui").rglob("*.py"), * (ROOT / "diffraction_analysis").rglob("*.py"),
+                     * (ROOT / "tiled_manager").rglob("*.py")]:
             with self.subTest(path=path.relative_to(ROOT)):
                 for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
                     imports = ([alias.name for alias in node.names] if isinstance(node, ast.Import)

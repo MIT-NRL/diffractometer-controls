@@ -556,6 +556,10 @@ class MITRMainWindow(PyDMMainWindow):
         bluesky_panel_action.triggered.connect(self.launch_bluesky_servers_panel)
         self._set_themed_action_icon(bluesky_panel_action, 'fa6s.network-wired')
 
+        tiled_manager_action = control_system_menu.addAction("Tiled Manager")
+        tiled_manager_action.triggered.connect(self.launch_tiled_manager)
+        self._set_themed_action_icon(tiled_manager_action, 'fa6s.database')
+
         # Add the "Controls" action to the menu bar
         controls_action = QAction(gear_icon, "Old Control Menu", self)
         controls_action.triggered.connect(lambda: load_file(
@@ -1441,6 +1445,20 @@ class MITRMainWindow(PyDMMainWindow):
     @Slot()
     def _ioc_control_panel_destroyed(self):
         self._ioc_control_panel = None
+
+    def launch_tiled_manager(self):
+        from tiled_manager.window import TiledManagerWindow
+        from diffractometer_controls.analysis.tiled_auth import get_tiled_uri
+
+        panel = getattr(self, '_tiled_manager_panel', None)
+        if panel is None:
+            panel = TiledManagerWindow(get_tiled_uri(), catalogs={
+                'Production': '4dh4', 'Test': 'testdb'}, parent=self)
+            self._tiled_manager_panel = panel
+            panel.destroyed.connect(lambda: setattr(self, '_tiled_manager_panel', None))
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
 
     def launch_bluesky_servers_panel(self):
         from diffractometer_controls.site.mitr.bluesky_servers import BlueskyServersPanel

@@ -1,4 +1,3 @@
-import json
 import os
 from pathlib import Path
 import socket
@@ -6,6 +5,8 @@ from urllib.parse import urlsplit
 
 import httpx
 from qtpy import QtWidgets
+
+from .reader_config import read_private_config
 
 try:
     from tiled.client.context import Context, password_grant
@@ -23,10 +24,7 @@ def _local_reader_config():
     """Read only the private configuration belonging to this user and host."""
     path = LOCAL_READER_CONFIG
     try:
-        info = path.stat()
-        if not path.is_file() or os.name != "posix" or info.st_uid != os.getuid() or info.st_mode & 0o077:
-            return None
-        config = json.loads(path.read_text(encoding="utf-8"))
+        config = read_private_config(path)
         if not isinstance(config, dict) or config.get("hostname") != socket.gethostname():
             return None
         _reader_server_id(config.get("uri", ""))
@@ -71,10 +69,11 @@ TILED_URI = get_tiled_uri()
 
 
 def build_tiled_client_from_local_reader(uri=None):
-    """Use the private reader key installed on this control computer, if any.
+    """Use the private reader key installed on this computer, if any.
 
     Bind automatic access to the recorded computer and server. A copied client
     configuration or a different requested server still uses normal login.
+    Multiple computers may intentionally be configured with the same reader key.
     """
     config = _local_reader_config()
     if config is None:
@@ -196,7 +195,7 @@ class TiledLoginDialog(QtWidgets.QDialog):
 def ensure_tiled_login(parent=None, *, uri=None):
     uri = uri or get_tiled_uri()
     # Prefer the explicitly installed read-only identity to any cached admin
-    # session on the control computer. Other machines retain normal login.
+    # session. Computers without a local reader configuration retain normal login.
     try:
         client = build_tiled_client_from_local_reader(uri=uri)
         if client is not None:

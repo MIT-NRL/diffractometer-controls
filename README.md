@@ -51,6 +51,13 @@ for replotting previous scans and access from other computers.
 The [reusable diffraction analysis package](diffraction_analysis/README.md) provides
 explicit peak fitting and a browser that can be embedded on other systems.
 
+**Control System → Tiled Manager** opens catalog monitoring, bounded data-read
+checks, per-PC reader installation, and dedicated reader-key management. It also
+runs independently with `python -m tiled_manager`; see the
+[Tiled Manager guide](docs/tiled_manager.md) for permissions, provisioning,
+remote setup, and rollback. Management is restricted by the application to the
+configured control PC; remote computers can monitor and install reader keys.
+
 The IOC panel controls five independent, manually started user services: motors
 and shared instrument records, He3 PSD, ZWO/QHY imaging, counter/analog/digital
 cards, and Reolink cameras. Consoles are read-only service journals; no IOC shell
@@ -75,6 +82,7 @@ filenames are listed in
 control_ui/                 reusable services, widgets, layout and EPICS panels
 diffractometer_controls/    application, experiment screens, analysis and MITR profile
 server/                    ordered startup, device/plan definitions, writers and config
+tiled_manager/             independent Tiled dashboard and reader-key lifecycle
 scripts/                   Linux session launcher and local verification tools
 examples/                  disconnected workspaces and existing simulation examples
 tests/                     GUI, scientific and offline server checks

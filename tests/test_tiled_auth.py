@@ -1,10 +1,10 @@
-import json
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
 from diffractometer_controls.analysis import tiled_auth
+from diffractometer_controls.analysis.reader_config import write_private_config
 
 
 class TiledAuthTests(unittest.TestCase):
@@ -58,9 +58,8 @@ class TiledAuthTests(unittest.TestCase):
 
     def local_config(self, directory):
         path = Path(directory) / "tiled-reader.json"
-        path.write_text(json.dumps({"hostname": "control-pc", "uri": "http://server:8000",
-                                    "api_key": "reader-key"}))
-        path.chmod(0o600)
+        write_private_config(path, {"hostname": "control-pc", "uri": "http://server:8000",
+                                    "api_key": "reader-key"})
         return path
 
     def test_local_reader_uses_its_explicit_key(self):
@@ -89,6 +88,7 @@ class TiledAuthTests(unittest.TestCase):
                     self.assertIsNone(tiled_auth.build_tiled_client_from_local_reader(uri))
                     create.assert_not_called()
 
+    @unittest.skipUnless(tiled_auth.os.name == "posix", "POSIX file permissions")
     def test_missing_or_publicly_readable_key_does_not_enable_autologin(self):
         with tempfile.TemporaryDirectory() as directory:
             path = self.local_config(directory)
