@@ -1466,6 +1466,7 @@ class DiffractionLivePlot(QtCore.QObject):
         self._selected_history_uid = ""
         self._current_live_run_uid = ""
         self._live_run_active = False
+        self._last_stopped_run_uid = ""
         self._current_live_start_doc = {}
         self._provisional_live_context = False
         self._rendered_primary_seq_nums = set()
@@ -1652,7 +1653,9 @@ class DiffractionLivePlot(QtCore.QObject):
             if self._current_live_run_uid and self._live_plot_fields:
                 self._arm_live_plot_field_subscriptions(self._live_plot_fields)
             return
-        self._ensure_live_context_from_running_item(running_item)
+        if not self._ensure_live_context_from_running_item(running_item):
+            self._disarm_live_subscriptions()
+            return
         detector_names = self._extract_live_detector_names_from_running_item(running_item)
         if self._live_plot_fields:
             self._arm_live_plot_field_subscriptions(self._live_plot_fields)
@@ -1757,6 +1760,11 @@ class DiffractionLivePlot(QtCore.QObject):
             if self._provisional_live_context:
                 self._emit_history_state(status_text="Live diffraction run · waiting for run identity")
                 self._backfill_retry_timer.start(5000)
+                return
+            if self._run_uid and self._run_uid != "__live_running__":
+                # Automatic startup reads can complete after Stop, or run
+                # again when returning to a cached screen. Keep the displayed
+                # run instead of replacing it with an older or incomplete one.
                 return
             latest_uid = ""
             if self._history_entries:
@@ -2148,7 +2156,7 @@ class DiffractionLivePlot(QtCore.QObject):
             return ''
         if state in {'RUNNING', 'PAUSED', 'SUSPENDED'}:
             value = _safe_caget(RUN_UID_STATUS_PV)
-            if value:
+            if value and str(value).strip() != self._last_stopped_run_uid:
                 return str(value).strip()
         # Start/Stop documents also establish activity if status PVs cannot
         # be reached. A retained RunUID PV by itself is not activity evidence.
@@ -2609,6 +2617,7 @@ class DiffractionLivePlot(QtCore.QObject):
         if name == "stop":
             if str(doc.get('run_start') or '') != str(self._current_live_run_uid or ''):
                 return
+            self._last_stopped_run_uid = str(doc.get('run_start') or '')
             self._live_backfill_pending = False
             self._backfill_retry_timer.stop()
             if self._live_follow_enabled:
@@ -2634,7 +2643,9 @@ class DiffractionLivePlot(QtCore.QObject):
             self._disarm_live_subscriptions()
             return
         running_item = dict(getattr(event, "running_item", {}) or {})
-        self._ensure_live_context_from_running_item(running_item)
+        if not self._ensure_live_context_from_running_item(running_item):
+            self._disarm_live_subscriptions()
+            return
         detector_names = self._extract_live_detector_names_from_running_item(running_item)
         if (
             not detector_names
@@ -2820,18 +2831,24 @@ class DiffractionLivePlot(QtCore.QObject):
 
     def _ensure_live_context_from_running_item(self, running_item):
         if not running_item:
-            return
+            return False
         if str(running_item.get("item_type", "") or "plan") != "plan":
-            return
+            return False
 
         active_uid = str(self._read_active_run_uid(allow_cached=False) or "").strip()
+        if (not active_uid and self._run_uid and not self._current_live_run_uid
+                and not self._provisional_live_context):
+            # QueueServer polls can still contain the finished plan after its
+            # Stop. Only an active run identity or a new Start should replace
+            # an established plot with a new acquisition context.
+            return False
         provisional_uid = active_uid or str(self._current_live_run_uid or "").strip() or "__live_running__"
         if active_uid:
             self._current_live_run_uid = active_uid
             self._live_run_active = True
 
         if str(self._run_uid or "") == provisional_uid and self._current_live_start_doc:
-            return
+            return True
 
         start_doc = {}
         if (
@@ -2843,11 +2860,12 @@ class DiffractionLivePlot(QtCore.QObject):
             start_doc = self._build_start_doc_from_running_item(running_item, uid=provisional_uid)
 
         if not start_doc:
-            return
+            return False
         self._current_live_start_doc = dict(start_doc)
         self._provisional_live_context = not bool(active_uid)
         if str(self._run_uid or "") != provisional_uid:
             self._configure_run_display(start_doc, historical=False)
+        return True
 
     def _build_start_doc_from_running_item(self, running_item, *, uid):
         running_item = dict(running_item or {})

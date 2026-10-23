@@ -19,6 +19,83 @@ class DiffractionHistoryReplayTests(unittest.TestCase):
     def flush(self):
         self.app.processEvents()
 
+    def test_finished_scalar_plot_survives_late_running_item_and_navigation(self):
+        for widget_class in (DiffractionPlotWidgetPyQtGraph, live.DiffractionPlotWidget):
+            with self.subTest(plotter=widget_class.__name__), patch.object(live, "PV", None), \
+                 patch.object(live, "_safe_caget", return_value=None):
+                widget = widget_class()
+                item = {"item_uid": "queued-plan", "name": "count_scalar", "kwargs": {"detectors": ["counter"]}}
+                client = SimpleNamespace(_running_item=item)
+                controller = live.DiffractionLivePlot(widget, re_client=client)
+                try:
+                    start = {"uid": "finished", "experiment_type": "diffraction",
+                             "plan_name": "count_scalar", "data_type": "scalar", "detectors": ["counter"]}
+                    descriptor = {"uid": "primary", "run_start": "finished", "name": "primary",
+                                  "data_keys": {"counter": {"dtype": "number", "shape": []}}}
+                    controller.on_document("start", start)
+                    controller.on_document("descriptor", descriptor)
+                    controller.on_document("event", {"descriptor": "primary", "seq_num": 2, "data": {"counter": 20}})
+                    controller._apply_live_backfill_snapshot({"start": start, "descriptor_docs": [descriptor],
+                        "seq_nums": [1], "rows": [{"counter": 10}]})
+                    controller.on_document("stop", {"run_start": "finished", "exit_status": "success"})
+                    self.flush()
+                    self.assertEqual(widget._summary_y["counter"], [10, 20])
+
+                    # Run-list and queue polls can still report the old plan
+                    # after its Stop and the status PV's transition to idle.
+                    controller._on_running_item_changed(SimpleNamespace(running_item=item))
+                    controller.deactivate()
+                    controller.activate()
+                    self.flush()
+                    self.assertEqual(controller._run_uid, "finished")
+                    self.assertFalse(controller._provisional_live_context)
+                    self.assertEqual(widget._summary_y["counter"], [10, 20])
+                    self.assertFalse(controller._live_subscriptions)
+
+                    # The status PV can also lag behind the Stop document.
+                    with patch.object(live, "_safe_caget", side_effect=lambda pv, **kw:
+                                      "RUNNING" if pv == live.RUN_STATE_STATUS_PV else "finished"):
+                        controller._on_running_item_changed(SimpleNamespace(running_item=item))
+                        self.flush()
+                        self.assertFalse(controller._live_run_active)
+                        self.assertEqual(controller._current_live_run_uid, "")
+                        self.assertEqual(widget._summary_y["counter"], [10, 20])
+
+                    # The next actual run, even of the same plan, still resets.
+                    controller.on_document("start", {**start, "uid": "next"})
+                    controller.on_document("descriptor", {**descriptor, "uid": "next-primary", "run_start": "next"})
+                    controller.on_document("event", {"descriptor": "next-primary", "seq_num": 1, "data": {"counter": 30}})
+                    self.flush()
+                    self.assertEqual(widget._summary_y["counter"], [30])
+                finally:
+                    controller.shutdown()
+                    widget.close()
+
+    def test_delayed_automatic_history_refresh_keeps_finished_scalar_run(self):
+        with patch.object(live, "PV", None), patch.object(live, "_safe_caget", return_value=None):
+            widget = DiffractionPlotWidgetPyQtGraph()
+            controller = live.DiffractionLivePlot(widget)
+            try:
+                start = {"uid": "finished", "experiment_type": "diffraction",
+                         "plan_name": "count_scalar", "data_type": "scalar", "detectors": ["counter"]}
+                controller.on_document("start", start)
+                controller._apply_live_backfill_snapshot({"start": start, "seq_nums": [1, 2],
+                                                         "rows": [{"counter": 10}, {"counter": 20}]})
+                controller.on_document("stop", {"run_start": "finished", "exit_status": "success"})
+                controller._tiled_enabled = True
+                # This automatic read began while the run was active, but
+                # arrives after Stop; Tiled may still list a previous run.
+                with patch.object(controller, "_request_history_load") as load:
+                    controller._on_history_refresh_completed(controller._history_refresh_token,
+                        {"autoload_live": True, "entries": [{"uid": "previous"}]})
+                    self.flush()
+                    load.assert_not_called()
+                self.assertEqual(controller._displayed_run_uid, "finished")
+                self.assertEqual(widget._summary_y["counter"], [10, 20])
+            finally:
+                controller.shutdown()
+                widget.close()
+
     def test_live_update_during_history_redraw_remains_the_newest_preview(self):
         for scalar in (False, True):
             with self.subTest(scalar=scalar), patch.object(live, "PV", None):
